@@ -2,6 +2,13 @@
 
 _The **how** (companion to `docs/plans/codeguard-roadmap.md`, the what/why). Every API/mechanism below was verified against source (`inspiration/cognee` 1.2.2) or official platform docs; reference SDKs are cloned under `inspiration/` (`mcp-typescript-sdk`, `bolt-js`, `linear-agent-demo`)._
 
+> **LIVE-VERIFIED (Jul 2 2026) — ran the whole Cognee-side design against a running engine before implementing:**
+> - ✅ **Feedback loop end-to-end**: recall-with-`sessionId` writes a QA entry; `GET /sessions/{id}` exposes `qa_id` + a populated `used_graph_element_ids`; `POST /remember/entry` (feedback) → 200; `POST /improve` → `PipelineRunCompleted`.
+> - ✅ `GRAPH_COMPLETION_COT`, `CODING_RULES` (seed via `/remember node_set` + retrieve), `visualize` (returns HTML), all 9 endpoints + fields present.
+> - ✅ **Confirmed Python-only**: `POST /memify` with a task-name string → HTTP 500 `WrongTaskTypeError` (rule *mining* is not reachable over REST — seed rules instead).
+> - ⚠️ **CASING CORRECTION** (implement to these exact names): `recall`/`search`/`improve`/`memify` JSON = **camelCase** (`sessionId`, `searchType`, `includeReferences`, `topK`, `datasets`, `nodeName`, `sessionIds`, `datasetName`, `extractionTasks`). `remember/entry` wrapper + `FeedbackEntry` = **snake_case** (`session_id`, `dataset_name`, `qa_id`, `feedback_score`). `/remember` form fields = snake (`node_set`, `datasetName` form). `visualize` query param = `dataset_id`. (Snake also works on the camel endpoints via Pydantic aliases, but use the declared names.)
+> - Not runtime-tested: TEMPORAL behavior + ontology upload (endpoints/fields confirmed present) and the GitHub delivery layer (needs a real repo — deferred; verified vs GitHub's live API docs).
+
 ## 0. The one invariant (read first)
 
 Every surface — GitHub, MCP, Slack, Linear, CLI — is a **thin adapter that only ever calls four core functions: `ask` / `ingest` / `warn` / `resolveTenant`.** The precision-critical decision logic lives in exactly one place. **Build Phase-0 features on today's `bot/` structure; do the `core/` extraction only when the second surface (MCP) lands** — the refactor is behavior-preserving plumbing, not new value.
@@ -88,9 +95,9 @@ Subscribe `pull_request` `opened`(incl. draft)/`reopened`/`ready_for_review`/`sy
 
 ### B1. Four-verb lifecycle + feedback learning (the flagship "Best Use of Cognee")
 The full chain, all REST-native (verified). **Key discovery: feedback rides on `/api/v1/recall` (which has `session_id`), NOT `/api/v1/search` (which doesn't).**
-1. **Catch recall** → `POST /api/v1/recall` `{query, search_type:"GRAPH_COMPLETION_COT", datasets:[ds], session_id:"codeguard-pr-<inst>-<n>", include_references:true, top_k:10}` → engine writes a QA entry with `used_graph_element_ids` (`graph_completion_retriever.py:351-364`). Store `session_id` on the delivery row.
+1. **Catch recall** → `POST /api/v1/recall` `{query, searchType:"GRAPH_COMPLETION_COT", datasets:[ds], sessionId:"codeguard-pr-<inst>-<n>", includeReferences:true, topK:10}` (camelCase) → engine writes a QA entry with `used_graph_element_ids` (`graph_completion_retriever.py:351-364`, live-confirmed). Store the session id on the delivery row.
 2. **Maintainer 👍/👎** (reaction or `@codeguard good|bad`) → recall doesn't return `qa_id`, so `GET /api/v1/sessions/{session_id}` → match the QA by `question` → read `qa_id` → `POST /api/v1/remember/entry` `{entry:{type:"feedback", qa_id, feedback_score}, session_id, dataset_name}` (score **int 1–5**; 👍=5, 👎=1).
-3. **Hourly `lifecycle` worker** → `POST /api/v1/improve` `{dataset_name, session_ids:[…]}` → applies feedback weights (EMA `w += 0.1·(rating−w)`) to the exact nodes/edges that produced the answer; higher weight → lower effective distance → ranked higher.
+3. **Hourly `lifecycle` worker** → `POST /api/v1/improve` `{datasetName, sessionIds:[…]}` (camelCase) → applies feedback weights (EMA `w += 0.1·(rating−w)`) to the exact nodes/edges that produced the answer; higher weight → lower effective distance → ranked higher.
 4. **`forget()`** wired to an event (e.g. `installation.deleted` → prune tenant, or `@codeguard forget`) so **all four verbs fire live**.
 
 New `cognee.ts`: `recallWithSession`, `getSessionQAs`, `addFeedback`, `improve`, `visualize`, `uploadOntology`. New `bot/src/lifecycle.ts` + a `feedback` queue. **Effort L**, but every endpoint exists.
