@@ -56,6 +56,31 @@ export async function fetchClosedItems(installationId: number, repoFullName: str
   return items;
 }
 
+/** Fetch a single issue/PR (with comments) for live ingestion. */
+export async function fetchItem(installationId: number, repoFullName: string, number: number): Promise<RepoItem> {
+  const octokit = await app.getInstallationOctokit(installationId);
+  const [owner, repo] = repoFullName.split("/");
+  const { data: it } = await octokit.rest.issues.get({ owner, repo, issue_number: number });
+  const comments = await octokit.paginate(octokit.rest.issues.listComments, {
+    owner,
+    repo,
+    issue_number: number,
+    per_page: 100,
+  });
+  return {
+    kind: it.pull_request ? "pr" : "issue",
+    number: it.number,
+    title: it.title,
+    body: it.body ?? "",
+    url: it.html_url,
+    state: it.state,
+    stateReason: it.state_reason ?? null,
+    labels: it.labels.map((l) => (typeof l === "string" ? l : (l.name ?? ""))).filter(Boolean),
+    closedAt: it.closed_at,
+    comments: comments.map((c) => c.body ?? "").filter(Boolean),
+  };
+}
+
 export async function fetchPr(
   installationId: number,
   repoFullName: string,

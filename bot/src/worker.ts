@@ -5,6 +5,8 @@ import * as gh from "./github.js";
 import * as llm from "./llm.js";
 import * as cognee from "./cognee.js";
 import type { TenantCredentials } from "./cognee.js";
+import type { RepoItem } from "./github.js";
+import type { Installation, TenantConfig } from "./types.js";
 
 export const QUEUE = { ingest: "ingest", catch: "catch" } as const;
 
@@ -13,6 +15,7 @@ const cog = { baseUrl: config.cogneeBaseUrl };
 export interface IngestJob {
   installationId: number;
   repo: string;
+  number?: number; // single-item (live) ingest; omit for a full backfill
   limit?: number;
 }
 export interface CatchJob {
@@ -31,7 +34,7 @@ export async function startQueue(): Promise<PgBoss> {
   return boss;
 }
 
-// Backfill / doc ingest -> extract a decision record -> remember() into the dataset.
+// Backfill (whole repo) or live single-item ingest -> extract decision -> remember().
 async function ingestWorker(jobs: PgBoss.Job<IngestJob>[]): Promise<void> {
   for (const { data } of jobs) {
     const inst = await db.getInstallation(data.installationId);
@@ -41,38 +44,51 @@ async function ingestWorker(jobs: PgBoss.Job<IngestJob>[]): Promise<void> {
     }
     const creds: TenantCredentials = { apiKey: inst.cogneeApiKey, tenantId: "" };
     const cfg = await db.getTenantConfig(data.installationId);
-    const items = await gh.fetchClosedItems(data.installationId, data.repo, data.limit ?? 50);
 
-    for (const it of items) {
-      const thread = `${it.title}\n\n${it.body}\n\n${it.comments.join("\n---\n")}`;
-      const d = await llm.extractDecision(cfg.llmProvider, thread);
-      if (!d.isDecision) continue;
-
-      const decisionId = `${it.kind.toUpperCase()}-${it.number}`;
-      const doc =
-        `Decision ${decisionId} (${it.closedAt ?? ""}, ${d.outcome.toUpperCase()}): ` +
-        `${d.title}. ${d.reasoning} Source: ${it.url}`;
-      const res = await cognee.remember(cog, creds, {
-        datasetName: inst.datasetName,
-        filename: `${decisionId}.txt`,
-        content: doc,
-      });
-      await db.upsertDecisionRecord({
-        decisionId,
-        installationId: data.installationId,
-        sourceType: it.kind,
-        sourceUrl: it.url,
-        title: d.title,
-        outcome: d.outcome,
-        reasoningText: d.reasoning,
-        decidedAt: it.closedAt ?? "",
-        terms: d.terms,
-        cogneeDataId: dataId(res),
-        createdAt: "",
-      });
+    if (data.number != null) {
+      const it = await gh.fetchItem(data.installationId, data.repo, data.number);
+      await ingestItem(inst, cfg, creds, it);
+      continue;
     }
+
+    const items = await gh.fetchClosedItems(data.installationId, data.repo, data.limit ?? 50);
+    for (const it of items) await ingestItem(inst, cfg, creds, it);
     console.log(`ingest done: ${data.repo} (${items.length} items scanned)`);
   }
+}
+
+async function ingestItem(
+  inst: Installation,
+  cfg: TenantConfig,
+  creds: TenantCredentials,
+  it: RepoItem,
+): Promise<void> {
+  const thread = `${it.title}\n\n${it.body}\n\n${it.comments.join("\n---\n")}`;
+  const d = await llm.extractDecision(cfg.llmProvider, thread);
+  if (!d.isDecision) return;
+
+  const decisionId = `${it.kind.toUpperCase()}-${it.number}`;
+  const doc =
+    `Decision ${decisionId} (${it.closedAt ?? ""}, ${d.outcome.toUpperCase()}): ` +
+    `${d.title}. ${d.reasoning} Source: ${it.url}`;
+  const res = await cognee.remember(cog, creds, {
+    datasetName: inst.datasetName,
+    filename: `${decisionId}.txt`,
+    content: doc,
+  });
+  await db.upsertDecisionRecord({
+    decisionId,
+    installationId: inst.installationId,
+    sourceType: it.kind,
+    sourceUrl: it.url,
+    title: d.title,
+    outcome: d.outcome,
+    reasoningText: d.reasoning,
+    decidedAt: it.closedAt ?? "",
+    terms: d.terms,
+    cogneeDataId: dataId(res),
+    createdAt: "",
+  });
 }
 
 // PR opened -> precision pipeline (see docs/specs) -> one cited comment, or stay silent.

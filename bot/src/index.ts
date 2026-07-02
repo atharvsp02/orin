@@ -41,6 +41,24 @@ async function main() {
     });
   });
 
+  // Closed PR / issue -> live ingest of that single decision (memory compounds forward).
+  app.webhooks.on("pull_request.closed", async ({ payload }) => {
+    if (!payload.installation) return;
+    await boss.send(QUEUE.ingest, {
+      installationId: payload.installation.id,
+      repo: payload.repository.full_name,
+      number: payload.pull_request.number,
+    });
+  });
+  app.webhooks.on("issues.closed", async ({ payload }) => {
+    if (!payload.installation) return;
+    await boss.send(QUEUE.ingest, {
+      installationId: payload.installation.id,
+      repo: payload.repository.full_name,
+      number: payload.issue.number,
+    });
+  });
+
   createServer(createNodeMiddleware(app)).listen(config.port, () =>
     console.log(`CodeGuard bot listening on :${config.port}`),
   );
