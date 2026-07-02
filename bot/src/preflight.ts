@@ -126,7 +126,14 @@ export async function handleGraph(req: IncomingMessage, res: ServerResponse): Pr
     const datasetId = await cognee.getDatasetId(cog, creds, inst.datasetName);
     if (!datasetId) return send(res, 404, { error: "no dataset yet" });
     const html = await cognee.visualize(cog, creds, datasetId);
-    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    // The graph HTML embeds labels derived from repo content (issue/PR text), so it is UNTRUSTED.
+    // `sandbox allow-scripts` (no allow-same-origin) runs the graph's own JS in an opaque origin:
+    // it can't read app-origin cookies/DOM or call /v1/*, neutralizing stored-XSS escalation.
+    res.writeHead(200, {
+      "Content-Type": "text/html; charset=utf-8",
+      "Content-Security-Policy": "sandbox allow-scripts; default-src 'self' 'unsafe-inline' data:; frame-ancestors 'self'",
+      "X-Content-Type-Options": "nosniff",
+    });
     res.end(html);
   } catch (e) {
     send(res, 502, { error: `graph unavailable: ${(e as Error).message}` });
