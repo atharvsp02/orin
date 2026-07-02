@@ -7,7 +7,7 @@ import * as db from "./db.js";
 import * as cognee from "./cognee.js";
 import { startQueue } from "./worker.js";
 import { QUEUE } from "./queues.js";
-import { handlePreflight, handleIssueKey } from "./preflight.js";
+import { handlePreflight, handleIssueKey, handleMetrics, handleGraph } from "./preflight.js";
 import { forgetTenant } from "./lifecycle.js";
 
 async function main() {
@@ -107,6 +107,14 @@ async function main() {
     }
     if (req.method === "POST" && req.url === "/v1/preflight-keys") {
       void handleIssueKey(req, res);
+      return;
+    }
+    if (req.method === "GET" && req.url === "/v1/metrics") {
+      void handleMetrics(req, res);
+      return;
+    }
+    if (req.method === "GET" && req.url === "/v1/graph") {
+      void handleGraph(req, res);
       return;
     }
     void middleware(req, res);

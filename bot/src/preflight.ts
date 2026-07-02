@@ -1,9 +1,12 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import * as db from "./db.js";
+import * as cognee from "./cognee.js";
 import { config } from "./config.js";
 import { evaluatePr } from "./pipeline.js";
 import type { TenantCredentials } from "./cognee.js";
+
+const cog = { baseUrl: config.cogneeBaseUrl };
 
 interface PreflightRequest {
   title?: string;
@@ -17,6 +20,18 @@ interface IssueKeyRequest {
 }
 
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
+
+const bearer = (req: IncomingMessage): string => {
+  const auth = req.headers.authorization ?? "";
+  return auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
+};
+
+/** Resolve a repo-scoped `cg_…` bearer key to its installation + repo (or null). */
+async function authKey(req: IncomingMessage): Promise<{ installationId: number; repo: string } | null> {
+  const key = bearer(req);
+  if (!key) return null;
+  return db.lookupPreflightKey(sha256(key));
+}
 
 function readBody(req: IncomingMessage, limit = 1_000_000): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -40,12 +55,8 @@ function send(res: ServerResponse, status: number, body: unknown): void {
  * Runs the catch pipeline against the repo's decisions with NO GitHub writes.
  */
 export async function handlePreflight(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const auth = req.headers.authorization ?? "";
-  const key = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
-  if (!key) return send(res, 401, { error: "missing bearer key" });
-
-  const mapping = await db.lookupPreflightKey(sha256(key));
-  if (!mapping) return send(res, 401, { error: "invalid or revoked key" });
+  const mapping = await authKey(req);
+  if (!mapping) return send(res, 401, { error: "missing/invalid bearer key" });
 
   let body: PreflightRequest;
   try {
@@ -94,4 +105,30 @@ export async function handleIssueKey(req: IncomingMessage, res: ServerResponse):
   const key = `cg_${randomBytes(24).toString("hex")}`;
   await db.insertPreflightKey(sha256(key), installationId, repo);
   send(res, 201, { key, repo, installationId });
+}
+
+/** Read-side metrics for a repo (the "PRs prevented" panel). Preflight-key auth. */
+export async function handleMetrics(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const mapping = await authKey(req);
+  if (!mapping) return send(res, 401, { error: "missing/invalid bearer key" });
+  const m = await db.metrics(mapping.installationId, mapping.repo);
+  send(res, 200, { repo: mapping.repo, ...m });
+}
+
+/** Interactive knowledge-graph HTML for the tenant's decision memory. Preflight-key auth. */
+export async function handleGraph(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const mapping = await authKey(req);
+  if (!mapping) return send(res, 401, { error: "missing/invalid bearer key" });
+  const inst = await db.getInstallation(mapping.installationId);
+  if (!inst) return send(res, 404, { error: "unknown installation" });
+  const creds: TenantCredentials = { apiKey: inst.cogneeApiKey, tenantId: "" };
+  try {
+    const datasetId = await cognee.getDatasetId(cog, creds, inst.datasetName);
+    if (!datasetId) return send(res, 404, { error: "no dataset yet" });
+    const html = await cognee.visualize(cog, creds, datasetId);
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    res.end(html);
+  } catch (e) {
+    send(res, 502, { error: `graph unavailable: ${(e as Error).message}` });
+  }
 }

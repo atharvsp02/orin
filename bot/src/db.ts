@@ -383,6 +383,34 @@ export async function listInstallations(): Promise<Installation[]> {
   return out;
 }
 
+export interface RepoMetrics {
+  prsPrevented: number; // distinct PRs where CodeGuard flagged a re-proposed decision
+  decisionsTracked: number;
+  rejectionsActive: number; // rejected + not yet superseded (what the catch enforces)
+}
+
+export async function metrics(installationId: number, repo: string): Promise<RepoMetrics> {
+  const prevented = await pool.query(
+    `SELECT COUNT(DISTINCT number)::int AS n FROM deliveries
+     WHERE installation_id = $1 AND repo = $2 AND kind = 'pr' AND decision_id IS NOT NULL AND state = 'posted'`,
+    [installationId, repo],
+  );
+  const tracked = await pool.query(
+    `SELECT COUNT(*)::int AS n FROM decision_records WHERE installation_id = $1 AND repo = $2`,
+    [installationId, repo],
+  );
+  const rejections = await pool.query(
+    `SELECT COUNT(*)::int AS n FROM decision_records
+     WHERE installation_id = $1 AND repo = $2 AND outcome = 'rejected' AND superseded_by IS NULL`,
+    [installationId, repo],
+  );
+  return {
+    prsPrevented: prevented.rows[0]?.n ?? 0,
+    decisionsTracked: tracked.rows[0]?.n ?? 0,
+    rejectionsActive: rejections.rows[0]?.n ?? 0,
+  };
+}
+
 // Full teardown on uninstall. installations delete cascades tenant_config/decision_records/preflight_keys;
 // deliveries + feedback_pending carry no FK, so clear them explicitly.
 export async function deleteInstallation(installationId: number): Promise<void> {
