@@ -4,11 +4,49 @@ Multi-tenant GitHub App backend. Ingests a repo's closed issues/PRs into a per-i
 Cognee knowledge graph, catches PRs/issues that re-propose already-rejected decisions, and
 answers `@codeguard` questions with citations.
 
-## HTTP endpoints
+## Entrypoints
+
+One package, several `npm run` targets (they share the decision core in `src/pipeline.ts`):
+
+| script | process |
+| --- | --- |
+| `start` | GitHub App webhook server + async workers |
+| `mcp` / `mcp:http` | MCP server (stdio / streamable HTTP) for IDE agents + CI |
+| `slack` | Slack app (Bolt) |
+| `linear` | Linear agent adapter |
+
+## HTTP endpoints (webhook server)
 
 - `POST /` — GitHub webhooks (handled by Octokit middleware).
-- `POST /v1/preflight` — contributor pre-flight check (below).
+- `POST /v1/preflight` — contributor pre-flight check (below), preflight-key auth.
 - `POST /v1/preflight-keys` — mint a preflight key (admin-only; disabled unless `ADMIN_TOKEN` is set).
+- `GET /v1/metrics` — `{prsPrevented, decisionsTracked, rejectionsActive}` for a repo, preflight-key auth.
+- `GET /v1/graph` — interactive knowledge-graph HTML (CSP-sandboxed), preflight-key auth.
+
+## Cognee lifecycle (all four verbs fire live)
+
+`remember` (ingest on install + on PR/issue close) → `recall` (session-scoped `GRAPH_COMPLETION_COT`
+during catch) → `improve` (hourly worker applies maintainer feedback) → `forget` (on uninstall or
+`@codeguard forget`). Feedback comes from `@codeguard good|bad` (or 👍/👎) on a flagged thread.
+
+## `@codeguard` commands
+
+`recall <q>`, `why`, `override [REF] "reason"`, `ignore`, `re-scan`, `good`/`bad` (feedback),
+`forget` (admin), `rules` (list), `rule <text>` (seed a coding rule).
+
+## Adapters (share one decision core)
+
+- **MCP** (`npm run mcp`): tools `ask_decision`→ask, `check_rejected`→warn, `record_decision`→ingest.
+  Auth via a repo-scoped `cg_` key in `CODEGUARD_TOKEN`; the server always calls Cognee with the
+  tenant's own key, never the client's token. `bot/cli/codeguard-mcp.mjs` is a CI gate over stdio.
+- **Slack** (`npm run slack`): `/why`, react `:decision:` to ingest, proposal-shaped messages get a
+  collision-warn. Multi-workspace OAuth; install tokens encrypted at rest.
+- **Linear** (`npm run linear`): `AgentSessionEvent` → `thought` then cited `response`; issue-create
+  collision-warn via comment. HMAC-verified webhook.
+
+Non-GitHub adapters resolve their tenant via `tenant_links` (a Slack team / Linear workspace linked
+to a GitHub installation) — there is **no** silent default-tenant fallback, so an unlinked workspace
+can never read or poison another tenant's memory.
 
 ## Contributor pre-flight (A5)
 
