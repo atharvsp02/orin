@@ -2,6 +2,7 @@ import { config } from "./config.js";
 import * as db from "./db.js";
 import * as llm from "./llm.js";
 import * as cognee from "./cognee.js";
+import { ONTOLOGY_KEY } from "./ontology.js";
 import type { TenantCredentials } from "./cognee.js";
 import type { Judgment } from "./llm.js";
 import type { RepoItem } from "./github.js";
@@ -33,6 +34,7 @@ export async function ingestItem(
     datasetName: inst.datasetName,
     filename: `${decisionId}.txt`,
     content: doc,
+    ontologyKey: ONTOLOGY_KEY,
   });
   await db.upsertDecisionRecord({
     decisionId,
@@ -203,6 +205,7 @@ export async function seedRules(
     filename: "coding-rules.txt",
     content: rules.map((r) => `- ${r}`).join("\n"),
     nodeSet: RULES_NODESET,
+    ontologyKey: ONTOLOGY_KEY,
   });
   return rules;
 }
@@ -244,7 +247,7 @@ export async function overrideDecision(
   const newId = `OVERRIDE-${a.number}-${Math.random().toString(36).slice(2, 8)}`;
   const cited = await db.getDecisionRecord(inst.installationId, a.repo, a.citedRef);
   const doc = `Decision ${newId} (ACCEPTED): Override of ${a.citedRef} by @${a.by}. ${a.reason} Source: ${a.sourceUrl}`;
-  const res = await cognee.remember(cog, creds, { datasetName: inst.datasetName, filename: `${newId}.txt`, content: doc });
+  const res = await cognee.remember(cog, creds, { datasetName: inst.datasetName, filename: `${newId}.txt`, content: doc, ontologyKey: ONTOLOGY_KEY });
   await db.upsertDecisionRecord({
     decisionId: newId,
     installationId: inst.installationId,

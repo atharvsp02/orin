@@ -58,14 +58,28 @@ export async function provisionTenant(
 export async function remember(
   cfg: CogneeConfig,
   creds: TenantCredentials,
-  opts: { datasetName: string; filename: string; content: string | Uint8Array; nodeSet?: string },
+  opts: { datasetName: string; filename: string; content: string | Uint8Array; nodeSet?: string; ontologyKey?: string },
 ): Promise<unknown> {
   const form = new FormData();
   form.append("data", new Blob([opts.content]), opts.filename);
   form.append("datasetName", opts.datasetName);
   form.append("run_in_background", "false");
   if (opts.nodeSet) form.append("node_set", opts.nodeSet); // e.g. "coding_agent_rules" to seed a rule
+  if (opts.ontologyKey) form.append("ontology_key", opts.ontologyKey); // ground extraction with an uploaded OWL
   return asJson(await fetch(`${cfg.baseUrl}/api/v1/remember`, { method: "POST", headers: keyHeader(creds), body: form }));
+}
+
+/** Upload an OWL ontology (multipart). `ontologyKey` is then referenced by remember/cognify. */
+export async function uploadOntology(
+  cfg: CogneeConfig,
+  creds: TenantCredentials,
+  opts: { ontologyKey: string; filename: string; content: string; description?: string },
+): Promise<unknown> {
+  const form = new FormData();
+  form.append("ontology_key", opts.ontologyKey);
+  form.append("ontology_file", new Blob([opts.content]), opts.filename);
+  if (opts.description) form.append("description", opts.description);
+  return asJson(await fetch(`${cfg.baseUrl}/api/v1/ontologies`, { method: "POST", headers: keyHeader(creds), body: form }));
 }
 
 export type SearchType =

@@ -9,6 +9,7 @@ import { startQueue } from "./worker.js";
 import { QUEUE } from "./queues.js";
 import { handlePreflight, handleIssueKey, handleMetrics, handleGraph } from "./preflight.js";
 import { forgetTenant } from "./lifecycle.js";
+import { DECISION_OWL, ONTOLOGY_KEY, ONTOLOGY_FILENAME } from "./ontology.js";
 
 async function main() {
   await db.initSchema();
@@ -28,6 +29,11 @@ async function main() {
       tenantName: `install-${installationId}`,
     });
     await db.upsertInstallation({ installationId, githubAccount: account, datasetName, cogneeApiKey: creds.apiKey });
+
+    // Ground extraction with the decision ontology (idempotent-ish: duplicate key 400s, which we ignore).
+    await cognee
+      .uploadOntology(cog, creds, { ontologyKey: ONTOLOGY_KEY, filename: ONTOLOGY_FILENAME, content: DECISION_OWL })
+      .catch((e) => console.warn("ontology upload skipped:", (e as Error).message));
 
     for (const r of payload.repositories ?? []) {
       await boss.send(QUEUE.ingest, { installationId, repo: r.full_name });
