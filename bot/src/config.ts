@@ -6,7 +6,7 @@ function required(name: string): string {
   return v;
 }
 
-export type LlmProvider = "google" | "openai" | "deepseek";
+export type LlmProvider = "google" | "openai" | "deepseek" | "openrouter";
 
 export const config = {
   port: Number(process.env.PORT ?? 3000),

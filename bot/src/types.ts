@@ -17,7 +17,7 @@ export interface TenantConfig {
   scoreCutoff: number; // CHUNKS cosine-distance cutoff (lower = closer)
   autoComment: boolean;
   customInstructions: string;
-  llmProvider: "google" | "openai" | "deepseek";
+  llmProvider: "google" | "openai" | "deepseek" | "openrouter";
 }
 
 export interface DecisionRecord {

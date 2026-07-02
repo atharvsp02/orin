@@ -1,22 +1,27 @@
 import { createProviderRegistry, generateObject } from "ai";
 import { google } from "@ai-sdk/google";
-import { openai } from "@ai-sdk/openai";
+import { openai, createOpenAI } from "@ai-sdk/openai";
 import { deepseek } from "@ai-sdk/deepseek";
 import { z } from "zod";
 
 // App-layer LLM (distinct from the Cognee engine's own LLM). Used for decision
 // extraction during ingest and PR-resemblance judgment during catch.
-const registry = createProviderRegistry({ google, openai, deepseek });
+// OpenRouter is an OpenAI-compatible endpoint → reuse the OpenAI provider with a base URL.
+const openrouter = createOpenAI({ baseURL: "https://openrouter.ai/api/v1", apiKey: process.env.OPENROUTER_API_KEY });
+const registry = createProviderRegistry({ google, openai, deepseek, openrouter });
 
-type ModelId = `google:${string}` | `openai:${string}` | `deepseek:${string}`;
+type ModelId = `google:${string}` | `openai:${string}` | `deepseek:${string}` | `openrouter:${string}`;
 
 const DEFAULT_MODEL: Record<string, ModelId> = {
   google: `google:${process.env.CODEGUARD_GOOGLE_MODEL ?? "gemini-2.5-flash"}`,
   openai: `openai:${process.env.CODEGUARD_OPENAI_MODEL ?? "gpt-4o-mini"}`,
   deepseek: `deepseek:${process.env.CODEGUARD_DEEPSEEK_MODEL ?? "deepseek-chat"}`,
+  openrouter: `openrouter:${process.env.CODEGUARD_OPENROUTER_MODEL ?? "google/gemini-2.5-flash"}`,
 };
 
 function model(provider: string) {
+  // OpenRouter: force chat-completions (its Responses-API support is partial) and pick the model directly.
+  if (provider === "openrouter") return openrouter.chat(process.env.CODEGUARD_OPENROUTER_MODEL ?? "google/gemini-2.5-flash");
   return registry.languageModel(DEFAULT_MODEL[provider] ?? DEFAULT_MODEL.google);
 }
 
@@ -37,6 +42,7 @@ export async function extractDecision(provider: string, thread: string): Promise
   const { object } = await generateObject({
     model: model(provider),
     schema: decisionSchema,
+    maxOutputTokens: 2048,
     prompt: `From the following GitHub issue/PR thread, extract the maintainer decision if one exists.\n\n${thread}`,
   });
   return object;
@@ -63,6 +69,7 @@ export async function judgePr(
   const { object } = await generateObject({
     model: model(provider),
     schema: judgmentSchema,
+    maxOutputTokens: 2048,
     prompt:
       `${customInstructions}\n\n` +
       `A new pull request:\n${prText}\n\n` +
