@@ -5,7 +5,8 @@ import { config } from "./config.js";
 import { app } from "./github.js";
 import * as db from "./db.js";
 import * as cognee from "./cognee.js";
-import { startQueue, QUEUE } from "./worker.js";
+import { startQueue } from "./worker.js";
+import { QUEUE } from "./queues.js";
 
 async function main() {
   await db.initSchema();
@@ -31,13 +32,42 @@ async function main() {
     }
   });
 
-  // New PR -> catch pipeline (async). The webhook acks fast; heavy work runs on the queue.
-  app.webhooks.on("pull_request.opened", async ({ payload }) => {
+  // New/updated PR (incl. draft) -> catch pipeline (async). Ack is fast; heavy work runs on the queue.
+  app.webhooks.on(
+    ["pull_request.opened", "pull_request.reopened", "pull_request.ready_for_review", "pull_request.synchronize"],
+    async ({ payload }) => {
+      if (!payload.installation) return;
+      await boss.send(QUEUE.catch, {
+        installationId: payload.installation.id,
+        repo: payload.repository.full_name,
+        kind: "pr",
+        number: payload.pull_request.number,
+      });
+    },
+  );
+
+  // New issue -> catch against rejected decisions before any code is written.
+  app.webhooks.on("issues.opened", async ({ payload }) => {
     if (!payload.installation) return;
     await boss.send(QUEUE.catch, {
       installationId: payload.installation.id,
       repo: payload.repository.full_name,
-      prNumber: payload.pull_request.number,
+      kind: "issue",
+      number: payload.issue.number,
+    });
+  });
+
+  // `@codeguard <cmd>` in a PR/issue comment -> command queue (recall/why/override/ignore/rescan).
+  app.webhooks.on("issue_comment.created", async ({ payload }) => {
+    if (!payload.installation || payload.comment.user?.type === "Bot") return;
+    await boss.send(QUEUE.command, {
+      installationId: payload.installation.id,
+      repo: payload.repository.full_name,
+      number: payload.issue.number,
+      commentId: payload.comment.id,
+      body: payload.comment.body ?? "",
+      sender: payload.comment.user?.login ?? "",
+      isPr: Boolean(payload.issue.pull_request),
     });
   });
 

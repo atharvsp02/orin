@@ -158,6 +158,44 @@ export async function improveTenant(creds: TenantCredentials, datasetName: strin
   await cognee.improve(cog, creds, { datasetName, sessionIds });
 }
 
+/** Cited recall over the tenant's decision graph (for `@codeguard recall|why`). */
+export async function ask(inst: Installation, creds: TenantCredentials, query: string): Promise<string> {
+  const res = await cognee.search(cog, creds, {
+    datasetName: inst.datasetName,
+    query,
+    searchType: "GRAPH_COMPLETION",
+    includeReferences: true,
+  });
+  return firstAnswer(res);
+}
+
+/** Mint a NEW accepted decision that SUPERSEDES a cited rejection (the `@codeguard override` loop). */
+export async function overrideDecision(
+  inst: Installation,
+  creds: TenantCredentials,
+  a: { citedRef: string; reason: string; by: string; number: number; sourceUrl: string },
+): Promise<string> {
+  const newId = `OVERRIDE-${a.number}-${Math.random().toString(36).slice(2, 8)}`;
+  const cited = await db.getDecisionRecord(inst.installationId, a.citedRef);
+  const doc = `Decision ${newId} (ACCEPTED): Override of ${a.citedRef} by @${a.by}. ${a.reason} Source: ${a.sourceUrl}`;
+  const res = await cognee.remember(cog, creds, { datasetName: inst.datasetName, filename: `${newId}.txt`, content: doc });
+  await db.upsertDecisionRecord({
+    decisionId: newId,
+    installationId: inst.installationId,
+    sourceType: "pr",
+    sourceUrl: a.sourceUrl,
+    title: `Override of ${cited?.title ?? a.citedRef}`,
+    outcome: "accepted",
+    reasoningText: a.reason,
+    decidedAt: new Date().toISOString(),
+    terms: cited?.terms ?? [],
+    cogneeDataId: dataId(res),
+    createdAt: "",
+  });
+  await db.markSuperseded(inst.installationId, [a.citedRef], newId);
+  return newId;
+}
+
 function dataId(res: unknown): string | undefined {
   const r = res as { items?: Array<{ id?: string }> } | undefined;
   return r?.items?.[0]?.id;

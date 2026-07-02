@@ -4,34 +4,26 @@ import * as db from "./db.js";
 import * as gh from "./github.js";
 import { ingestItem, evaluatePr } from "./pipeline.js";
 import { resolveDelivery, buildDecision } from "./delivery.js";
+import { handleCommand } from "./commands.js";
+import { QUEUE } from "./queues.js";
 import type { DeliveryRefs } from "./delivery.js";
 import type { TenantCredentials } from "./cognee.js";
 import type { DeliveryMode } from "./types.js";
-
-export const QUEUE = { ingest: "ingest", catch: "catch" } as const;
-
-export interface IngestJob {
-  installationId: number;
-  repo: string;
-  number?: number; // single-item (live) ingest; omit for a full backfill
-  limit?: number;
-}
-export interface CatchJob {
-  installationId: number;
-  repo: string;
-  prNumber: number;
-}
+import type { CatchJob, CommandJob, IngestJob } from "./queues.js";
 
 export async function startQueue(): Promise<PgBoss> {
   const boss = new PgBoss(config.databaseUrl);
   await boss.start();
   await boss.createQueue(QUEUE.ingest);
   await boss.createQueue(QUEUE.catch);
+  await boss.createQueue(QUEUE.command);
   await boss.work<IngestJob>(QUEUE.ingest, ingestWorker);
   await boss.work<CatchJob>(QUEUE.catch, catchWorker);
+  await boss.work<CommandJob>(QUEUE.command, (jobs) => commandWorker(jobs, boss));
   return boss;
 }
 
+// Backfill (whole repo) or live single-item ingest -> extract decision -> remember().
 async function ingestWorker(jobs: PgBoss.Job<IngestJob>[]): Promise<void> {
   for (const { data } of jobs) {
     const inst = await db.getInstallation(data.installationId);
@@ -53,28 +45,51 @@ async function ingestWorker(jobs: PgBoss.Job<IngestJob>[]): Promise<void> {
   }
 }
 
+// PR opened/updated or issue opened -> precision pipeline -> deliver (or stay silent).
 async function catchWorker(jobs: PgBoss.Job<CatchJob>[]): Promise<void> {
   for (const { data } of jobs) {
     const inst = await db.getInstallation(data.installationId);
     if (!inst) continue;
     const creds: TenantCredentials = { apiKey: inst.cogneeApiKey, tenantId: "" };
     const cfg = await db.getTenantConfig(data.installationId);
-    const pr = await gh.fetchPr(data.installationId, data.repo, data.prNumber);
 
+    // Issues have no diff/check — deliver a plain comment before code is written.
+    if (data.kind === "issue") {
+      const it = await gh.fetchItem(data.installationId, data.repo, data.number);
+      const sessionId = `codeguard-issue-${data.installationId}-${data.number}`;
+      const judgment = await evaluatePr(inst, cfg, creds, `${it.title}\n\n${it.body}`, sessionId);
+      if (judgment.matches && judgment.decisionId && judgment.comment && cfg.autoComment) {
+        await gh.postComment(data.installationId, data.repo, data.number, `⚠️ ${judgment.comment}`);
+      }
+      await db.upsertDelivery({
+        installationId: data.installationId,
+        repo: data.repo,
+        prNumber: data.number,
+        kind: "issue",
+        headSha: "",
+        mode: "comment",
+        decisionId: judgment.decisionId,
+        sessionId,
+        state: judgment.matches ? "posted" : "clear",
+      });
+      continue;
+    }
+
+    const pr = await gh.fetchPr(data.installationId, data.repo, data.number);
     const [owner, repo] = data.repo.split("/");
     const octokit = await gh.installationOctokit(data.installationId);
     const ctx = {
       octokit,
       owner,
       repo,
-      number: data.prNumber,
+      number: data.number,
       headSha: pr.headSha,
-      externalId: `${data.installationId}:${data.repo}#${data.prNumber}`,
+      externalId: `${data.installationId}:${data.repo}#${data.number}`,
     };
     const delivery = resolveDelivery(cfg.deliveryMode);
 
     // Idempotency per head_sha: synchronize re-runs reuse the same check/review/comment.
-    const prior = await db.getDelivery(data.installationId, data.repo, data.prNumber, pr.headSha);
+    const prior = await db.getDelivery(data.installationId, data.repo, data.number, pr.headSha);
     let refs: DeliveryRefs | null = prior
       ? {
           mode: prior.mode as DeliveryMode,
@@ -86,7 +101,7 @@ async function catchWorker(jobs: PgBoss.Job<CatchJob>[]): Promise<void> {
     if (cfg.autoComment && !refs) refs = await delivery.open(ctx); // show the check in_progress while we work
 
     const prText = `${pr.title}\n\n${pr.body}\n\nFiles: ${pr.files.map((f) => f.path).join(", ")}`;
-    const sessionId = `codeguard-pr-${data.installationId}-${data.prNumber}`;
+    const sessionId = `codeguard-pr-${data.installationId}-${data.number}`;
     const judgment = await evaluatePr(inst, cfg, creds, prText, sessionId);
     const decision = await buildDecision(inst, cfg, pr, judgment);
 
@@ -97,7 +112,8 @@ async function catchWorker(jobs: PgBoss.Job<CatchJob>[]): Promise<void> {
     await db.upsertDelivery({
       installationId: data.installationId,
       repo: data.repo,
-      prNumber: data.prNumber,
+      prNumber: data.number,
+      kind: "pr",
       headSha: pr.headSha,
       mode: refs?.mode ?? null,
       checkRunId: refs?.checkRunId ?? null,
@@ -108,4 +124,8 @@ async function catchWorker(jobs: PgBoss.Job<CatchJob>[]): Promise<void> {
       state: decision.findings.length ? "posted" : "clear",
     });
   }
+}
+
+async function commandWorker(jobs: PgBoss.Job<CommandJob>[], boss: PgBoss): Promise<void> {
+  for (const { data } of jobs) await handleCommand(data, boss);
 }

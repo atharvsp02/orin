@@ -233,6 +233,25 @@ export async function getPrSession(installationId: number, repo: string, prNumbe
   return rows[0]?.session_id ?? null;
 }
 
+// The decision CodeGuard most recently flagged on a PR/issue (for `@codeguard override` with no ref).
+export async function getLatestDecisionForPr(installationId: number, repo: string, number: number): Promise<string | null> {
+  const { rows } = await pool.query(
+    `SELECT decision_id FROM deliveries
+     WHERE installation_id = $1 AND repo = $2 AND number = $3 AND decision_id IS NOT NULL
+     ORDER BY updated_at DESC LIMIT 1`,
+    [installationId, repo, number],
+  );
+  return rows[0]?.decision_id ?? null;
+}
+
+export async function ignoreDeliveries(installationId: number, repo: string, number: number): Promise<void> {
+  await pool.query(
+    `UPDATE deliveries SET state = 'ignored', updated_at = now()
+     WHERE installation_id = $1 AND repo = $2 AND number = $3`,
+    [installationId, repo, number],
+  );
+}
+
 export async function getDecisionRecord(installationId: number, decisionId: string): Promise<DecisionRecord | null> {
   const { rows } = await pool.query(
     `SELECT * FROM decision_records WHERE installation_id = $1 AND decision_id = $2`,
