@@ -10,6 +10,7 @@
     "mcp": "node dist/mcp.js",
     "mcp:http": "MCP_HTTP=1 node dist/mcp.js",
     "slack": "node dist/slack.js",
+    "linear": "node dist/linear.js",
     "dev": "node --watch src/index.ts",
     "typecheck": "tsc --noEmit",
     "test": "tsc && node test/patch.test.mjs && node test/commands.test.mjs && node test/pipeline.test.mjs"
@@ -18,6 +19,7 @@
     "@ai-sdk/deepseek": "^3.0.3",
     "@ai-sdk/google": "^4.0.6",
     "@ai-sdk/openai": "^4.0.5",
+    "@linear/sdk": "^88.0.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@slack/bolt": "^4.7.3",
     "ai": "^7.0.11",
