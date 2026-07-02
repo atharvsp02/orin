@@ -60,10 +60,11 @@ async function catchWorker(jobs: PgBoss.Job<CatchJob>[]): Promise<void> {
     const pr = await gh.fetchPr(data.installationId, data.repo, data.prNumber);
     const prText = `${pr.title}\n\n${pr.body}\n\nFiles: ${pr.files.join(", ")}`;
 
-    const judgment = await evaluatePr(inst, cfg, creds, prText);
+    const sessionId = `codeguard-pr-${data.installationId}-${data.prNumber}`;
+    const judgment = await evaluatePr(inst, cfg, creds, prText, sessionId);
     if (judgment.matches && judgment.decisionId && judgment.comment) {
       if (cfg.autoComment) await gh.postComment(data.installationId, data.repo, data.prNumber, judgment.comment);
-      await db.recordComment(data.installationId, data.repo, data.prNumber, judgment.decisionId);
+      await db.recordComment(data.installationId, data.repo, data.prNumber, judgment.decisionId, sessionId);
     }
   }
 }

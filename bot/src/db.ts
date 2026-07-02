@@ -44,6 +44,7 @@ export async function initSchema(): Promise<void> {
       repo            TEXT   NOT NULL,
       pr_number       INT    NOT NULL,
       decision_id     TEXT,
+      session_id      TEXT,
       posted_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
       PRIMARY KEY (installation_id, repo, pr_number)
     );
@@ -158,10 +159,20 @@ export async function recordComment(
   repo: string,
   prNumber: number,
   decisionId: string | null,
+  sessionId: string | null = null,
 ): Promise<void> {
   await pool.query(
-    `INSERT INTO pr_comments (installation_id, repo, pr_number, decision_id)
-     VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,
-    [installationId, repo, prNumber, decisionId],
+    `INSERT INTO pr_comments (installation_id, repo, pr_number, decision_id, session_id)
+     VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING`,
+    [installationId, repo, prNumber, decisionId, sessionId],
   );
+}
+
+// Resolve the recall session for a PR (used to attach maintainer feedback).
+export async function getPrSession(installationId: number, repo: string, prNumber: number): Promise<string | null> {
+  const { rows } = await pool.query(
+    `SELECT session_id FROM pr_comments WHERE installation_id = $1 AND repo = $2 AND pr_number = $3`,
+    [installationId, repo, prNumber],
+  );
+  return rows[0]?.session_id ?? null;
 }

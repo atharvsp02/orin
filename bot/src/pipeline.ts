@@ -54,6 +54,7 @@ export async function evaluatePr(
   cfg: TenantConfig,
   creds: TenantCredentials,
   prText: string,
+  sessionId?: string,
 ): Promise<Judgment> {
   const records = await db.getDecisionRecords(inst.installationId);
   const active = records.filter((r) => r.outcome === "rejected" && !r.supersededBy);
@@ -79,13 +80,23 @@ export async function evaluatePr(
 
   if (candidates.size === 0) return { matches: false, decisionId: null, comment: "" };
 
-  // Cited recall from the knowledge graph as context for the judgment.
-  const recall = await cognee.search(cog, creds, {
-    datasetName: inst.datasetName,
-    query: `Does this pull request re-propose a past decision?\n${prText}`,
-    searchType: "GRAPH_COMPLETION",
-    includeReferences: true,
-  });
+  // Cited recall (chain-of-thought) from the knowledge graph as context for the judgment.
+  // With a sessionId it goes through /recall, recording a QA entry so maintainer feedback can reweight it.
+  const query = `Does this pull request re-propose a past decision?\n${prText}`;
+  const recall = sessionId
+    ? await cognee.recallWithSession(cog, creds, {
+        datasetName: inst.datasetName,
+        query,
+        sessionId,
+        searchType: "GRAPH_COMPLETION_COT",
+        includeReferences: true,
+      })
+    : await cognee.search(cog, creds, {
+        datasetName: inst.datasetName,
+        query,
+        searchType: "GRAPH_COMPLETION_COT",
+        includeReferences: true,
+      });
 
   return llm.judgePr(
     cfg.llmProvider,
@@ -113,10 +124,38 @@ export function grounded(a: string, b: string, threshold: number): boolean {
 }
 
 function firstAnswer(res: unknown): string {
-  const arr = res as Array<{ search_result?: unknown }> | undefined;
-  const first = Array.isArray(arr) ? arr[0]?.search_result : undefined;
-  if (Array.isArray(first)) return String(first[0] ?? "");
-  return typeof first === "string" ? first : "";
+  const arr = res as Array<{ search_result?: unknown; text?: unknown }> | undefined;
+  const o = Array.isArray(arr) ? arr[0] : undefined;
+  if (!o) return "";
+  if (typeof o.text === "string") return o.text; // /recall shape
+  const sr = o.search_result; // /search shape
+  if (Array.isArray(sr)) return String(sr[0] ?? "");
+  return typeof sr === "string" ? sr : "";
+}
+
+// --- lifecycle: maintainer feedback → reweight the exact decision nodes → improve ---
+
+/** Attach a maintainer 👍/👎 to the recall QA that produced a verdict on this PR. */
+export async function submitFeedback(
+  creds: TenantCredentials,
+  opts: { datasetName: string; sessionId: string; question: string; score: 1 | 2 | 3 | 4 | 5 },
+): Promise<void> {
+  const qas = await cognee.getSessionQAs(cog, creds, opts.sessionId);
+  const needle = opts.question.slice(0, 40);
+  const qa = qas.find((q) => q.question.includes(needle)) ?? qas[qas.length - 1];
+  if (!qa?.qaId) return;
+  await cognee.addFeedback(cog, creds, {
+    datasetName: opts.datasetName,
+    sessionId: opts.sessionId,
+    qaId: qa.qaId,
+    score: opts.score,
+  });
+}
+
+/** Apply accumulated feedback for a tenant's sessions (run on a schedule or after a 👍/👎). */
+export async function improveTenant(creds: TenantCredentials, datasetName: string, sessionIds: string[]): Promise<void> {
+  if (sessionIds.length === 0) return;
+  await cognee.improve(cog, creds, { datasetName, sessionIds });
 }
 
 function dataId(res: unknown): string | undefined {
