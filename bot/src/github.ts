@@ -1,6 +1,6 @@
 import { App } from "octokit";
 import { config } from "./config.js";
-import type { DecisionSource } from "./types.js";
+import type { DecisionSource, PrSnapshot } from "./types.js";
 
 export const app = new App({
   appId: config.github.appId,
@@ -96,11 +96,12 @@ export async function fetchItem(installationId: number, repoFullName: string, nu
   };
 }
 
-export async function fetchPr(
-  installationId: number,
-  repoFullName: string,
-  prNumber: number,
-): Promise<{ title: string; body: string; url: string; files: string[] }> {
+/** Installation-scoped Octokit (used by the delivery layer to publish checks/reviews). */
+export function installationOctokit(installationId: number) {
+  return app.getInstallationOctokit(installationId);
+}
+
+export async function fetchPr(installationId: number, repoFullName: string, prNumber: number): Promise<PrSnapshot> {
   const octokit = await app.getInstallationOctokit(installationId);
   const [owner, repo] = repoFullName.split("/");
   const { data: pr } = await octokit.rest.pulls.get({ owner, repo, pull_number: prNumber });
@@ -110,7 +111,23 @@ export async function fetchPr(
     pull_number: prNumber,
     per_page: 100,
   });
-  return { title: pr.title, body: pr.body ?? "", url: pr.html_url, files: files.map((f) => f.filename) };
+  return {
+    number: pr.number,
+    title: pr.title,
+    body: pr.body ?? "",
+    url: pr.html_url,
+    headSha: pr.head.sha,
+    baseSha: pr.base.sha,
+    baseRef: pr.base.ref,
+    draft: pr.draft ?? false,
+    files: files.map((f) => ({
+      path: f.filename,
+      status: f.status,
+      patch: f.patch,
+      additions: f.additions,
+      deletions: f.deletions,
+    })),
+  };
 }
 
 export async function postComment(
