@@ -1,0 +1,35 @@
+# dependencies
+node_modules/
+.pnp.*
+
+# build output
+dist/
+build/
+.next/
+out/
+*.tsbuildinfo
+
+# env / secrets
+.env
+.env.local
+.env.*.local
+
+# cognee local / file-based stores
+.cognee_system/
+**/cgdata/
+**/cgsys/
+data/
+
+# cloned reference repos (study only, not ours)
+inspiration/
+
+# local tooling
+.claude/
+
+# logs & misc
+*.log
+npm-debug.log*
+.DS_Store
+coverage/
+.vercel/
+.turbo/
