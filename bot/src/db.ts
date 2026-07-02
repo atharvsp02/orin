@@ -78,6 +78,11 @@ export async function initSchema(): Promise<void> {
       created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
       PRIMARY KEY (platform, external_id)
     );
+    CREATE TABLE IF NOT EXISTS slack_installs (
+      id         TEXT PRIMARY KEY,   -- team id (or enterprise id for org installs)
+      data       JSONB NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
   `);
 }
 
@@ -370,6 +375,24 @@ export async function resolveLink(platform: string, externalId: string): Promise
     [platform, externalId],
   );
   return rows[0] ? Number(rows[0].installation_id) : null;
+}
+
+// Slack OAuth installation store (Bolt InstallationStore backing).
+export async function storeSlackInstall(id: string, data: unknown): Promise<void> {
+  await pool.query(
+    `INSERT INTO slack_installs (id, data) VALUES ($1, $2)
+     ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`,
+    [id, JSON.stringify(data)],
+  );
+}
+
+export async function fetchSlackInstall(id: string): Promise<unknown | null> {
+  const { rows } = await pool.query(`SELECT data FROM slack_installs WHERE id = $1`, [id]);
+  return rows[0]?.data ?? null;
+}
+
+export async function deleteSlackInstall(id: string): Promise<void> {
+  await pool.query(`DELETE FROM slack_installs WHERE id = $1`, [id]);
 }
 
 export async function insertPreflightKey(keyHash: string, installationId: number, repo: string): Promise<void> {
