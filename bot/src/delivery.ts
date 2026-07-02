@@ -173,11 +173,12 @@ export function resolveDelivery(mode: DeliveryMode): Delivery {
 export async function buildDecision(
   inst: Installation,
   cfg: TenantConfig,
+  repo: string,
   pr: PrSnapshot,
   judgment: Judgment,
 ): Promise<DeliveryDecision> {
   if (!judgment.matches || !judgment.decisionId) return { blocking: false, findings: [] };
-  const rec = await db.getDecisionRecord(inst.installationId, judgment.decisionId);
+  const rec = await db.getDecisionRecord(inst.installationId, repo, judgment.decisionId);
   const blocking = cfg.blockOnRepropose && !pr.draft;
   const anchor = rec
     ? anchorFor(pr.files, rec.terms, {

@@ -16,6 +16,7 @@ export async function ingestItem(
   cfg: TenantConfig,
   creds: TenantCredentials,
   it: RepoItem,
+  repo: string,
 ): Promise<void> {
   const thread = `${it.title}\n\n${it.body}\n\n${it.comments.join("\n---\n")}`;
   const d = await llm.extractDecision(cfg.llmProvider, thread);
@@ -33,6 +34,7 @@ export async function ingestItem(
   await db.upsertDecisionRecord({
     decisionId,
     installationId: inst.installationId,
+    repo,
     sourceType: it.kind,
     sourceUrl: it.url,
     title: d.title,
@@ -44,7 +46,7 @@ export async function ingestItem(
     createdAt: "",
   });
   if (d.supersedesRefs.length) {
-    await db.markSuperseded(inst.installationId, d.supersedesRefs, decisionId);
+    await db.markSuperseded(inst.installationId, repo, d.supersedesRefs, decisionId);
   }
 }
 
@@ -54,9 +56,10 @@ export async function evaluatePr(
   cfg: TenantConfig,
   creds: TenantCredentials,
   prText: string,
+  repo: string,
   sessionId?: string,
 ): Promise<Judgment> {
-  const records = await db.getDecisionRecords(inst.installationId);
+  const records = await db.getDecisionRecords(inst.installationId, repo);
   const active = records.filter((r) => r.outcome === "rejected" && !r.supersededBy);
 
   const candidates = new Map<string, DecisionRecord>();
@@ -173,15 +176,16 @@ export async function ask(inst: Installation, creds: TenantCredentials, query: s
 export async function overrideDecision(
   inst: Installation,
   creds: TenantCredentials,
-  a: { citedRef: string; reason: string; by: string; number: number; sourceUrl: string },
+  a: { repo: string; citedRef: string; reason: string; by: string; number: number; sourceUrl: string },
 ): Promise<string> {
   const newId = `OVERRIDE-${a.number}-${Math.random().toString(36).slice(2, 8)}`;
-  const cited = await db.getDecisionRecord(inst.installationId, a.citedRef);
+  const cited = await db.getDecisionRecord(inst.installationId, a.repo, a.citedRef);
   const doc = `Decision ${newId} (ACCEPTED): Override of ${a.citedRef} by @${a.by}. ${a.reason} Source: ${a.sourceUrl}`;
   const res = await cognee.remember(cog, creds, { datasetName: inst.datasetName, filename: `${newId}.txt`, content: doc });
   await db.upsertDecisionRecord({
     decisionId: newId,
     installationId: inst.installationId,
+    repo: a.repo,
     sourceType: "pr",
     sourceUrl: a.sourceUrl,
     title: `Override of ${cited?.title ?? a.citedRef}`,
@@ -193,7 +197,7 @@ export async function overrideDecision(
     createdAt: "",
   });
   // Exact supersession — the caller must have already authorized this citedRef against the thread.
-  await db.setSuperseded(inst.installationId, a.citedRef, newId);
+  await db.setSuperseded(inst.installationId, a.repo, a.citedRef, newId);
   return newId;
 }
 

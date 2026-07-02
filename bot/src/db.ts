@@ -29,6 +29,7 @@ export async function initSchema(): Promise<void> {
     CREATE TABLE IF NOT EXISTS decision_records (
       decision_id     TEXT   NOT NULL,
       installation_id BIGINT NOT NULL REFERENCES installations(installation_id) ON DELETE CASCADE,
+      repo            TEXT   NOT NULL DEFAULT '',
       source_type     TEXT   NOT NULL,
       source_url      TEXT   NOT NULL,
       title           TEXT   NOT NULL,
@@ -39,7 +40,7 @@ export async function initSchema(): Promise<void> {
       superseded_by   TEXT,
       cognee_data_id  TEXT,
       created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-      PRIMARY KEY (installation_id, decision_id)
+      PRIMARY KEY (installation_id, repo, decision_id)
     );
     CREATE TABLE IF NOT EXISTS deliveries (
       installation_id BIGINT NOT NULL,
@@ -111,39 +112,48 @@ export async function getTenantConfig(installationId: number): Promise<TenantCon
 export async function upsertDecisionRecord(d: DecisionRecord): Promise<void> {
   await pool.query(
     `INSERT INTO decision_records
-       (decision_id, installation_id, source_type, source_url, title, outcome, reasoning_text, decided_at, terms, superseded_by, cognee_data_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-     ON CONFLICT (installation_id, decision_id) DO UPDATE
+       (decision_id, installation_id, repo, source_type, source_url, title, outcome, reasoning_text, decided_at, terms, superseded_by, cognee_data_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+     ON CONFLICT (installation_id, repo, decision_id) DO UPDATE
        SET outcome        = EXCLUDED.outcome,
            reasoning_text = EXCLUDED.reasoning_text,
            terms          = EXCLUDED.terms,
            superseded_by  = EXCLUDED.superseded_by,
            cognee_data_id = EXCLUDED.cognee_data_id`,
     [
-      d.decisionId, d.installationId, d.sourceType, d.sourceUrl, d.title, d.outcome,
+      d.decisionId, d.installationId, d.repo, d.sourceType, d.sourceUrl, d.title, d.outcome,
       d.reasoningText, d.decidedAt || null, d.terms, d.supersededBy ?? null, d.cogneeDataId ?? null,
     ],
   );
 }
 
-// Link reversals: mark prior records referenced by a superseding decision (by issue/PR number).
-export async function markSuperseded(installationId: number, refs: string[], supersededBy: string): Promise<void> {
+// Link reversals: mark prior records (in the same repo) referenced by a superseding decision.
+export async function markSuperseded(
+  installationId: number,
+  repo: string,
+  refs: string[],
+  supersededBy: string,
+): Promise<void> {
   for (const ref of refs) {
     const num = ref.match(/\d+/)?.[0];
     if (!num) continue;
     await pool.query(
       `UPDATE decision_records SET superseded_by = $1
-       WHERE installation_id = $2 AND decision_id LIKE $3 AND decision_id <> $4`,
-      [supersededBy, installationId, `%-${num}`, supersededBy],
+       WHERE installation_id = $2 AND repo = $3 AND decision_id LIKE $4 AND decision_id <> $5`,
+      [supersededBy, installationId, repo, `%-${num}`, supersededBy],
     );
   }
 }
 
-export async function getDecisionRecords(installationId: number): Promise<DecisionRecord[]> {
-  const { rows } = await pool.query(`SELECT * FROM decision_records WHERE installation_id = $1`, [installationId]);
+export async function getDecisionRecords(installationId: number, repo: string): Promise<DecisionRecord[]> {
+  const { rows } = await pool.query(
+    `SELECT * FROM decision_records WHERE installation_id = $1 AND repo = $2`,
+    [installationId, repo],
+  );
   return rows.map((r) => ({
     decisionId: r.decision_id,
     installationId: Number(r.installation_id),
+    repo: r.repo ?? "",
     sourceType: r.source_type,
     sourceUrl: r.source_url,
     title: r.title,
@@ -268,25 +278,35 @@ export async function decisionFlaggedOnThread(
   return rows.length > 0;
 }
 
-// Supersede one exact decision id (precise — unlike markSuperseded's number-suffix match used at ingest).
-export async function setSuperseded(installationId: number, decisionId: string, supersededBy: string): Promise<void> {
+// Supersede one exact decision id in one repo (precise — unlike markSuperseded's number-suffix match).
+export async function setSuperseded(
+  installationId: number,
+  repo: string,
+  decisionId: string,
+  supersededBy: string,
+): Promise<void> {
   await pool.query(
     `UPDATE decision_records SET superseded_by = $1
-     WHERE installation_id = $2 AND decision_id = $3 AND decision_id <> $1`,
-    [supersededBy, installationId, decisionId],
+     WHERE installation_id = $2 AND repo = $3 AND decision_id = $4 AND decision_id <> $1`,
+    [supersededBy, installationId, repo, decisionId],
   );
 }
 
-export async function getDecisionRecord(installationId: number, decisionId: string): Promise<DecisionRecord | null> {
+export async function getDecisionRecord(
+  installationId: number,
+  repo: string,
+  decisionId: string,
+): Promise<DecisionRecord | null> {
   const { rows } = await pool.query(
-    `SELECT * FROM decision_records WHERE installation_id = $1 AND decision_id = $2`,
-    [installationId, decisionId],
+    `SELECT * FROM decision_records WHERE installation_id = $1 AND repo = $2 AND decision_id = $3`,
+    [installationId, repo, decisionId],
   );
   const r = rows[0];
   if (!r) return null;
   return {
     decisionId: r.decision_id,
     installationId: Number(r.installation_id),
+    repo: r.repo ?? "",
     sourceType: r.source_type,
     sourceUrl: r.source_url,
     title: r.title,

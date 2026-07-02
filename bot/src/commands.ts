@@ -91,7 +91,7 @@ export async function handleCommand(job: CommandJob, boss: PgBoss): Promise<void
         break;
       }
       const sourceUrl = `https://github.com/${job.repo}/${job.isPr ? "pull" : "issues"}/${job.number}`;
-      const newId = await overrideDecision(inst, creds, { citedRef: ref, reason: cmd.reason, by: job.sender, number: job.number, sourceUrl });
+      const newId = await overrideDecision(inst, creds, { repo: job.repo, citedRef: ref, reason: cmd.reason, by: job.sender, number: job.number, sourceUrl });
       await reply(`✅ Recorded **${newId}** superseding **${ref}** — CodeGuard will no longer flag this decision.`);
       break;
     }

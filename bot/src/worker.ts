@@ -36,11 +36,11 @@ async function ingestWorker(jobs: PgBoss.Job<IngestJob>[]): Promise<void> {
 
     if (data.number != null) {
       const it = await gh.fetchItem(data.installationId, data.repo, data.number);
-      await ingestItem(inst, cfg, creds, it);
+      await ingestItem(inst, cfg, creds, it, data.repo);
       continue;
     }
     const items = await gh.fetchClosedItems(data.installationId, data.repo, data.limit ?? 50);
-    for (const it of items) await ingestItem(inst, cfg, creds, it);
+    for (const it of items) await ingestItem(inst, cfg, creds, it, data.repo);
     console.log(`ingest done: ${data.repo} (${items.length} items scanned)`);
   }
 }
@@ -57,7 +57,7 @@ async function catchWorker(jobs: PgBoss.Job<CatchJob>[]): Promise<void> {
     if (data.kind === "issue") {
       const it = await gh.fetchItem(data.installationId, data.repo, data.number);
       const sessionId = `codeguard-issue-${data.installationId}-${data.number}`;
-      const judgment = await evaluatePr(inst, cfg, creds, `${it.title}\n\n${it.body}`, sessionId);
+      const judgment = await evaluatePr(inst, cfg, creds, `${it.title}\n\n${it.body}`, data.repo, sessionId);
       if (judgment.matches && judgment.decisionId && judgment.comment && cfg.autoComment) {
         await gh.postComment(data.installationId, data.repo, data.number, `⚠️ ${judgment.comment}`);
       }
@@ -102,8 +102,8 @@ async function catchWorker(jobs: PgBoss.Job<CatchJob>[]): Promise<void> {
 
     const prText = `${pr.title}\n\n${pr.body}\n\nFiles: ${pr.files.map((f) => f.path).join(", ")}`;
     const sessionId = `codeguard-pr-${data.installationId}-${data.number}`;
-    const judgment = await evaluatePr(inst, cfg, creds, prText, sessionId);
-    const decision = await buildDecision(inst, cfg, pr, judgment);
+    const judgment = await evaluatePr(inst, cfg, creds, prText, data.repo, sessionId);
+    const decision = await buildDecision(inst, cfg, data.repo, pr, judgment);
 
     if (cfg.autoComment) {
       refs = decision.findings.length ? await delivery.publish(ctx, refs, decision) : await delivery.clear(ctx, refs);

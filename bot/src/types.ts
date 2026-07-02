@@ -70,6 +70,7 @@ export interface TenantConfig {
 export interface DecisionRecord {
   decisionId: string;
   installationId: number;
+  repo: string; // repo-scoped: decision ids (PR-42) collide across repos in one installation
   sourceType: DecisionSource;
   sourceUrl: string;
   title: string;
