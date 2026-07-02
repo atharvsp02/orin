@@ -1,0 +1,21 @@
+{
+  "name": "codeguard-bot",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "CodeGuard GitHub App — webhook listener + async workers.",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "node --watch src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@octokit/app": "^15.1.0",
+    "pg-boss": "^10.1.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
+  }
+}
