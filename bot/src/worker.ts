@@ -5,6 +5,7 @@ import * as gh from "./github.js";
 import { ingestItem, evaluatePr } from "./pipeline.js";
 import { resolveDelivery, buildDecision } from "./delivery.js";
 import { handleCommand } from "./commands.js";
+import { runImprove } from "./lifecycle.js";
 import { QUEUE } from "./queues.js";
 import type { DeliveryRefs } from "./delivery.js";
 import type { TenantCredentials } from "./cognee.js";
@@ -17,9 +18,13 @@ export async function startQueue(): Promise<PgBoss> {
   await boss.createQueue(QUEUE.ingest);
   await boss.createQueue(QUEUE.catch);
   await boss.createQueue(QUEUE.command);
+  await boss.createQueue(QUEUE.lifecycle);
   await boss.work<IngestJob>(QUEUE.ingest, ingestWorker);
   await boss.work<CatchJob>(QUEUE.catch, catchWorker);
   await boss.work<CommandJob>(QUEUE.command, (jobs) => commandWorker(jobs, boss));
+  await boss.work(QUEUE.lifecycle, () => runImprove());
+  // Apply accumulated maintainer feedback to the graph once an hour (the /improve verb).
+  await boss.schedule(QUEUE.lifecycle, "0 * * * *");
   return boss;
 }
 

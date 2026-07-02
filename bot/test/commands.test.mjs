@@ -39,6 +39,12 @@ eq("re-scan (hyphen)", parseCommand("@codeguard re-scan"), { name: "rescan" });
 eq("rescan", parseCommand("@codeguard rescan"), { name: "rescan" });
 eq("no command", parseCommand("just a normal comment"), null);
 eq("case-insensitive", parseCommand("@CodeGuard WHY"), { name: "why" });
+eq("good", parseCommand("@codeguard good — nice catch"), { name: "good" });
+eq("bad", parseCommand("@codeguard bad, false positive"), { name: "bad" });
+eq("thumbs up emoji", parseCommand("@codeguard 👍"), { name: "good" });
+eq("thumbs down emoji", parseCommand("@codeguard 👎"), { name: "bad" });
+eq("forget", parseCommand("@codeguard forget"), { name: "forget" });
+eq("no partial-word match (overrides)", parseCommand("@codeguard overrides everything"), null);
 
 console.log(`\n=== commands.ts: ${pass} passed, ${fail} failed ===`);
 process.exit(fail ? 1 : 0);

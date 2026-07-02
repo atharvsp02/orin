@@ -10,6 +10,9 @@ import type { DecisionRecord, Installation, TenantConfig } from "./types.js";
 // Decision core — no GitHub I/O, so it is unit-testable in isolation.
 const cog = { baseUrl: config.cogneeBaseUrl };
 
+// Stable question stem recorded on every catch recall — the feedback path matches QAs by it.
+export const CATCH_QUESTION = "Does this pull request re-propose a past decision?";
+
 /** Extract a decision from one issue/PR thread and remember() it into the dataset. */
 export async function ingestItem(
   inst: Installation,
@@ -85,7 +88,7 @@ export async function evaluatePr(
 
   // Cited recall (chain-of-thought) from the knowledge graph as context for the judgment.
   // With a sessionId it goes through /recall, recording a QA entry so maintainer feedback can reweight it.
-  const query = `Does this pull request re-propose a past decision?\n${prText}`;
+  const query = `${CATCH_QUESTION}\n${prText}`;
   const recall = sessionId
     ? await cognee.recallWithSession(cog, creds, {
         datasetName: inst.datasetName,

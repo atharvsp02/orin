@@ -65,6 +65,12 @@ export async function initSchema(): Promise<void> {
       created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
       revoked_at      TIMESTAMPTZ
     );
+    CREATE TABLE IF NOT EXISTS feedback_pending (
+      installation_id BIGINT NOT NULL,
+      session_id      TEXT   NOT NULL,
+      created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (installation_id, session_id)
+    );
   `);
 }
 
@@ -344,4 +350,43 @@ export async function insertPreflightKey(keyHash: string, installationId: number
      ON CONFLICT (key_hash) DO NOTHING`,
     [keyHash, installationId, repo],
   );
+}
+
+// --- feedback lifecycle: sessions that got a 👍/👎 and are due for /improve ---
+
+export async function recordFeedbackPending(installationId: number, sessionId: string): Promise<void> {
+  await pool.query(
+    `INSERT INTO feedback_pending (installation_id, session_id) VALUES ($1, $2)
+     ON CONFLICT (installation_id, session_id) DO NOTHING`,
+    [installationId, sessionId],
+  );
+}
+
+// Atomically take everything pending (race-safe: DELETE … RETURNING), grouped per installation.
+export async function drainFeedbackPending(): Promise<Map<number, string[]>> {
+  const { rows } = await pool.query(`DELETE FROM feedback_pending RETURNING installation_id, session_id`);
+  const byInstall = new Map<number, string[]>();
+  for (const r of rows) {
+    const id = Number(r.installation_id);
+    (byInstall.get(id) ?? byInstall.set(id, []).get(id)!).push(r.session_id);
+  }
+  return byInstall;
+}
+
+export async function listInstallations(): Promise<Installation[]> {
+  const { rows } = await pool.query(`SELECT installation_id FROM installations`);
+  const out: Installation[] = [];
+  for (const r of rows) {
+    const inst = await getInstallation(Number(r.installation_id));
+    if (inst) out.push(inst);
+  }
+  return out;
+}
+
+// Full teardown on uninstall. installations delete cascades tenant_config/decision_records/preflight_keys;
+// deliveries + feedback_pending carry no FK, so clear them explicitly.
+export async function deleteInstallation(installationId: number): Promise<void> {
+  await pool.query(`DELETE FROM deliveries WHERE installation_id = $1`, [installationId]);
+  await pool.query(`DELETE FROM feedback_pending WHERE installation_id = $1`, [installationId]);
+  await pool.query(`DELETE FROM installations WHERE installation_id = $1`, [installationId]);
 }

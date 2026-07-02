@@ -2,6 +2,7 @@ import PgBoss from "pg-boss";
 import * as db from "./db.js";
 import { installationOctokit } from "./github.js";
 import { ask, overrideDecision } from "./pipeline.js";
+import { recordThreadFeedback, forgetTenant } from "./lifecycle.js";
 import { QUEUE } from "./queues.js";
 import type { CommandJob } from "./queues.js";
 import type { TenantCredentials } from "./cognee.js";
@@ -13,15 +14,19 @@ export type Command =
   | { name: "why" }
   | { name: "override"; ref?: string; reason: string }
   | { name: "ignore" }
-  | { name: "rescan" };
+  | { name: "rescan" }
+  | { name: "good" }
+  | { name: "bad" }
+  | { name: "forget" };
 
-const RE = /@codeguard\s+(recall|why|override|ignore|re-?scan)\b([^\n]*)/i;
+const RE = /@codeguard\s+(recall|why|override|ignore|re-?scan|good|bad|forget|👍|👎)(?![a-z0-9])([^\n]*)/i;
 
 /** Parse an `@codeguard <cmd> …` mention (pure — unit-tested). */
 export function parseCommand(body: string): Command | null {
   const m = body.match(RE);
   if (!m) return null;
-  const name = m[1].toLowerCase().replace("-", "");
+  const raw = m[1].toLowerCase().replace("-", "");
+  const name = raw === "👍" ? "good" : raw === "👎" ? "bad" : raw;
   const rest = (m[2] ?? "").trim();
   switch (name) {
     case "recall":
@@ -32,6 +37,12 @@ export function parseCommand(body: string): Command | null {
       return { name: "ignore" };
     case "rescan":
       return { name: "rescan" };
+    case "good":
+      return { name: "good" };
+    case "bad":
+      return { name: "bad" };
+    case "forget":
+      return { name: "forget" };
     case "override": {
       // @codeguard override [REF] "reason"   (REF like PR-42 optional; quotes optional)
       const quoted = rest.match(/^(\S+)?\s*"([^"]*)"/);
@@ -45,13 +56,22 @@ export function parseCommand(body: string): Command | null {
   }
 }
 
-async function canMutate(octokit: Gh, owner: string, repo: string, username: string): Promise<boolean> {
+async function permission(octokit: Gh, owner: string, repo: string, username: string): Promise<string | null> {
   try {
     const { data } = await octokit.rest.repos.getCollaboratorPermissionLevel({ owner, repo, username });
-    return data.permission === "admin" || data.permission === "write";
+    return data.permission;
   } catch {
-    return false;
+    return null;
   }
+}
+
+async function canMutate(octokit: Gh, owner: string, repo: string, username: string): Promise<boolean> {
+  const p = await permission(octokit, owner, repo, username);
+  return p === "admin" || p === "write";
+}
+
+async function isAdmin(octokit: Gh, owner: string, repo: string, username: string): Promise<boolean> {
+  return (await permission(octokit, owner, repo, username)) === "admin";
 }
 
 export async function handleCommand(job: CommandJob, boss: PgBoss): Promise<void> {
@@ -112,6 +132,32 @@ export async function handleCommand(job: CommandJob, boss: PgBoss): Promise<void
         number: job.number,
       });
       await reply("🔄 Re-scanning this against recorded decisions…");
+      break;
+    }
+    case "good":
+    case "bad": {
+      // Maintainer feedback reweights the exact graph nodes that produced the verdict.
+      if (!(await canMutate(octokit, owner, repo, job.sender))) {
+        await reply(`@${job.sender} — feedback (\`good\`/\`bad\`) needs write access.`);
+        break;
+      }
+      const score = cmd.name === "good" ? 5 : 1;
+      const ok = await recordThreadFeedback(inst, job.repo, job.number, score);
+      await reply(
+        ok
+          ? `📝 Thanks — recorded this as a **${cmd.name === "good" ? "good" : "bad"}** call. CodeGuard will reweight its memory.`
+          : "Nothing to score here — CodeGuard hasn't flagged a decision on this thread.",
+      );
+      break;
+    }
+    case "forget": {
+      // Destructive: prunes the whole tenant decision graph. Admin-only.
+      if (!(await isAdmin(octokit, owner, repo, job.sender))) {
+        await reply(`@${job.sender} — \`forget\` prunes all of CodeGuard's memory and needs **admin** access.`);
+        break;
+      }
+      await forgetTenant(inst);
+      await reply("🧹 Pruned CodeGuard's decision memory for this account.");
       break;
     }
   }

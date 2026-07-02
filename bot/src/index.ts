@@ -8,6 +8,7 @@ import * as cognee from "./cognee.js";
 import { startQueue } from "./worker.js";
 import { QUEUE } from "./queues.js";
 import { handlePreflight, handleIssueKey } from "./preflight.js";
+import { forgetTenant } from "./lifecycle.js";
 
 async function main() {
   await db.initSchema();
@@ -31,6 +32,14 @@ async function main() {
     for (const r of payload.repositories ?? []) {
       await boss.send(QUEUE.ingest, { installationId, repo: r.full_name });
     }
+  });
+
+  // Uninstall -> forget() the tenant's whole graph, then tear down local rows (the live forget verb).
+  app.webhooks.on("installation.deleted", async ({ payload }) => {
+    const installationId = payload.installation.id;
+    const inst = await db.getInstallation(installationId);
+    if (inst) await forgetTenant(inst).catch((e) => console.warn("forget failed:", e));
+    await db.deleteInstallation(installationId);
   });
 
   // New/updated PR (incl. draft) -> catch pipeline (async). Ack is fast; heavy work runs on the queue.

@@ -1,5 +1,5 @@
 // Queue names + job payloads, shared by the webhook entry point, the worker, and command handling.
-export const QUEUE = { ingest: "ingest", catch: "catch", command: "command" } as const;
+export const QUEUE = { ingest: "ingest", catch: "catch", command: "command", lifecycle: "lifecycle" } as const;
 
 export interface IngestJob {
   installationId: number;
