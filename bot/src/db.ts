@@ -71,6 +71,13 @@ export async function initSchema(): Promise<void> {
       created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
       PRIMARY KEY (installation_id, session_id)
     );
+    CREATE TABLE IF NOT EXISTS tenant_links (
+      platform        TEXT   NOT NULL,
+      external_id     TEXT   NOT NULL,
+      installation_id BIGINT NOT NULL REFERENCES installations(installation_id) ON DELETE CASCADE,
+      created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (platform, external_id)
+    );
   `);
 }
 
@@ -158,10 +165,13 @@ export async function markSuperseded(
   }
 }
 
-export async function getDecisionRecords(installationId: number, repo: string): Promise<DecisionRecord[]> {
+// repo omitted ⇒ installation-wide (used by the platform-neutral adapters, which have no repo).
+export async function getDecisionRecords(installationId: number, repo?: string): Promise<DecisionRecord[]> {
   const { rows } = await pool.query(
-    `SELECT * FROM decision_records WHERE installation_id = $1 AND repo = $2`,
-    [installationId, repo],
+    repo === undefined
+      ? `SELECT * FROM decision_records WHERE installation_id = $1`
+      : `SELECT * FROM decision_records WHERE installation_id = $1 AND repo = $2`,
+    repo === undefined ? [installationId] : [installationId, repo],
   );
   return rows.map((r) => ({
     decisionId: r.decision_id,
@@ -342,6 +352,24 @@ export async function lookupPreflightKey(keyHash: string): Promise<{ installatio
   const r = rows[0];
   if (!r) return null;
   return { installationId: Number(r.installation_id), repo: r.repo };
+}
+
+// --- tenant links: map a Slack team / Linear workspace to an existing (GitHub) installation ---
+
+export async function linkTenant(platform: string, externalId: string, installationId: number): Promise<void> {
+  await pool.query(
+    `INSERT INTO tenant_links (platform, external_id, installation_id) VALUES ($1, $2, $3)
+     ON CONFLICT (platform, external_id) DO UPDATE SET installation_id = EXCLUDED.installation_id`,
+    [platform, externalId, installationId],
+  );
+}
+
+export async function resolveLink(platform: string, externalId: string): Promise<number | null> {
+  const { rows } = await pool.query(
+    `SELECT installation_id FROM tenant_links WHERE platform = $1 AND external_id = $2`,
+    [platform, externalId],
+  );
+  return rows[0] ? Number(rows[0].installation_id) : null;
 }
 
 export async function insertPreflightKey(keyHash: string, installationId: number, repo: string): Promise<void> {

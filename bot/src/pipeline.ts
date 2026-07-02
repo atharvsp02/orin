@@ -61,7 +61,7 @@ export async function evaluatePr(
   cfg: TenantConfig,
   creds: TenantCredentials,
   prText: string,
-  repo: string,
+  repo?: string, // omitted ⇒ evaluate against the whole installation (platform-neutral adapters)
   sessionId?: string,
 ): Promise<Judgment> {
   const records = await db.getDecisionRecords(inst.installationId, repo);
