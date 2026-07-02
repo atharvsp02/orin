@@ -1,6 +1,5 @@
 // Platform-neutral tenant resolution. GitHub short-circuits to its numeric installation id
 // (zero migration); Slack/Linear resolve through tenant_links, with a dev/demo fallback.
-import { config } from "./config.js";
 import * as db from "./db.js";
 import type { Installation, TenantConfig } from "./types.js";
 import type { TenantCredentials } from "./cognee.js";
@@ -19,13 +18,13 @@ export interface Tenant {
   inst: Installation;
 }
 
-/** Resolve a platform reference to the tenant bundle (installation + creds + config), or null. */
+/** Resolve a platform reference to the tenant bundle (installation + creds + config), or null.
+ *  Non-GitHub platforms MUST have an explicit tenant_links row — there is deliberately no silent
+ *  default fallback here, so an unlinked Slack/Linear workspace can never read or poison another
+ *  tenant's memory. (Local single-tenant setups insert one link row; MCP passes a GitHub ref directly.) */
 export async function resolveTenant(ref: TenantRef): Promise<Tenant | null> {
-  let installationId: number | null =
+  const installationId: number | null =
     ref.platform === "github" ? Number(ref.externalId) : await db.resolveLink(ref.platform, ref.externalId);
-  if ((installationId == null || Number.isNaN(installationId)) && config.defaultInstallationId != null) {
-    installationId = config.defaultInstallationId;
-  }
   if (installationId == null || Number.isNaN(installationId)) return null;
 
   const inst = await db.getInstallation(installationId);

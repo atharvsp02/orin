@@ -80,7 +80,7 @@ export async function initSchema(): Promise<void> {
     );
     CREATE TABLE IF NOT EXISTS slack_installs (
       id         TEXT PRIMARY KEY,   -- team id (or enterprise id for org installs)
-      data       JSONB NOT NULL,
+      data       TEXT NOT NULL,      -- AES-256-GCM ciphertext (holds OAuth bot tokens)
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
   `);
@@ -377,18 +377,19 @@ export async function resolveLink(platform: string, externalId: string): Promise
   return rows[0] ? Number(rows[0].installation_id) : null;
 }
 
-// Slack OAuth installation store (Bolt InstallationStore backing).
+// Slack OAuth installation store (Bolt InstallationStore backing). The install object holds bot
+// tokens (xoxb-…), so it is encrypted at rest with the same AES-256-GCM key as the Cognee keys.
 export async function storeSlackInstall(id: string, data: unknown): Promise<void> {
   await pool.query(
     `INSERT INTO slack_installs (id, data) VALUES ($1, $2)
      ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`,
-    [id, JSON.stringify(data)],
+    [id, encrypt(JSON.stringify(data))],
   );
 }
 
 export async function fetchSlackInstall(id: string): Promise<unknown | null> {
   const { rows } = await pool.query(`SELECT data FROM slack_installs WHERE id = $1`, [id]);
-  return rows[0]?.data ?? null;
+  return rows[0] ? JSON.parse(decrypt(rows[0].data)) : null;
 }
 
 export async function deleteSlackInstall(id: string): Promise<void> {

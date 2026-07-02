@@ -42,7 +42,7 @@ function buildApp(): InstanceType<typeof App> {
     signingSecret: reqEnv("SLACK_SIGNING_SECRET"),
     clientId: reqEnv("SLACK_CLIENT_ID"),
     clientSecret: reqEnv("SLACK_CLIENT_SECRET"),
-    stateSecret: process.env.SLACK_STATE_SECRET ?? "codeguard",
+    stateSecret: reqEnv("SLACK_STATE_SECRET"), // signs the OAuth state param — must not be a known default (CSRF)
     scopes: ["commands", "chat:write", "reactions:read", "channels:history", "app_mentions:read"],
     installationStore,
   });
