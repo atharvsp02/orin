@@ -1,0 +1,15 @@
+services:
+  cognee:
+    image: cognee/cognee:1.2.2
+    container_name: codeguard-cognee
+    # Bind to localhost only — expose to the bot/dashboard via a Cloudflare Tunnel,
+    # never directly to the internet (the /auth/register endpoint is public).
+    ports:
+      - "127.0.0.1:8000:8000"
+    env_file: .env
+    volumes:
+      - cognee-data:/data # persist file-based Kuzu / LanceDB / SQLite
+    restart: unless-stopped
+
+volumes:
+  cognee-data:
