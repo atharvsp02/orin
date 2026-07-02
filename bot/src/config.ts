@@ -12,6 +12,7 @@ export const config = {
   port: Number(process.env.PORT ?? 3000),
   databaseUrl: required("DATABASE_URL"),
   cogneeBaseUrl: process.env.COGNEE_BASE_URL ?? "http://127.0.0.1:8000",
+  secret: required("CODEGUARD_SECRET"), // encrypts stored per-tenant Cognee API keys
   github: {
     appId: required("GITHUB_APP_ID"),
     privateKey: required("GITHUB_PRIVATE_KEY"),

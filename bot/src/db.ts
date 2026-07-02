@@ -1,5 +1,6 @@
 import { Pool } from "pg";
 import { config } from "./config.js";
+import { decrypt, encrypt } from "./crypto.js";
 import type { DecisionRecord, Installation, TenantConfig } from "./types.js";
 
 const pool = new Pool({ connectionString: config.databaseUrl });
@@ -62,7 +63,7 @@ export async function upsertInstallation(i: {
        SET github_account = EXCLUDED.github_account,
            dataset_name   = EXCLUDED.dataset_name,
            cognee_api_key = EXCLUDED.cognee_api_key`,
-    [i.installationId, i.githubAccount, i.datasetName, i.cogneeApiKey],
+    [i.installationId, i.githubAccount, i.datasetName, encrypt(i.cogneeApiKey)],
   );
   await pool.query(`INSERT INTO tenant_config (installation_id) VALUES ($1) ON CONFLICT DO NOTHING`, [i.installationId]);
 }
@@ -75,7 +76,7 @@ export async function getInstallation(installationId: number): Promise<Installat
     installationId: Number(r.installation_id),
     githubAccount: r.github_account,
     datasetName: r.dataset_name,
-    cogneeApiKey: r.cognee_api_key,
+    cogneeApiKey: decrypt(r.cognee_api_key),
     createdAt: String(r.created_at),
   };
 }
@@ -111,6 +112,19 @@ export async function upsertDecisionRecord(d: DecisionRecord): Promise<void> {
       d.reasoningText, d.decidedAt || null, d.terms, d.supersededBy ?? null, d.cogneeDataId ?? null,
     ],
   );
+}
+
+// Link reversals: mark prior records referenced by a superseding decision (by issue/PR number).
+export async function markSuperseded(installationId: number, refs: string[], supersededBy: string): Promise<void> {
+  for (const ref of refs) {
+    const num = ref.match(/\d+/)?.[0];
+    if (!num) continue;
+    await pool.query(
+      `UPDATE decision_records SET superseded_by = $1
+       WHERE installation_id = $2 AND decision_id LIKE $3 AND decision_id <> $4`,
+      [supersededBy, installationId, `%-${num}`, supersededBy],
+    );
+  }
 }
 
 export async function getDecisionRecords(installationId: number): Promise<DecisionRecord[]> {

@@ -32,8 +32,23 @@ export async function fetchClosedItems(installationId: number, repoFullName: str
     per_page: 100,
   });
 
+  // Signal-rich first: PRs, not_planned, wontfix/duplicate, and threads with discussion.
+  const ranked = issues
+    .map((it) => {
+      let score = 0;
+      if (it.pull_request) score += 2;
+      if (it.state_reason === "not_planned") score += 2;
+      if ((it.comments ?? 0) > 0) score += 1;
+      const labels = it.labels.map((l) => (typeof l === "string" ? l : (l.name ?? ""))).join(" ").toLowerCase();
+      if (/wontfix|duplicate|invalid|declined/.test(labels)) score += 1;
+      return { it, score };
+    })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map((s) => s.it);
+
   const items: RepoItem[] = [];
-  for (const it of issues.slice(0, limit)) {
+  for (const it of ranked) {
     const comments = await octokit.paginate(octokit.rest.issues.listComments, {
       owner,
       repo,

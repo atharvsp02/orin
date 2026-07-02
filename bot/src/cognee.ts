@@ -102,6 +102,41 @@ export async function search(
   );
 }
 
+export interface ScoredChunk {
+  score: number; // cosine distance, lower = closer
+  documentName: string;
+  documentId: string;
+  text: string;
+}
+
+/** CHUNKS + verbose search that surfaces per-chunk relevance scores and citation payloads. */
+export async function searchChunksScored(
+  cfg: CogneeConfig,
+  creds: TenantCredentials,
+  opts: { datasetName: string; query: string; topK?: number },
+): Promise<ScoredChunk[]> {
+  const res = await search(cfg, creds, {
+    datasetName: opts.datasetName,
+    query: opts.query,
+    searchType: "CHUNKS",
+    verbose: true,
+    topK: opts.topK ?? 5,
+  });
+  const arr = res as Array<{
+    objects_result?: Array<{
+      score?: number;
+      payload?: { document_name?: string; document_id?: string; text?: string };
+    }>;
+  }>;
+  const objs = Array.isArray(arr) ? (arr[0]?.objects_result ?? []) : [];
+  return objs.map((o) => ({
+    score: o.score ?? 1,
+    documentName: o.payload?.document_name ?? "",
+    documentId: o.payload?.document_id ?? "",
+    text: o.payload?.text ?? "",
+  }));
+}
+
 /** Prune a dataset (the live `forget()` demo). */
 export async function forget(cfg: CogneeConfig, creds: TenantCredentials, datasetName: string): Promise<unknown> {
   return asJson(

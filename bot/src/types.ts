@@ -1,4 +1,4 @@
-export type DecisionOutcome = "merged" | "rejected" | "reverted";
+export type DecisionOutcome = "accepted" | "rejected" | "reverted";
 export type DecisionSource = "pr" | "issue" | "doc";
 
 export interface Installation {

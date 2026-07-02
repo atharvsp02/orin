@@ -11,9 +11,9 @@ const registry = createProviderRegistry({ google, openai, deepseek });
 type ModelId = `google:${string}` | `openai:${string}` | `deepseek:${string}`;
 
 const DEFAULT_MODEL: Record<string, ModelId> = {
-  google: "google:gemini-2.5-flash",
-  openai: "openai:gpt-4o-mini",
-  deepseek: "deepseek:deepseek-chat",
+  google: `google:${process.env.CODEGUARD_GOOGLE_MODEL ?? "gemini-2.5-flash"}`,
+  openai: `openai:${process.env.CODEGUARD_OPENAI_MODEL ?? "gpt-4o-mini"}`,
+  deepseek: `deepseek:${process.env.CODEGUARD_DEEPSEEK_MODEL ?? "deepseek-chat"}`,
 };
 
 function model(provider: string) {
@@ -23,9 +23,12 @@ function model(provider: string) {
 const decisionSchema = z.object({
   isDecision: z.boolean().describe("true only if this thread records a real maintainer decision or rejection"),
   title: z.string(),
-  outcome: z.enum(["merged", "rejected", "reverted"]),
+  outcome: z.enum(["accepted", "rejected", "reverted"]),
   reasoning: z.string().describe("why the decision was made, one or two sentences"),
   terms: z.array(z.string()).describe("key nouns: dependencies, file paths, tools, labels"),
+  supersedesRefs: z
+    .array(z.string())
+    .describe("references to prior issues/PRs this decision reverses or supersedes, e.g. '#42', 'DR-11'; empty if none"),
 });
 
 export type ExtractedDecision = z.infer<typeof decisionSchema>;
