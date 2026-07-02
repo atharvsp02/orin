@@ -9,7 +9,7 @@
     "start": "node dist/index.js",
     "dev": "node --watch src/index.ts",
     "typecheck": "tsc --noEmit",
-    "test": "tsc && node test/patch.test.mjs && node test/commands.test.mjs"
+    "test": "tsc && node test/patch.test.mjs && node test/commands.test.mjs && node test/pipeline.test.mjs"
   },
   "dependencies": {
     "@ai-sdk/deepseek": "^3.0.3",

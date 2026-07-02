@@ -79,8 +79,10 @@ export async function evaluatePr(
   const byData = new Map(active.filter((r) => r.cogneeDataId).map((r) => [r.cogneeDataId as string, r]));
   const chunks = await cognee.searchChunksScored(cog, creds, { datasetName: inst.datasetName, query: prText, topK: 5 });
   for (const c of chunks) {
-    if (c.score > cfg.scoreCutoff) continue;
     const r = byData.get(c.documentId) ?? byId.get(c.documentName) ?? byId.get(c.documentName.toUpperCase());
+    // Bounded recency penalty: only nudges fuzzy matches near the cutoff (max +0.015 distance).
+    const penalty = r ? (1 - recencyWeight(r.decidedAt)) * 0.1 : 0;
+    if (c.score + penalty > cfg.scoreCutoff) continue;
     if (r) candidates.set(r.decisionId, r);
   }
 
@@ -116,6 +118,25 @@ export async function evaluatePr(
     })),
     firstAnswer(recall),
     cfg.customInstructions,
+  );
+}
+
+// Gentle recency preference. Cognee's retriever has no decay, so we keep it here — but BOUNDED
+// (never below FLOOR) so an old-but-exactly-re-proposed decision is still caught. Returns [FLOOR, 1].
+const DECAY_FLOOR = 0.85;
+const DECAY_HALFLIFE_DAYS = 540; // ~18 months
+export function recencyWeight(decidedAt: string, nowMs: number = Date.now()): number {
+  const t = Date.parse(decidedAt);
+  if (Number.isNaN(t)) return 1;
+  const ageDays = Math.max(0, (nowMs - t) / 86_400_000);
+  const w = Math.pow(0.5, ageDays / DECAY_HALFLIFE_DAYS);
+  return DECAY_FLOOR + (1 - DECAY_FLOOR) * w;
+}
+
+// Heuristic: does this question ask about a time window? (routes `ask` to TEMPORAL search).
+export function isTemporalQuery(q: string): boolean {
+  return /\b(q[1-4]|quarter|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|20\d\d|last (week|month|year|quarter)|since|before|after|between|recently|when did)\b/i.test(
+    q,
   );
 }
 
@@ -202,12 +223,13 @@ export async function matchRules(
   return rules.filter((r) => grounded(prText, r, Math.max(2, cfg.confidenceThreshold)));
 }
 
-/** Cited recall over the tenant's decision graph (for `@codeguard recall|why`). */
+/** Cited recall over the tenant's decision graph (for `@codeguard recall|why`).
+ *  Date-scoped questions ("what did we reject in Q1?") route to the TEMPORAL retriever. */
 export async function ask(inst: Installation, creds: TenantCredentials, query: string): Promise<string> {
   const res = await cognee.search(cog, creds, {
     datasetName: inst.datasetName,
     query,
-    searchType: "GRAPH_COMPLETION",
+    searchType: isTemporalQuery(query) ? "TEMPORAL" : "GRAPH_COMPLETION",
     includeReferences: true,
   });
   return firstAnswer(res);
