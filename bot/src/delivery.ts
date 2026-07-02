@@ -30,12 +30,15 @@ export interface Delivery {
 
 const CHECK_NAME = "CodeGuard"; // the required-status-check "context"
 
-function output(findings: Finding[]) {
+function output(findings: Finding[], notes?: string[]) {
   const f = findings[0];
+  const rules = notes?.length ? `\n\n---\n\n**Related coding rules**\n${notes.map((n) => `- ${n}`).join("\n")}` : "";
   return {
     title: f ? `Re-proposes ${f.decisionId} (${f.outcome})` : "No decision conflict",
     summary: f ? (f.summaryMd.split("\n")[0] ?? "") : "No re-proposal of a rejected decision found.",
-    text: findings.map((x) => `### ${x.decisionId} — ${x.title}\n\n${x.summaryMd}\n\nSource: ${x.sourceUrl}`).join("\n\n---\n\n"),
+    text:
+      findings.map((x) => `### ${x.decisionId} — ${x.title}\n\n${x.summaryMd}\n\nSource: ${x.sourceUrl}`).join("\n\n---\n\n") +
+      rules,
   };
 }
 
@@ -73,7 +76,7 @@ const checkDelivery: Delivery = {
   },
   async publish(ctx, prior, d) {
     const id = prior?.checkRunId ?? (await openCheck(ctx));
-    const o = output(d.findings);
+    const o = output(d.findings, d.notes);
     await ctx.octokit.rest.checks.update({
       owner: ctx.owner,
       repo: ctx.repo,
@@ -147,7 +150,7 @@ const commentDelivery: Delivery = {
     return { mode: "comment" };
   },
   async publish(ctx, prior, d) {
-    const body = output(d.findings).text;
+    const body = output(d.findings, d.notes).text;
     if (prior?.commentId) {
       await ctx.octokit.rest.issues.updateComment({ owner: ctx.owner, repo: ctx.repo, comment_id: prior.commentId, body });
       return { mode: "comment", commentId: prior.commentId };
@@ -176,6 +179,7 @@ export async function buildDecision(
   repo: string,
   pr: PrSnapshot,
   judgment: Judgment,
+  rules: string[] = [],
 ): Promise<DeliveryDecision> {
   if (!judgment.matches || !judgment.decisionId) return { blocking: false, findings: [] };
   const rec = await db.getDecisionRecord(inst.installationId, repo, judgment.decisionId);
@@ -188,6 +192,7 @@ export async function buildDecision(
     : null;
   return {
     blocking,
+    notes: rules.length ? rules : undefined,
     findings: [
       {
         decisionId: judgment.decisionId,

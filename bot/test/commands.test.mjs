@@ -44,6 +44,8 @@ eq("bad", parseCommand("@codeguard bad, false positive"), { name: "bad" });
 eq("thumbs up emoji", parseCommand("@codeguard 👍"), { name: "good" });
 eq("thumbs down emoji", parseCommand("@codeguard 👎"), { name: "bad" });
 eq("forget", parseCommand("@codeguard forget"), { name: "forget" });
+eq("rules (list)", parseCommand("@codeguard rules"), { name: "rules" });
+eq("rule (seed)", parseCommand("@codeguard rule Do not add new deps"), { name: "rule", text: "Do not add new deps" });
 eq("no partial-word match (overrides)", parseCommand("@codeguard overrides everything"), null);
 
 console.log(`\n=== commands.ts: ${pass} passed, ${fail} failed ===`);

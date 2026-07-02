@@ -164,6 +164,44 @@ export async function improveTenant(creds: TenantCredentials, datasetName: strin
   await cognee.improve(cog, creds, { datasetName, sessionIds });
 }
 
+// --- coding rules: CODING_RULES enforcement (REST-native) + seeding via node_set ---
+
+const RULES_NODESET = "coding_agent_rules";
+
+/** Mine rules from freeform text and seed them into the graph under the coding-rules nodeset. */
+export async function seedRules(
+  inst: Installation,
+  cfg: TenantConfig,
+  creds: TenantCredentials,
+  text: string,
+): Promise<string[]> {
+  const rules = await llm.extractRules(cfg.llmProvider, text);
+  if (rules.length === 0) return [];
+  await cognee.remember(cog, creds, {
+    datasetName: inst.datasetName,
+    filename: "coding-rules.txt",
+    content: rules.map((r) => `- ${r}`).join("\n"),
+    nodeSet: RULES_NODESET,
+  });
+  return rules;
+}
+
+/** List the repo's coding rules (deterministic CODING_RULES search — no LLM). */
+export async function listRules(inst: Installation, creds: TenantCredentials): Promise<string[]> {
+  return cognee.searchCodingRules(cog, creds, { datasetName: inst.datasetName, nodeset: RULES_NODESET });
+}
+
+/** Which seeded rules does this PR text plausibly touch (grounding gate; advisory, non-blocking). */
+export async function matchRules(
+  inst: Installation,
+  cfg: TenantConfig,
+  creds: TenantCredentials,
+  prText: string,
+): Promise<string[]> {
+  const rules = await listRules(inst, creds);
+  return rules.filter((r) => grounded(prText, r, Math.max(2, cfg.confidenceThreshold)));
+}
+
 /** Cited recall over the tenant's decision graph (for `@codeguard recall|why`). */
 export async function ask(inst: Installation, creds: TenantCredentials, query: string): Promise<string> {
   const res = await cognee.search(cog, creds, {

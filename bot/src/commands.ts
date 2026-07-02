@@ -1,7 +1,7 @@
 import PgBoss from "pg-boss";
 import * as db from "./db.js";
 import { installationOctokit } from "./github.js";
-import { ask, overrideDecision } from "./pipeline.js";
+import { ask, overrideDecision, seedRules, listRules } from "./pipeline.js";
 import { recordThreadFeedback, forgetTenant } from "./lifecycle.js";
 import { QUEUE } from "./queues.js";
 import type { CommandJob } from "./queues.js";
@@ -17,9 +17,11 @@ export type Command =
   | { name: "rescan" }
   | { name: "good" }
   | { name: "bad" }
-  | { name: "forget" };
+  | { name: "forget" }
+  | { name: "rules" }
+  | { name: "rule"; text: string };
 
-const RE = /@codeguard\s+(recall|why|override|ignore|re-?scan|good|bad|forget|👍|👎)(?![a-z0-9])([^\n]*)/i;
+const RE = /@codeguard\s+(recall|why|override|ignore|re-?scan|good|bad|forget|rules|rule|👍|👎)(?![a-z0-9])([^\n]*)/i;
 
 /** Parse an `@codeguard <cmd> …` mention (pure — unit-tested). */
 export function parseCommand(body: string): Command | null {
@@ -43,6 +45,10 @@ export function parseCommand(body: string): Command | null {
       return { name: "bad" };
     case "forget":
       return { name: "forget" };
+    case "rules":
+      return { name: "rules" };
+    case "rule":
+      return { name: "rule", text: rest };
     case "override": {
       // @codeguard override [REF] "reason"   (REF like PR-42 optional; quotes optional)
       const quoted = rest.match(/^(\S+)?\s*"([^"]*)"/);
@@ -158,6 +164,25 @@ export async function handleCommand(job: CommandJob, boss: PgBoss): Promise<void
       }
       await forgetTenant(inst);
       await reply("🧹 Pruned CodeGuard's decision memory for this account.");
+      break;
+    }
+    case "rules": {
+      const rules = await listRules(inst, creds);
+      await reply(rules.length ? `**Coding rules CodeGuard tracks:**\n${rules.map((r) => `- ${r}`).join("\n")}` : "No coding rules recorded yet — add one with `@codeguard rule <text>`.");
+      break;
+    }
+    case "rule": {
+      if (!(await canMutate(octokit, owner, repo, job.sender))) {
+        await reply(`@${job.sender} — adding a \`rule\` needs write access.`);
+        break;
+      }
+      if (!cmd.text.trim()) {
+        await reply("Usage: `@codeguard rule <the rule text>`");
+        break;
+      }
+      const cfg = await db.getTenantConfig(job.installationId);
+      const seeded = await seedRules(inst, cfg, creds, cmd.text);
+      await reply(seeded.length ? `📏 Recorded ${seeded.length} rule(s):\n${seeded.map((r) => `- ${r}`).join("\n")}` : "Couldn't extract a concrete rule from that — try phrasing it as a constraint.");
       break;
     }
   }

@@ -44,6 +44,7 @@ export interface Finding {
 export interface DeliveryDecision {
   blocking: boolean; // → check conclusion failure vs neutral
   findings: Finding[]; // empty ⇒ clean ⇒ conclusion success
+  notes?: string[]; // advisory coding-rule hints, appended to the finding text (never blocking)
 }
 
 export interface Installation {

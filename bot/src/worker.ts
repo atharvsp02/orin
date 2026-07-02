@@ -2,7 +2,7 @@ import PgBoss from "pg-boss";
 import { config } from "./config.js";
 import * as db from "./db.js";
 import * as gh from "./github.js";
-import { ingestItem, evaluatePr } from "./pipeline.js";
+import { ingestItem, evaluatePr, matchRules } from "./pipeline.js";
 import { resolveDelivery, buildDecision } from "./delivery.js";
 import { handleCommand } from "./commands.js";
 import { runImprove } from "./lifecycle.js";
@@ -108,7 +108,9 @@ async function catchWorker(jobs: PgBoss.Job<CatchJob>[]): Promise<void> {
     const prText = `${pr.title}\n\n${pr.body}\n\nFiles: ${pr.files.map((f) => f.path).join(", ")}`;
     const sessionId = `codeguard-pr-${data.installationId}-${data.number}`;
     const judgment = await evaluatePr(inst, cfg, creds, prText, data.repo, sessionId);
-    const decision = await buildDecision(inst, cfg, data.repo, pr, judgment);
+    // Advisory coding-rule hints only enrich an existing re-proposal finding (kept out of the blocking gate).
+    const rules = judgment.matches ? await matchRules(inst, cfg, creds, prText) : [];
+    const decision = await buildDecision(inst, cfg, data.repo, pr, judgment, rules);
 
     if (cfg.autoComment) {
       refs = decision.findings.length ? await delivery.publish(ctx, refs, decision) : await delivery.clear(ctx, refs);

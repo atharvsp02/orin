@@ -48,6 +48,26 @@ export async function extractDecision(provider: string, thread: string): Promise
   return object;
 }
 
+const rulesSchema = z.object({
+  rules: z
+    .array(z.string())
+    .describe("atomic, imperative coding/contribution rules, one constraint each; [] if the text states none"),
+});
+
+/** Mine atomic coding rules from freeform guideline text (CONTRIBUTING, a decision, a maintainer note). */
+export async function extractRules(provider: string, text: string): Promise<string[]> {
+  const { object } = await generateObject({
+    model: model(provider),
+    schema: rulesSchema,
+    maxOutputTokens: 2048,
+    prompt:
+      `Extract the concrete coding/contribution rules stated in the text below as short imperative sentences ` +
+      `(e.g. "Do not add new runtime dependencies without maintainer approval"). ` +
+      `Only include real constraints; return an empty list if there are none.\n\n${text}`,
+  });
+  return object.rules.map((r) => r.trim()).filter(Boolean);
+}
+
 const judgmentSchema = z.object({
   matches: z.boolean(),
   decisionId: z.string().nullable().describe("the decision_id this PR re-proposes, or null"),
