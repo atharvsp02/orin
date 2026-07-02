@@ -7,6 +7,7 @@ import * as db from "./db.js";
 import * as cognee from "./cognee.js";
 import { startQueue } from "./worker.js";
 import { QUEUE } from "./queues.js";
+import { handlePreflight, handleIssueKey } from "./preflight.js";
 
 async function main() {
   await db.initSchema();
@@ -89,9 +90,18 @@ async function main() {
     });
   });
 
-  createServer(createNodeMiddleware(app)).listen(config.port, () =>
-    console.log(`CodeGuard bot listening on :${config.port}`),
-  );
+  const middleware = createNodeMiddleware(app);
+  createServer((req, res) => {
+    if (req.method === "POST" && req.url === "/v1/preflight") {
+      void handlePreflight(req, res);
+      return;
+    }
+    if (req.method === "POST" && req.url === "/v1/preflight-keys") {
+      void handleIssueKey(req, res);
+      return;
+    }
+    void middleware(req, res);
+  }).listen(config.port, () => console.log(`CodeGuard bot listening on :${config.port}`));
 }
 
 main().catch((err) => {

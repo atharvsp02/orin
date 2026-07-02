@@ -1,0 +1,31 @@
+name: CodeGuard Preflight
+description: Check a PR against your repo's recorded decisions before requesting review.
+inputs:
+  token:
+    description: CodeGuard repo-scoped preflight key (cg_…)
+    required: true
+  endpoint:
+    description: CodeGuard preflight endpoint URL
+    required: false
+    default: https://codeguard.example/v1/preflight
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        CG_TOKEN: ${{ inputs.token }}
+        CG_ENDPOINT: ${{ inputs.endpoint }}
+        PR_TITLE: ${{ github.event.pull_request.title }}
+        BASE_REF: ${{ github.base_ref }}
+      run: |
+        set -euo pipefail
+        BASE="origin/${BASE_REF:-${{ github.event.repository.default_branch }}}"
+        DIFF="$(git diff --unified=0 "$BASE...HEAD" || true)"
+        BODY="$(jq -nc --arg t "$PR_TITLE" --arg d "$DIFF" '{title:$t, diff:$d}')"
+        RESP="$(curl -sS -X POST "$CG_ENDPOINT" \
+          -H "Authorization: Bearer $CG_TOKEN" -H "Content-Type: application/json" -d "$BODY")"
+        echo "$RESP" | jq .
+        if [ "$(echo "$RESP" | jq -r '.blocking // false')" = "true" ]; then
+          echo "::error::CodeGuard: this re-proposes a rejected decision ($(echo "$RESP" | jq -r '.decisionId // "?"'))"
+          exit 1
+        fi

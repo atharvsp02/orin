@@ -13,6 +13,7 @@ export const config = {
   databaseUrl: required("DATABASE_URL"),
   cogneeBaseUrl: process.env.COGNEE_BASE_URL ?? "http://127.0.0.1:8000",
   secret: required("CODEGUARD_SECRET"), // encrypts stored per-tenant Cognee API keys
+  adminToken: process.env.ADMIN_TOKEN, // optional: gates preflight-key issuance until the dashboard exists
   github: {
     appId: required("GITHUB_APP_ID"),
     privateKey: required("GITHUB_PRIVATE_KEY"),

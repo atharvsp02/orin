@@ -58,6 +58,13 @@ export async function initSchema(): Promise<void> {
       updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
       PRIMARY KEY (installation_id, repo, number, head_sha)
     );
+    CREATE TABLE IF NOT EXISTS preflight_keys (
+      key_hash        TEXT PRIMARY KEY,
+      installation_id BIGINT NOT NULL REFERENCES installations(installation_id) ON DELETE CASCADE,
+      repo            TEXT   NOT NULL,
+      created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+      revoked_at      TIMESTAMPTZ
+    );
   `);
 }
 
@@ -318,4 +325,23 @@ export async function getDecisionRecord(
     cogneeDataId: r.cognee_data_id ?? undefined,
     createdAt: String(r.created_at),
   };
+}
+
+// Repo-scoped pre-flight key: maps a hashed `cg_…` token to one installation + repo.
+export async function lookupPreflightKey(keyHash: string): Promise<{ installationId: number; repo: string } | null> {
+  const { rows } = await pool.query(
+    `SELECT installation_id, repo FROM preflight_keys WHERE key_hash = $1 AND revoked_at IS NULL`,
+    [keyHash],
+  );
+  const r = rows[0];
+  if (!r) return null;
+  return { installationId: Number(r.installation_id), repo: r.repo };
+}
+
+export async function insertPreflightKey(keyHash: string, installationId: number, repo: string): Promise<void> {
+  await pool.query(
+    `INSERT INTO preflight_keys (key_hash, installation_id, repo) VALUES ($1, $2, $3)
+     ON CONFLICT (key_hash) DO NOTHING`,
+    [keyHash, installationId, repo],
+  );
 }
