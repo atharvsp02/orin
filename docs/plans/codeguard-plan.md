@@ -18,11 +18,13 @@ Deep verification details live in `docs/specs/codeguard-ebac-and-precision.md`. 
 | Working LLM/embedding config | ✅ **live-verified** | `gemini-2.5-flash` + `gemini-embedding-001` (3072d) |
 | **Ingestion needs a PAID LLM tier** | ✅ **confirmed constraint** | free Gemini caps at **20 generations/day** |
 | Cognee runs self-hosted with no Docker/sudo (venv) | ✅ **live-verified** | production still uses the Docker image on the VM |
-| GitHub App mechanics (perms, webhooks, install token, `/user/installations`) | 🧩 docs-verified | not exercised — deferred by choice |
-| Async pipeline design | 🧩 **designed** (§7) | build + load-test on VM |
-| Data model | 🧩 **designed** (§6) | build on VM |
-| Catch-refinement (re-proposal linking, reversal handling) | ⏳ pending | blocked by exhausted daily quota; retry w/ paid key |
+| Bot backend (config, db, cognee, github, llm, pipeline, worker) | ✅ **built + typechecks/builds** | `bot/` |
+| Data model + async pipeline (Postgres schema, pg-boss, ingest/catch) | ✅ **built + locally verified** | ran against real local Postgres |
+| Ingest → extract → remember + catch → grounding/score/judge → comment | ✅ **locally verified end-to-end** | synthetic items; correct cited match + correct silence |
+| Encryption at rest, `scoreCutoff`, reversal linking, backfill selectivity | ✅ **built + verified** | reversal + false-positive proven locally |
+| GitHub App mechanics (perms, webhooks, install token, `/user/installations`) | 🧩 docs-verified | code written; not exercised — deferred by choice |
 | GitHub App registration / webhook / comment posting | ⛔ deferred | user's choice — do when ready to touch GitHub |
+| `web/` dashboard | ⏳ not started | Milestone B (Next.js) |
 
 ---
 
