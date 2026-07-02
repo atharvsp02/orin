@@ -252,6 +252,31 @@ export async function ignoreDeliveries(installationId: number, repo: string, num
   );
 }
 
+// Guard against cross-repo IDOR: an override may only target a decision CodeGuard actually
+// flagged on THIS repo+thread (repos in one installation share a dataset and can collide on ids).
+export async function decisionFlaggedOnThread(
+  installationId: number,
+  repo: string,
+  number: number,
+  decisionId: string,
+): Promise<boolean> {
+  const { rows } = await pool.query(
+    `SELECT 1 FROM deliveries
+     WHERE installation_id = $1 AND repo = $2 AND number = $3 AND decision_id = $4 LIMIT 1`,
+    [installationId, repo, number, decisionId],
+  );
+  return rows.length > 0;
+}
+
+// Supersede one exact decision id (precise — unlike markSuperseded's number-suffix match used at ingest).
+export async function setSuperseded(installationId: number, decisionId: string, supersededBy: string): Promise<void> {
+  await pool.query(
+    `UPDATE decision_records SET superseded_by = $1
+     WHERE installation_id = $2 AND decision_id = $3 AND decision_id <> $1`,
+    [supersededBy, installationId, decisionId],
+  );
+}
+
 export async function getDecisionRecord(installationId: number, decisionId: string): Promise<DecisionRecord | null> {
   const { rows } = await pool.query(
     `SELECT * FROM decision_records WHERE installation_id = $1 AND decision_id = $2`,

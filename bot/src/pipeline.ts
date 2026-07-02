@@ -192,7 +192,8 @@ export async function overrideDecision(
     cogneeDataId: dataId(res),
     createdAt: "",
   });
-  await db.markSuperseded(inst.installationId, [a.citedRef], newId);
+  // Exact supersession — the caller must have already authorized this citedRef against the thread.
+  await db.setSuperseded(inst.installationId, a.citedRef, newId);
   return newId;
 }
 

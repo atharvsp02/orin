@@ -85,6 +85,11 @@ export async function handleCommand(job: CommandJob, boss: PgBoss): Promise<void
         await reply("Nothing to override — no decision was cited on this thread.");
         break;
       }
+      // Cross-repo IDOR guard: only a decision CodeGuard flagged on THIS repo+thread may be overridden.
+      if (!(await db.decisionFlaggedOnThread(job.installationId, job.repo, job.number, ref))) {
+        await reply(`@${job.sender} — \`${ref}\` was not flagged by CodeGuard on this thread, so it can't be overridden here.`);
+        break;
+      }
       const sourceUrl = `https://github.com/${job.repo}/${job.isPr ? "pull" : "issues"}/${job.number}`;
       const newId = await overrideDecision(inst, creds, { citedRef: ref, reason: cmd.reason, by: job.sender, number: job.number, sourceUrl });
       await reply(`✅ Recorded **${newId}** superseding **${ref}** — CodeGuard will no longer flag this decision.`);
