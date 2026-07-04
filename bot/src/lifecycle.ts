@@ -23,25 +23,34 @@ export async function recordThreadFeedback(
 ): Promise<boolean> {
   const sessionId = await db.getPrSession(inst.installationId, repo, number);
   if (!sessionId) return false;
-  await submitFeedback(credsFor(inst), {
+  // A clear thread (or a transient Cognee error) yields no QA to score — contain it and report "nothing to score".
+  const scored = await submitFeedback(credsFor(inst), {
     datasetName: inst.datasetName,
     sessionId,
     question: CATCH_QUESTION,
     score,
-  });
+  }).catch(() => false);
+  if (!scored) return false;
   await db.recordFeedbackPending(inst.installationId, sessionId);
   return true;
 }
 
-/** Hourly worker: drain every session that got feedback and apply /improve per tenant. */
+/** Hourly worker: drain every session that got feedback and apply /improve per tenant.
+ *  Each tenant is isolated — one tenant's Cognee failure re-queues only its own sessions,
+ *  never discarding another tenant's feedback (at-least-once). */
 export async function runImprove(): Promise<void> {
   const pending = await db.drainFeedbackPending();
   if (pending.size === 0) return;
   for (const [installationId, sessionIds] of pending) {
-    const inst = await db.getInstallation(installationId);
-    if (!inst) continue;
-    await improveTenant(credsFor(inst), inst.datasetName, sessionIds);
-    console.log(`improve: ${inst.datasetName} (${sessionIds.length} sessions)`);
+    try {
+      const inst = await db.getInstallation(installationId);
+      if (!inst) continue; // installation gone → drop its (now-orphaned) sessions
+      await improveTenant(credsFor(inst), inst.datasetName, sessionIds);
+      console.log(`improve: ${inst.datasetName} (${sessionIds.length} sessions)`);
+    } catch (e) {
+      console.warn(`improve failed for ${installationId}, re-queueing:`, (e as Error).message);
+      for (const s of sessionIds) await db.recordFeedbackPending(installationId, s).catch(() => undefined);
+    }
   }
 }
 

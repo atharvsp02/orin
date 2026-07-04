@@ -81,7 +81,9 @@ export async function evaluatePr(
   const byData = new Map(active.filter((r) => r.cogneeDataId).map((r) => [r.cogneeDataId as string, r]));
   const chunks = await cognee.searchChunksScored(cog, creds, { datasetName: inst.datasetName, query: prText, topK: 5 });
   for (const c of chunks) {
-    const r = byData.get(c.documentId) ?? byId.get(c.documentName) ?? byId.get(c.documentName.toUpperCase());
+    // remember() uploads as `${decisionId}.txt`, so document_name carries the extension — strip it.
+    const name = c.documentName.replace(/\.txt$/i, "");
+    const r = byData.get(c.documentId) ?? byId.get(name) ?? byId.get(name.toUpperCase());
     // Bounded recency penalty: only nudges fuzzy matches near the cutoff (max +0.015 distance).
     const penalty = r ? (1 - recencyWeight(r.decidedAt)) * 0.1 : 0;
     if (c.score + penalty > cfg.scoreCutoff) continue;
@@ -164,21 +166,23 @@ function firstAnswer(res: unknown): string {
 
 // --- lifecycle: maintainer feedback → reweight the exact decision nodes → improve ---
 
-/** Attach a maintainer 👍/👎 to the recall QA that produced a verdict on this PR. */
+/** Attach a maintainer 👍/👎 to the recall QA that produced a verdict on this PR.
+ *  Returns false when there is no such QA (e.g. a thread CodeGuard never flagged). */
 export async function submitFeedback(
   creds: TenantCredentials,
   opts: { datasetName: string; sessionId: string; question: string; score: 1 | 2 | 3 | 4 | 5 },
-): Promise<void> {
+): Promise<boolean> {
   const qas = await cognee.getSessionQAs(cog, creds, opts.sessionId);
   const needle = opts.question.slice(0, 40);
   const qa = qas.find((q) => q.question.includes(needle)) ?? qas[qas.length - 1];
-  if (!qa?.qaId) return;
+  if (!qa?.qaId) return false;
   await cognee.addFeedback(cog, creds, {
     datasetName: opts.datasetName,
     sessionId: opts.sessionId,
     qaId: qa.qaId,
     score: opts.score,
   });
+  return true;
 }
 
 /** Apply accumulated feedback for a tenant's sessions (run on a schedule or after a 👍/👎). */

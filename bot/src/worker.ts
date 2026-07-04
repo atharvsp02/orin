@@ -74,7 +74,7 @@ async function catchWorker(jobs: PgBoss.Job<CatchJob>[]): Promise<void> {
         headSha: "",
         mode: "comment",
         decisionId: judgment.decisionId,
-        sessionId,
+        sessionId: judgment.matches ? sessionId : null, // a recall session exists only when we flagged
         state: judgment.matches ? "posted" : "clear",
       });
       continue;
@@ -127,7 +127,7 @@ async function catchWorker(jobs: PgBoss.Job<CatchJob>[]): Promise<void> {
       reviewId: refs?.reviewId ?? null,
       commentId: refs?.commentId ?? null,
       decisionId: judgment.decisionId,
-      sessionId,
+      sessionId: judgment.matches ? sessionId : null, // a recall session exists only when we flagged
       state: decision.findings.length ? "posted" : "clear",
     });
   }
