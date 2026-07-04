@@ -83,7 +83,9 @@ function registerHandlers(app: InstanceType<typeof App>): void {
     if (!text) return;
     await prim.ingest(tenant, {
       kind: "doc",
-      number: Math.floor(Number(event.item.ts)) % 1_000_000,
+      // full ts digits (e.g. 1699999999.123456 → 1699999999123456) — unique per message, so
+      // re-reacting is idempotent and distinct messages never collide on DOC-<n>.
+      number: Number(event.item.ts.replace(".", "")),
       title: text.slice(0, 80),
       body: text,
       url: "",

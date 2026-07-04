@@ -2,7 +2,7 @@
 // remember/recall would bypass our grounding gate + supersession). Tools map 1:1 to the primitives.
 // The server always calls Cognee with the TENANT's own key, never the client's token.
 import { createServer } from "node:http";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -57,7 +57,8 @@ export function buildServer(ctx: McpContext): McpServer {
       inputSchema: { text: z.string().describe("PR title/description/diff or a proposal to check") },
     },
     async ({ text }) => {
-      const j = await prim.warn(ctx.tenant, text);
+      // Scope enforcement to the key's repo (a repo-scoped cg_ key must not check another repo).
+      const j = await prim.warn(ctx.tenant, text, ctx.repo || undefined);
       return {
         content: [{ type: "text", text: JSON.stringify({ matches: j.matches, decisionId: j.decisionId, comment: j.comment }) }],
       };
@@ -77,7 +78,7 @@ export function buildServer(ctx: McpContext): McpServer {
     async ({ title, body, url }) => {
       await prim.ingest(ctx.tenant, {
         kind: "doc",
-        number: Math.floor(Date.now() / 1000) % 1_000_000,
+        number: parseInt(randomBytes(6).toString("hex"), 16), // collision-resistant DOC id
         title,
         body,
         url: url ?? "",

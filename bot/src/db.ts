@@ -153,6 +153,9 @@ export async function upsertDecisionRecord(d: DecisionRecord): Promise<void> {
 }
 
 // Link reversals: mark prior records (in the same repo) referenced by a superseding decision.
+// Only the exact GitHub-item ids for that number are matched (PR-<n> / ISSUE-<n>) — never a
+// wildcard suffix — so a ref like "#42" can't collaterally supersede an unrelated DOC-42, and
+// LLM-extracted refs from an untrusted closed thread have a bounded, exact blast radius.
 export async function markSuperseded(
   installationId: number,
   repo: string,
@@ -164,8 +167,8 @@ export async function markSuperseded(
     if (!num) continue;
     await pool.query(
       `UPDATE decision_records SET superseded_by = $1
-       WHERE installation_id = $2 AND repo = $3 AND decision_id LIKE $4 AND decision_id <> $5`,
-      [supersededBy, installationId, repo, `%-${num}`, supersededBy],
+       WHERE installation_id = $2 AND repo = $3 AND decision_id = ANY($4) AND decision_id <> $1`,
+      [supersededBy, installationId, repo, [`PR-${num}`, `ISSUE-${num}`]],
     );
   }
 }

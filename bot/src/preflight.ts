@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import * as db from "./db.js";
 import * as cognee from "./cognee.js";
@@ -21,6 +21,12 @@ interface IssueKeyRequest {
 
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 
+const constantEq = (a: string, b: string): boolean => {
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  return ab.length === bb.length && timingSafeEqual(ab, bb);
+};
+
 const bearer = (req: IncomingMessage): string => {
   const auth = req.headers.authorization ?? "";
   return auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
@@ -35,12 +41,14 @@ async function authKey(req: IncomingMessage): Promise<{ installationId: number; 
 
 function readBody(req: IncomingMessage, limit = 1_000_000): Promise<string> {
   return new Promise((resolve, reject) => {
-    let data = "";
-    req.on("data", (c) => {
-      data += c;
-      if (data.length > limit) req.destroy();
+    const chunks: Buffer[] = [];
+    let len = 0;
+    req.on("data", (c: Buffer) => {
+      chunks.push(c);
+      len += c.length;
+      if (len > limit) req.destroy();
     });
-    req.on("end", () => resolve(data));
+    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8"))); // concat then decode once (multibyte-safe)
     req.on("error", reject);
   });
 }
@@ -89,7 +97,7 @@ export async function handleIssueKey(req: IncomingMessage, res: ServerResponse):
   if (!config.adminToken) return send(res, 404, { error: "issuance disabled" });
   const auth = req.headers.authorization ?? "";
   const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
-  if (token !== config.adminToken) return send(res, 401, { error: "unauthorized" });
+  if (!constantEq(token, config.adminToken)) return send(res, 401, { error: "unauthorized" });
 
   let body: IssueKeyRequest;
   try {

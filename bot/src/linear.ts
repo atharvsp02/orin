@@ -90,12 +90,16 @@ async function main(): Promise<void> {
       res.writeHead(404).end();
       return;
     }
-    let raw = "";
-    req.on("data", (c) => {
-      raw += c;
-      if (raw.length > 2_000_000) req.destroy();
+    const chunks: Buffer[] = [];
+    let len = 0;
+    req.on("data", (c: Buffer) => {
+      chunks.push(c);
+      len += c.length;
+      if (len > 2_000_000) req.destroy();
     });
     req.on("end", () => {
+      // HMAC over the exact received bytes — decoding chunk-by-chunk would corrupt multibyte UTF-8.
+      const raw = Buffer.concat(chunks).toString("utf8");
       if (!verify(secret, raw, req.headers["linear-signature"] as string ?? "")) {
         res.writeHead(400, { "Content-Type": "application/json" }).end(JSON.stringify({ error: "bad signature" }));
         return;
