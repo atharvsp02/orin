@@ -219,11 +219,13 @@ export async function getDelivery(
   );
   const r = rows[0];
   if (!r) return null;
+  // BIGINT columns come back as strings from node-postgres — coerce to number (ids are < 2^53).
+  const num = (v: unknown): number | null => (v == null ? null : Number(v));
   return {
     mode: r.mode,
-    checkRunId: r.check_run_id,
-    reviewId: r.review_id,
-    commentId: r.comment_id,
+    checkRunId: num(r.check_run_id),
+    reviewId: num(r.review_id),
+    commentId: num(r.comment_id),
     decisionId: r.decision_id,
     sessionId: r.session_id,
     state: r.state,
