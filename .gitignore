@@ -33,3 +33,6 @@ npm-debug.log*
 coverage/
 .vercel/
 .turbo/
+
+# GitHub App private keys — never commit
+*.pem

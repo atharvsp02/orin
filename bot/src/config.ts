@@ -1,9 +1,17 @@
 import "dotenv/config";
+import { readFileSync } from "node:fs";
 
 function required(name: string): string {
   const v = process.env[name];
   if (!v) throw new Error(`missing required env var: ${name}`);
   return v;
+}
+
+// GitHub App private key: from a .pem file path (preferred — avoids multi-line PEM in .env) or inline.
+function githubPrivateKey(): string {
+  const path = process.env.GITHUB_PRIVATE_KEY_PATH;
+  if (path) return readFileSync(path, "utf8");
+  return required("GITHUB_PRIVATE_KEY");
 }
 
 export type LlmProvider = "google" | "openai" | "deepseek" | "openrouter";
@@ -20,7 +28,7 @@ export const config = {
     : undefined,
   github: {
     appId: required("GITHUB_APP_ID"),
-    privateKey: required("GITHUB_PRIVATE_KEY"),
+    privateKey: githubPrivateKey(),
     webhookSecret: required("GITHUB_WEBHOOK_SECRET"),
   },
 };
