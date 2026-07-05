@@ -1,11 +1,15 @@
-// Orin Slack adapter (Bolt) — thin over the decision core. Multi-workspace OAuth; the tenant
-// (which repo's memory) resolves per team via tenant_links, falling back to ORIN_DEFAULT_INSTALLATION.
+// Orin Slack adapter (Bolt) — thin over the decision core. Multi-workspace OAuth: every new
+// workspace is auto-provisioned its OWN isolated brain on install, and can later switch to a
+// GitHub installation's memory via the one-time link-code flow (`/orin link` → `@orin link CODE`).
+import { createHash, randomBytes } from "node:crypto";
 import bolt from "@slack/bolt";
 import type { Installation, InstallationQuery } from "@slack/bolt";
 import * as db from "./db.js";
-import { resolveTenant } from "./tenant.js";
+import { resolveTenant, provisionAndLink } from "./tenant.js";
 import type { Tenant } from "./tenant.js";
 import * as prim from "./primitives.js";
+
+const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 
 const { App } = bolt;
 
@@ -23,6 +27,10 @@ const installationStore = {
     const id = installation.isEnterpriseInstall && installation.enterprise ? installation.enterprise.id : installation.team?.id;
     if (!id) throw new Error("Slack installation has no team/enterprise id");
     await db.storeSlackInstall(id, installation);
+    // Self-serve: a new workspace gets its own isolated brain immediately (no-op when already linked).
+    await provisionAndLink({ platform: "slack", externalId: id }, `slack:${installation.team?.name ?? id}`).catch((e) =>
+      console.error("slack auto-provision failed:", (e as Error).message),
+    );
   },
   async fetchInstallation(query: InstallationQuery<boolean>): Promise<Installation> {
     const data = await db.fetchSlackInstall(idOf(query));
@@ -58,18 +66,84 @@ function looksLikeProposal(text: string): boolean {
 }
 
 function registerHandlers(app: InstanceType<typeof App>): void {
-  // /why <question> — ack fast (<3s), then answer with a cited Block Kit message via response_url.
+  // /why [repo:owner/name] <question> — ack fast (<3s), then answer with a cited message.
+  // A workspace linked to a GitHub org holds ALL that org's repos in one memory; the repo:
+  // token narrows the question to one of them.
   app.command("/why", async ({ command, ack, respond }) => {
     await ack();
     const tenant = await tenantForTeam(command.team_id);
     if (!tenant) {
-      await respond("Orin isn't linked to a repo for this workspace yet.");
+      await respond("Orin has no memory for this workspace yet — reinstall the app, or run `/orin help`.");
       return;
     }
-    const answer = await prim.ask(tenant, command.text?.trim() || "Summarize the most relevant past decision and why it was made.");
+    const raw = command.text?.trim() ?? "";
+    const repo = raw.match(/\brepo:(\S+)/i)?.[1];
+    const question = raw.replace(/\brepo:\S+\s*/i, "").trim() || "Summarize the most relevant past decision and why it was made.";
+    const answer = await prim.ask(tenant, repo ? `In repository ${repo}: ${question}` : question);
     await respond({
       blocks: [{ type: "section", text: { type: "mrkdwn", text: answer || "No relevant decision found in memory." } }],
     });
+  });
+
+  // /orin — workspace management: link to a GitHub org's memory, status, repos, unlink, help.
+  app.command("/orin", async ({ command, ack, respond }) => {
+    await ack();
+    const teamId = command.team_id ?? "";
+    const [sub = "help", ...rest] = (command.text ?? "").trim().split(/\s+/);
+    const ephemeral = (text: string) => respond({ response_type: "ephemeral", text });
+
+    switch (sub.toLowerCase()) {
+      case "link": {
+        // Mint a one-time code bound to THIS workspace. It is consumed on GitHub by someone
+        // with write access (`@orin link CODE`), which links this workspace to that org's memory.
+        const code = randomBytes(4).toString("hex").toUpperCase();
+        await db.insertLinkCode(sha256(code), "slack", teamId, 15);
+        await ephemeral(
+          `🔗 Link code: \`${code}\` (expires in 15 minutes, single-use).\n` +
+            `Have someone with *write access* comment \`@orin link ${code}\` on any issue/PR in the GitHub org you want to connect. ` +
+            `That replaces this workspace's current memory with the org's decision memory.`,
+        );
+        break;
+      }
+      case "status": {
+        const tenant = await tenantForTeam(teamId);
+        if (!tenant) {
+          await ephemeral("No memory linked. Reinstall the app to auto-provision one, or run `/orin link`.");
+          break;
+        }
+        const [count, repos] = await Promise.all([
+          db.countDecisions(tenant.installationId),
+          db.distinctRepos(tenant.installationId),
+        ]);
+        const kind = tenant.inst.githubAccount.startsWith("slack:") ? "own workspace memory" : `GitHub memory of *${tenant.inst.githubAccount}*`;
+        await ephemeral(`📊 Linked to ${kind} — ${count} decisions${repos.length ? ` across: ${repos.join(", ")}` : ""}.`);
+        break;
+      }
+      case "repos": {
+        const tenant = await tenantForTeam(teamId);
+        const repos = tenant ? await db.distinctRepos(tenant.installationId) : [];
+        await ephemeral(repos.length ? `Repos with recorded decisions:\n${repos.map((r) => `• \`${r}\` — try \`/why repo:${r} …\``).join("\n")}` : "No repo-scoped decisions yet.");
+        break;
+      }
+      case "unlink": {
+        // Detach from the current memory and provision a fresh, empty one for this workspace.
+        await db.unlinkTenant("slack", teamId);
+        await provisionAndLink({ platform: "slack", externalId: teamId }, `slack:${teamId}`);
+        await ephemeral("🧹 Unlinked. This workspace now has its own fresh, empty memory.");
+        break;
+      }
+      default:
+        void rest;
+        await ephemeral(
+          "*Orin commands*\n" +
+            "• `/why [repo:owner/name] <question>` — ask why a decision was made\n" +
+            "• `/orin link` — get a code to connect this workspace to a GitHub org's memory\n" +
+            "• `/orin status` — what memory this workspace uses\n" +
+            "• `/orin repos` — repos with recorded decisions\n" +
+            "• `/orin unlink` — detach and start a fresh workspace memory\n" +
+            "• React with :decision: on any message to record it as a decision",
+        );
+    }
   });
 
   // React with :decision: on a message to record it into memory.

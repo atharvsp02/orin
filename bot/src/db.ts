@@ -83,6 +83,14 @@ export async function initSchema(): Promise<void> {
       data       TEXT NOT NULL,      -- AES-256-GCM ciphertext (holds OAuth bot tokens)
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+    CREATE TABLE IF NOT EXISTS link_codes (
+      code_hash   TEXT PRIMARY KEY,  -- sha256 of the one-time code
+      platform    TEXT NOT NULL,     -- workspace that minted it (e.g. 'slack')
+      external_id TEXT NOT NULL,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+      expires_at  TIMESTAMPTZ NOT NULL,
+      used_at     TIMESTAMPTZ
+    );
   `);
 }
 
@@ -380,6 +388,49 @@ export async function resolveLink(platform: string, externalId: string): Promise
     [platform, externalId],
   );
   return rows[0] ? Number(rows[0].installation_id) : null;
+}
+
+export async function unlinkTenant(platform: string, externalId: string): Promise<void> {
+  await pool.query(`DELETE FROM tenant_links WHERE platform = $1 AND external_id = $2`, [platform, externalId]);
+}
+
+// One-time cross-platform link codes: minted in Slack (ephemeral — only the requester sees it,
+// bound to the minting workspace), consumed on GitHub by a write-access maintainer. Consuming
+// links the MINTING workspace to THAT GitHub installation — a leaked used code grants nothing.
+export async function insertLinkCode(codeHash: string, platform: string, externalId: string, ttlMinutes: number): Promise<void> {
+  await pool.query(
+    `INSERT INTO link_codes (code_hash, platform, external_id, expires_at)
+     VALUES ($1, $2, $3, now() + ($4 || ' minutes')::interval)
+     ON CONFLICT (code_hash) DO NOTHING`,
+    [codeHash, platform, externalId, String(ttlMinutes)],
+  );
+}
+
+// Atomic consume: single-use and unexpired, or null.
+export async function consumeLinkCode(codeHash: string): Promise<{ platform: string; externalId: string } | null> {
+  const { rows } = await pool.query(
+    `UPDATE link_codes SET used_at = now()
+     WHERE code_hash = $1 AND used_at IS NULL AND expires_at > now()
+     RETURNING platform, external_id`,
+    [codeHash],
+  );
+  return rows[0] ? { platform: rows[0].platform, externalId: rows[0].external_id } : null;
+}
+
+export async function distinctRepos(installationId: number): Promise<string[]> {
+  const { rows } = await pool.query(
+    `SELECT DISTINCT repo FROM decision_records WHERE installation_id = $1 AND repo <> '' ORDER BY repo`,
+    [installationId],
+  );
+  return rows.map((r) => r.repo);
+}
+
+export async function countDecisions(installationId: number): Promise<number> {
+  const { rows } = await pool.query(
+    `SELECT COUNT(*)::int AS n FROM decision_records WHERE installation_id = $1`,
+    [installationId],
+  );
+  return rows[0]?.n ?? 0;
 }
 
 // Slack OAuth installation store (Bolt InstallationStore backing). The install object holds bot

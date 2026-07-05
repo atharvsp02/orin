@@ -3,7 +3,7 @@
 import { createServer } from "node:http";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { LinearClient } from "@linear/sdk";
-import { resolveTenant } from "./tenant.js";
+import { resolveTenant, provisionAndLink } from "./tenant.js";
 import type { Tenant } from "./tenant.js";
 import * as prim from "./primitives.js";
 
@@ -39,8 +39,16 @@ function reqEnv(name: string): string {
   return v;
 }
 
-const linearTenant = (orgId?: string): Promise<Tenant | null> =>
-  resolveTenant({ platform: "linear", externalId: orgId ?? "" });
+// Self-serve: an unknown Linear org gets its own isolated brain on first contact.
+const linearTenant = async (orgId?: string): Promise<Tenant | null> => {
+  if (!orgId) return null;
+  const existing = await resolveTenant({ platform: "linear", externalId: orgId });
+  if (existing) return existing;
+  return provisionAndLink({ platform: "linear", externalId: orgId }, `linear:${orgId}`).catch((e) => {
+    console.error("linear auto-provision failed:", (e as Error).message);
+    return null;
+  });
+};
 
 async function handleSession(client: Linear, wh: AgentSessionWebhook): Promise<void> {
   const sessionId = wh.agentSession.id;
@@ -49,7 +57,7 @@ async function handleSession(client: Linear, wh: AgentSessionWebhook): Promise<v
   const respond = (body: string) => client.createAgentActivity({ agentSessionId: sessionId, content: { type: "response", body } });
 
   if (!tenant) {
-    await respond("Orin isn't linked to a repo for this Linear workspace yet.");
+    await respond("Orin couldn't provision memory for this Linear workspace — try again shortly.");
     return;
   }
   await thought("Searching past decisions in memory…").catch(() => undefined);

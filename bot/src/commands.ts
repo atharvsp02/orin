@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import PgBoss from "pg-boss";
 import * as db from "./db.js";
 import { installationOctokit } from "./github.js";
@@ -19,9 +20,10 @@ export type Command =
   | { name: "bad" }
   | { name: "forget" }
   | { name: "rules" }
-  | { name: "rule"; text: string };
+  | { name: "rule"; text: string }
+  | { name: "link"; code: string };
 
-const RE = /@orin\s+(recall|why|override|ignore|re-?scan|good|bad|forget|rules|rule|👍|👎)(?![a-z0-9])([^\n]*)/i;
+const RE = /@orin\s+(recall|why|override|ignore|re-?scan|good|bad|forget|rules|rule|link|👍|👎)(?![a-z0-9])([^\n]*)/i;
 
 /** Parse an `@orin <cmd> …` mention (pure — unit-tested). */
 export function parseCommand(body: string): Command | null {
@@ -49,6 +51,8 @@ export function parseCommand(body: string): Command | null {
       return { name: "rules" };
     case "rule":
       return { name: "rule", text: rest };
+    case "link":
+      return { name: "link", code: rest.trim() };
     case "override": {
       // @orin override [REF] "reason"   (REF like PR-42 optional; quotes optional)
       const quoted = rest.match(/^(\S+)?\s*"([^"]*)"/);
@@ -169,6 +173,26 @@ export async function handleCommand(job: CommandJob, boss: PgBoss): Promise<void
     case "rules": {
       const rules = await listRules(inst, creds);
       await reply(rules.length ? `**Coding rules Orin tracks:**\n${rules.map((r) => `- ${r}`).join("\n")}` : "No coding rules recorded yet — add one with `@orin rule <text>`.");
+      break;
+    }
+    case "link": {
+      // Consume a one-time code minted in Slack (`/orin link`) → link that workspace to THIS
+      // installation's memory. Write access required so outsiders can't attach workspaces here.
+      if (!(await canMutate(octokit, owner, repo, job.sender))) {
+        await reply(`@${job.sender} — \`link\` needs write access to this repo.`);
+        break;
+      }
+      if (!cmd.code) {
+        await reply("Usage: `@orin link <CODE>` — mint the code in Slack with `/orin link`.");
+        break;
+      }
+      const hit = await db.consumeLinkCode(createHash("sha256").update(cmd.code.toUpperCase()).digest("hex"));
+      if (!hit) {
+        await reply("That link code is invalid, expired, or already used. Mint a fresh one in Slack with `/orin link`.");
+        break;
+      }
+      await db.linkTenant(hit.platform, hit.externalId, job.installationId);
+      await reply(`🔗 Linked the ${hit.platform} workspace to this org's decision memory. Ask away with \`/why\` over there.`);
       break;
     }
     case "rule": {

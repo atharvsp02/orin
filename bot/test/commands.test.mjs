@@ -46,6 +46,8 @@ eq("thumbs down emoji", parseCommand("@orin 👎"), { name: "bad" });
 eq("forget", parseCommand("@orin forget"), { name: "forget" });
 eq("rules (list)", parseCommand("@orin rules"), { name: "rules" });
 eq("rule (seed)", parseCommand("@orin rule Do not add new deps"), { name: "rule", text: "Do not add new deps" });
+eq("link with code", parseCommand("@orin link AB12CD34"), { name: "link", code: "AB12CD34" });
+eq("link without code", parseCommand("@orin link"), { name: "link", code: "" });
 eq("no partial-word match (overrides)", parseCommand("@orin overrides everything"), null);
 
 console.log(`\n=== commands.ts: ${pass} passed, ${fail} failed ===`);
