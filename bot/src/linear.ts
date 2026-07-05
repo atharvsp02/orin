@@ -2,7 +2,7 @@
 // OAuth consent → per-org token stored encrypted → its own isolated brain auto-provisioned.
 // Webhooks (app-level) fire for every installed org; each event resolves that org's own client.
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { LinearClient } from "@linear/sdk";
 import * as db from "./db.js";
 import { resolveTenant, provisionAndLink } from "./tenant.js";
@@ -79,9 +79,27 @@ async function handleSession(client: Linear, wh: AgentSessionWebhook): Promise<v
     await respond("Orin couldn't provision memory for this Linear workspace — try again shortly.");
     return;
   }
+  const s = wh.agentSession;
+
+  // `@Orin link` mints a one-time code to attach THIS workspace to a GitHub org's memory.
+  // Symmetric with Slack's `/orin link`: Linear mints, GitHub consumes (`@orin link CODE`),
+  // which requires GitHub write access (the real gate). We read only the prompt the user
+  // typed (activity/comment body), never the issue title/description, so an issue merely
+  // named "link…" can't trigger it.
+  const prompt = (wh.agentActivity?.content?.body ?? s.comment?.body ?? "").replace(/@orin/gi, "").trim();
+  if (/^link\b/i.test(prompt) && wh.organizationId) {
+    const code = randomBytes(16).toString("hex").toUpperCase();
+    await db.insertLinkCode(createHash("sha256").update(code).digest("hex"), "linear", wh.organizationId, 15);
+    await respond(
+      `🔗 Link code: \`${code}\` (expires in 15 minutes, single-use).\n\n` +
+        `Have someone with **write access** comment \`@orin link ${code}\` on any issue or PR in the GitHub org you want to connect. ` +
+        `That replaces this workspace's memory with the org's decision memory, so \`/why\` and mentions here answer from the same graph.`,
+    );
+    return;
+  }
+
   await thought("Searching past decisions in memory…").catch(() => undefined);
 
-  const s = wh.agentSession;
   const text = [s.issue?.title, s.issue?.description, s.comment?.body, wh.agentActivity?.content?.body]
     .filter(Boolean)
     .join("\n\n");
