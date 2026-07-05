@@ -28,7 +28,7 @@ I assemble + add all text cards, highlights, and music.
 - The NEW re-proposal issue you create live (the catch):
   title **"Add a Redis cache in front of search"**, body "Search feels slow on big datasets.
   Let's put Redis in front of the retrieval path to cache lookups."
-- Slack question (verified to return a cited answer): **`/why did we reject redis`**
+- Slack question (verified, returns a cited answer scoped to the repo): **`/why orin-demo why redis cancelled`**
 - Linear issue title: **Introduce Redis caching for analytics**
 - Override comment (on the new re-proposal issue): **`@orinbot override ISSUE-1 "we now have a platform team to operate Redis"`**
 
@@ -89,7 +89,7 @@ slash command **`/orin`**.
   requests, where Orin becomes a merge-blocking check. That's the whole product, right there."
 
 ### CUT 9: Slack  🔇 NO TALK  (~14s)
-- Screen: Slack → type `/why did we reject redis` → Orin's cited answer appears. Record it.
+- Screen: Slack → type `/why orin-demo why redis cancelled` → Orin's cited answer appears. Record it.
 - Text on screen (I add): **In Slack: /why** then **Same decision. With evidence.**
 - (Already linked and verified, so this just works.)
 
@@ -99,13 +99,12 @@ slash command **`/orin`**.
 - Text on screen (I add): **In Linear** then **It warns before the work even starts.**
 - NOTE: Linear must be linked to the same org memory BEFORE recording (see checklist).
 
-### CUT 11: Coding agents / Cursor  🎙️ YOU TALK  (~12s)
-- Screen: Cursor or Claude Code with Orin's MCP configured → ask it to check a change → it calls
-  `check_rejected` and flags the Redis decision. Record it. (Fallback: a terminal running the
-  CLI pre-flight and exiting with an error.)
+### CUT 11: MCP setup (Keys + Integrations)  🎙️ YOU TALK  (~14s)
+- Screen: Orin dashboard → **Keys** → mint a repo-scoped key (show it appear in the list) →
+  **Integrations** → show the **MCP · Cursor, Claude Code, CLI** card with the config snippet.
 - SAY:
-  "And your AI coding agents plug in over MCP. Cursor checks a change against the same memory
-  before a pull request even exists. Same decision, everywhere your team works."
+  "Your coding agents plug in over MCP. Mint a repo-scoped key here, drop this config into Cursor
+  or Claude Code, and they check the same memory before a pull request even exists."
 
 ### CUT 12: Override  🔇 NO TALK  (~12s)
 - Screen: on the new re-proposal issue, comment
@@ -148,7 +147,7 @@ slash command **`/orin`**.
    citations.
 3. Linear: link it to the same org memory before CUT 10: in a Linear issue type `@Orin link`,
    then on GitHub comment `@orinbot link CODE`. Test the warning off-camera.
-4. Cursor/Claude Code: add Orin's MCP config with a minted repo key; test `check_rejected` once.
+4. CUT 11 is just the dashboard **Keys** and **Integrations** pages, nothing to install.
 5. For CUT 8: create the "Add a Redis cache in front of search" issue OFF-camera first so Orin's
    warning comment is already posted, then record. (Issue-stage catch takes about a minute.)
 6. Record the dashboard at normal 100% zoom, big window (1600px+), dark theme, no bookmarks bar.
@@ -156,4 +155,4 @@ slash command **`/orin`**.
 
 ## Total talking words about 290 (fits comfortably; the rest is text + music).
 
-Cut times: 6+15+4+20+2+10+5+26+14+14+12+12+18+14+5 = 176s.
+Cut times: 6+15+4+20+2+10+5+26+14+14+14+12+18+14+5 = 179s.

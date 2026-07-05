@@ -87,8 +87,19 @@ function registerHandlers(app: InstanceType<typeof App>): void {
       return;
     }
     const raw = command.text?.trim() ?? "";
-    const repo = raw.match(/\brepo:(\S+)/i)?.[1];
-    const question = raw.replace(/\brepo:\S+\s*/i, "").trim() || "Summarize the most relevant past decision and why it was made.";
+    let repo = raw.match(/\brepo:(\S+)/i)?.[1];
+    let question = raw.replace(/\brepo:\S+\s*/i, "").trim();
+    // Also accept a bare leading repo name, e.g. `/why orin-demo why redis cancelled`.
+    if (!repo && question) {
+      const repos = await db.distinctRepos(tenant.installationId).catch(() => [] as string[]);
+      const first = question.split(/\s+/)[0]?.toLowerCase();
+      const hit = first ? repos.find((r) => r.toLowerCase() === first || r.split("/")[1]?.toLowerCase() === first) : undefined;
+      if (hit) {
+        repo = hit;
+        question = question.split(/\s+/).slice(1).join(" ").trim();
+      }
+    }
+    if (!question) question = "Summarize the most relevant past decision and why it was made.";
     const answer = await prim.ask(tenant, repo ? `In repository ${repo}: ${question}` : question);
     await respond({
       blocks: [{ type: "section", text: { type: "mrkdwn", text: answer || "No relevant decision found in memory." } }],

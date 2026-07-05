@@ -55,21 +55,20 @@ Values to reuse (already true in the repo): repo **`ydark926/orin-demo`**, exist
   decision, the reasoning, and links the original thread. And the same thing happens on pull
   requests, where Orin becomes a merge-blocking check. That's the whole product, right there."
 
-### clip-11-cursor  🎙️ TALK  (~12s)
-- Screen: Cursor or Claude Code with Orin's MCP configured → ask it to check a Redis-ish change →
-  it calls `check_rejected` and flags the decision. (Fallback: a terminal running the CLI
-  pre-flight and exiting with an error.)
+### clip-11-mcp-setup  🎙️ TALK  (~14s)
+- Screen: Orin dashboard → **Keys** → mint a repo-scoped key (show it appear in the list) →
+  **Integrations** → show the **MCP · Cursor, Claude Code, CLI** card with the config snippet.
 - SAY:
-  "And your AI coding agents plug in over MCP. Cursor checks a change against the same memory
-  before a pull request even exists. Same decision, everywhere your team works."
+  "Your coding agents plug in over MCP. Mint a repo-scoped key here, drop this config into Cursor
+  or Claude Code, and they check the same memory before a pull request even exists."
 
 ---
 
 ## B. SILENT clips (screen only, no voice)
 
 ### clip-09-slack  🔇 SILENT  (~14s)
-- Screen: Slack → type **`/why did we reject redis`** → let Orin's cited answer render fully.
-- (Already linked and verified, so it just works.)
+- Screen: Slack → type **`/why orin-demo why redis cancelled`** → let Orin's cited answer render fully.
+- (Already linked and verified, so it just works. Orin scopes it to the orin-demo repo and cites ISSUE-1.)
 
 ### clip-10-linear  🔇 SILENT  (~14s)
 - Screen: Linear → create an issue **"Introduce Redis caching for analytics"** → wait for Orin's
