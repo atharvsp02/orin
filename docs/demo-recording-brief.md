@@ -70,17 +70,6 @@ Values to reuse (already true in the repo): repo **`ydark926/orin-demo`**, exist
 - Screen: Slack → type **`/why orin-demo why redis cancelled`** → let Orin's cited answer render fully.
 - (Already linked and verified, so it just works. Orin scopes it to the orin-demo repo and cites ISSUE-1.)
 
-### clip-10-linear  🔇 SILENT  (~14s)
-- Screen: Linear → create an issue **"Introduce Redis caching for analytics"** → wait for Orin's
-  collision-warning comment citing the same decision, then show it.
-- Needs Linear linked first (see the note at the bottom).
-
-### clip-12-override  🔇 SILENT  (~12s)
-- Screen: on the new re-proposal issue, comment
-  **`@orinbot override ISSUE-1 "we now have a platform team to operate Redis"`** → show Orin's
-  reply that it recorded an override superseding ISSUE-1 → then comment **`@orinbot re-scan`** →
-  show that it no longer flags it.
-
 ### clip-13-dashboard-tour  🔇 SILENT  (~18s)
 - Screen: quick moves, ~4s each:
   1. **Catches** (stat tiles + click one catch)
@@ -105,9 +94,8 @@ Values to reuse (already true in the repo): repo **`ydark926/orin-demo`**, exist
 ---
 
 ## Order they'll be assembled in
-intro card → **02** → card → **04** → card → **06** → card → **08** → **09** → **10** → **11** →
-**12** → **13** → **14** (over animation) → **15** (over close card).
+intro card → **02** → card → **04** → card → **06** → card → **08** → **09** → Linear text card →
+**11** → **13** → **14** (over animation) → **15** (over close card).
 
-## One thing to set up first (only if you want the Linear clip)
-Link Linear to orin-demo's memory before recording clip-10: in a Linear issue type **`@Orin link`**,
-then on GitHub comment **`@orinbot link CODE`**. Test the warning once off-camera.
+## Linear
+Not recorded. I show it as a short text card ("And the same in Linear"). Nothing to set up.

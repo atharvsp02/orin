@@ -5,7 +5,7 @@ How to read this:
 - 🔇 NO TALK    = no voice. Just screen action + text on screen + music. I build the text in Remotion.
 
 Rhythm: music+text intro (silent) → you talk → text card (silent) → demo you talk → text →
-demo you talk … it alternates the whole way. Total ~176s, under the 180s cap.
+demo you talk … it alternates the whole way. Total ~157s, comfortably under the 180s cap.
 
 The catch is shown on an **issue** (no live PR). We simply say the same thing happens on pull
 requests as a merge-blocking check. That keeps the demo fast and reliable.
@@ -29,8 +29,6 @@ I assemble + add all text cards, highlights, and music.
   title **"Add a Redis cache in front of search"**, body "Search feels slow on big datasets.
   Let's put Redis in front of the retrieval path to cache lookups."
 - Slack question (verified, returns a cited answer scoped to the repo): **`/why orin-demo why redis cancelled`**
-- Linear issue title: **Introduce Redis caching for analytics**
-- Override comment (on the new re-proposal issue): **`@orinbot override ISSUE-1 "we now have a platform team to operate Redis"`**
 
 Note on handles: on GitHub always type **`@orinbot`** (not `@orin`, which tags a real GitHub
 user). In Linear the agent is mentioned as **`@Orin`** (its Linear app name). In Slack it's the
@@ -93,11 +91,10 @@ slash command **`/orin`**.
 - Text on screen (I add): **In Slack: /why** then **Same decision. With evidence.**
 - (Already linked and verified, so this just works.)
 
-### CUT 10: Linear  🔇 NO TALK  (~14s)
-- Screen: Linear → create an issue "Introduce Redis caching for analytics" → Orin comments a
-  collision warning citing the same decision. Record it.
-- Text on screen (I add): **In Linear** then **It warns before the work even starts.**
-- NOTE: Linear must be linked to the same org memory BEFORE recording (see checklist).
+### CUT 10: Linear (text card)  🔇 NO TALK  (~4s)
+- Screen: none (I build it). Linear logo + text, same card style as the others.
+- Text on screen: **And the same in Linear** then small: **@Orin answers in issues and warns on new ones.**
+- Shown textually, no recording.
 
 ### CUT 11: MCP setup (Keys + Integrations)  🎙️ YOU TALK  (~14s)
 - Screen: Orin dashboard → **Keys** → mint a repo-scoped key (show it appear in the list) →
@@ -105,13 +102,6 @@ slash command **`/orin`**.
 - SAY:
   "Your coding agents plug in over MCP. Mint a repo-scoped key here, drop this config into Cursor
   or Claude Code, and they check the same memory before a pull request even exists."
-
-### CUT 12: Override  🔇 NO TALK  (~12s)
-- Screen: on the new re-proposal issue, comment
-  `@orinbot override ISSUE-1 "we now have a platform team to operate Redis"` → Orin replies it
-  recorded an override superseding ISSUE-1 → comment `@orinbot re-scan` → Orin no longer flags it.
-  Record the flow.
-- Text on screen (I add): **Context changed? Override it. With receipts.** then **Superseded, not deleted.**
 
 ### CUT 13: Dashboard tour  🔇 NO TALK  (~18s, music-driven)
 - Screen: quick pans, ~4s each: Catches (the stat tiles + a catch) → Knowledge graph (drag the
@@ -136,23 +126,21 @@ slash command **`/orin`**.
 ---
 
 ## What I build vs what you record
-- I build (no recording needed): CUT 1, 3, 5, 7, 15 text/brand cards, the CUT 14 lifecycle
+- I build (no recording needed): CUT 1, 3, 5, 7, 10, 15 text/brand cards, the CUT 14 lifecycle
   animation, and ALL the on-screen text/highlights/music on top of your clips.
-- You record (screen, some with your voice): CUT 2, 4, 6, 8, 11, 14 (you talk) and CUT 9, 10, 12,
-  13 (screen only, no voice).
+- You record (screen, some with your voice): CUT 2, 4, 6, 8, 11, 14 (you talk) and CUT 9, 13
+  (screen only, no voice).
 
 ## Before you record (most of this is already done)
 1. DONE: OrinBot installed on `ydark926/orin-demo`; 12 real decisions seeded incl. ISSUE-1.
-2. DONE: Slack linked to orin-demo's memory; `/why did we reject redis` verified to answer with
-   citations.
-3. Linear: link it to the same org memory before CUT 10: in a Linear issue type `@Orin link`,
-   then on GitHub comment `@orinbot link CODE`. Test the warning off-camera.
-4. CUT 11 is just the dashboard **Keys** and **Integrations** pages, nothing to install.
-5. For CUT 8: create the "Add a Redis cache in front of search" issue OFF-camera first so Orin's
+2. DONE: Slack linked to orin-demo's memory; `/why orin-demo why redis cancelled` verified to
+   answer with citations.
+3. CUT 11 is just the dashboard **Keys** and **Integrations** pages, nothing to install.
+4. For CUT 8: create the "Add a Redis cache in front of search" issue OFF-camera first so Orin's
    warning comment is already posted, then record. (Issue-stage catch takes about a minute.)
-6. Record the dashboard at normal 100% zoom, big window (1600px+), dark theme, no bookmarks bar.
-7. Screenshot every beat as a backup in case a take flakes.
+5. Record the dashboard at normal 100% zoom, big window (1600px+), dark theme, no bookmarks bar.
+6. Screenshot every beat as a backup in case a take flakes.
 
 ## Total talking words about 290 (fits comfortably; the rest is text + music).
 
-Cut times: 6+15+4+20+2+10+5+26+14+14+14+12+18+14+5 = 179s.
+Cut times: 6+15+4+20+2+10+5+26+14+4+14+18+14+5 = 157s.
