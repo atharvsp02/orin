@@ -81,13 +81,13 @@ export function Hero3DStage() {
                 transition={{ duration: 0.6, delay: 0.2 }}
                 className="mt-8 flex items-center gap-6"
               >
-                <button className="px-5 py-2.5 bg-white text-zinc-900 font-medium rounded-lg hover:bg-zinc-100 transition-colors text-sm">
+                <a href="https://github.com/apps/orinbot" className="px-5 py-2.5 bg-white text-zinc-900 font-medium rounded-lg hover:bg-zinc-100 transition-colors text-sm">
                   Install on GitHub
-                </button>
-                <button className="text-zinc-300 font-medium hover:text-white transition-colors flex items-center gap-2 text-sm">
+                </a>
+                <a href="https://orin-bot.duckdns.org/slack/install" className="text-zinc-300 font-medium hover:text-white transition-colors flex items-center gap-2 text-sm">
                   <span className="text-zinc-500">New:</span> Orin agent for Slack
                   <span aria-hidden="true">→</span>
-                </button>
+                </a>
               </motion.div>
             </div>
           </div>

@@ -7,12 +7,12 @@ export function CTASection() {
             Remember the past. Ship the future.
           </h2>
           <div className="flex items-center gap-3">
-            <button className="px-5 py-2.5 border border-zinc-700 text-white font-medium rounded-lg hover:bg-zinc-800 transition-colors text-sm">
+            <a href="https://github.com/apps/orinbot" className="px-5 py-2.5 border border-zinc-700 text-white font-medium rounded-lg hover:bg-zinc-800 transition-colors text-sm">
               View on GitHub
-            </button>
-            <button className="px-5 py-2.5 bg-white text-zinc-900 font-medium rounded-lg hover:bg-zinc-100 transition-colors text-sm">
+            </a>
+            <a href="https://github.com/apps/orinbot" className="px-5 py-2.5 bg-white text-zinc-900 font-medium rounded-lg hover:bg-zinc-100 transition-colors text-sm">
               Install Orin
-            </button>
+            </a>
           </div>
         </div>
       </div>

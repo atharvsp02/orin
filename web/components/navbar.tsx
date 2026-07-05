@@ -29,11 +29,11 @@ export function Navbar() {
             </a>
           </div>
           <div className="flex items-center gap-4">
-            <a href="#" className="text-sm text-zinc-400 hover:text-white transition-colors">
+            <a href="/dashboard" className="text-sm text-zinc-400 hover:text-white transition-colors">
               Log in
             </a>
             <a
-              href="#"
+              href="https://github.com/apps/orinbot"
               className="text-sm text-white bg-zinc-800 hover:bg-zinc-700 px-3.5 py-1.5 rounded-md border border-zinc-700 transition-colors"
             >
               Install Orin
