@@ -26,7 +26,8 @@ export interface Overview {
   account: string;
   metrics: Metrics;
   recent: Catch[];
-  repos: string[];
+  repos: string[]; // repos that already have recorded decisions
+  installedRepos: string[]; // repos the App is installed on (live from GitHub)
   links: Array<{ platform: string; externalId: string }>;
 }
 

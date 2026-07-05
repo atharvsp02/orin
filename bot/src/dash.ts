@@ -6,6 +6,7 @@ import { config } from "./config.js";
 import * as db from "./db.js";
 import * as cognee from "./cognee.js";
 import { sessionFrom, send } from "./auth.js";
+import { installationOctokit } from "./github.js";
 import type { TenantCredentials } from "./cognee.js";
 import type { DeliveryMode } from "./types.js";
 
@@ -56,7 +57,16 @@ export async function handleDash(req: IncomingMessage, res: ServerResponse, path
       db.distinctRepos(inst),
       db.linksFor(inst),
     ]);
-    send(res, 200, { account: installation.githubAccount, metrics, recent, repos, links });
+    // Repos the App is INSTALLED on, straight from GitHub (always current, covers adds/removes).
+    let installedRepos: string[] = [];
+    try {
+      const octokit = await installationOctokit(inst);
+      const rows = await octokit.paginate(octokit.rest.apps.listReposAccessibleToInstallation, { per_page: 100 });
+      installedRepos = rows.map((r) => r.full_name);
+    } catch (e) {
+      console.warn("overview: listing installed repos failed:", (e as Error).message);
+    }
+    send(res, 200, { account: installation.githubAccount, metrics, recent, repos, links, installedRepos });
     return true;
   }
 

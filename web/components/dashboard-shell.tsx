@@ -1,10 +1,11 @@
 "use client"
 
-// The real Orin dashboard. Deliberately mirrors the hero mockup (dashboard-mockup.tsx): same
-// three-pane layout, colors, borders, and type scale. Every value on screen comes from the API;
-// empty states are honest and link to real actions. No fabricated data, ever.
+// The real Orin dashboard. Same three-pane layout as the hero mockup, and the inner views share
+// the landing page's design language: centered content columns, bordered cards with a soft top
+// sheen, syntax-colored code, brand icons. Every value comes from the API; empty states are
+// honest and specific. No fabricated data, ever.
 import type React from "react"
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import {
   CirclePower,
   Inbox,
@@ -16,17 +17,17 @@ import {
   Settings as SettingsIcon,
   Search,
   ChevronDown,
-  ChevronRight,
   HelpCircle,
-  Smartphone,
-  Map,
-  FileText,
   ExternalLink,
   Copy,
+  Check,
   LogOut,
-  Slack,
+  Slack as SlackIcon,
   Network,
+  GitBranch,
+  FileText,
 } from "lucide-react"
+import { SiGithub, SiLinear } from "@icons-pack/react-simple-icons"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -138,16 +139,16 @@ export function DashboardShell({ me }: { me: Me }) {
           </div>
         </div>
 
-        {overview && overview.repos.length > 0 && (
+        {overview && overview.installedRepos.length > 0 && (
           <div className="mt-5 px-3">
-            <div className="px-2 py-1 text-[10px] text-zinc-500 font-medium uppercase tracking-wider">Repos with memory</div>
+            <div className="px-2 py-1 text-[10px] text-zinc-500 font-medium uppercase tracking-wider">Connected repos</div>
             <div className="space-y-0.5 mt-1">
-              {overview.repos.slice(0, 3).map((r, i) => (
+              {overview.installedRepos.slice(0, 4).map((r, i) => (
                 <NavItem
                   key={r}
-                  icon={[Smartphone, Map, FileText][i] ?? FileText}
+                  icon={GitBranch}
                   label={r.split("/")[1] ?? r}
-                  color={["text-blue-400", "text-orange-400", "text-emerald-400"][i]}
+                  color={["text-blue-400", "text-orange-400", "text-emerald-400", "text-purple-400"][i]}
                   onClick={() => {
                     setSelectedRepo(r)
                     setView("repos")
@@ -165,7 +166,7 @@ export function DashboardShell({ me }: { me: Me }) {
               {overview.links.map((l) => (
                 <NavItem
                   key={`${l.platform}:${l.externalId}`}
-                  icon={l.platform === "slack" ? Slack : Network}
+                  icon={l.platform === "slack" ? SlackIcon : Network}
                   label={`${l.platform === "slack" ? "Slack" : "Linear"} workspace`}
                   onClick={() => setView("integrations")}
                 />
@@ -211,19 +212,15 @@ export function DashboardShell({ me }: { me: Me }) {
       {view === "repos" && (
         <ReposView overview={overview} decisions={decisions} selectedRepo={selectedRepo} onSelectRepo={setSelectedRepo} query={query} />
       )}
-      {view === "graph" && (
-        <FullPanel title="Knowledge graph" subtitle={`Cognee decision graph for ${account}`}>
-          <iframe src={api.graphUrl(inst)} sandbox="allow-scripts" className="w-full h-full rounded-lg border border-zinc-800/50 bg-zinc-950" title="Knowledge graph" />
-        </FullPanel>
-      )}
-      {view === "integrations" && <IntegrationsView overview={overview} />}
-      {view === "keys" && <KeysView inst={inst} />}
+      {view === "graph" && <GraphView inst={inst} account={account} />}
+      {view === "integrations" && <IntegrationsView inst={inst} overview={overview} />}
+      {view === "keys" && <KeysView inst={inst} overview={overview} />}
       {view === "settings" && <SettingsView inst={inst} />}
     </div>
   )
 }
 
-/* ── shared pieces (classNames copied from the hero mockup) ─────────── */
+/* ── shared pieces ──────────────────────────────────────────────────── */
 
 function NavItem({
   icon: Icon,
@@ -282,7 +279,7 @@ function ListItem({
   title: string
   subtitle?: string
   time?: string
-  status: "posted" | "clear" | "ignored" | "rejected" | "accepted" | "reverted" | string
+  status: string
   active?: boolean
   onClick?: () => void
 }) {
@@ -293,6 +290,7 @@ function ListItem({
     rejected: "bg-red-500",
     accepted: "bg-emerald-500",
     reverted: "bg-yellow-500",
+    repo: "bg-blue-400",
   }
   return (
     <div
@@ -312,51 +310,74 @@ function ListItem({
   )
 }
 
-function DetailPanel({ crumbs, children }: { crumbs: string[]; children: React.ReactNode }) {
+/** Full-width view: centered content column + landing-style header, no more left-hugging. */
+function FullPanel({
+  title,
+  subtitle,
+  action,
+  children,
+}: {
+  title: string
+  subtitle?: string
+  action?: React.ReactNode
+  children: React.ReactNode
+}) {
   return (
-    <div className="flex-1 h-full bg-zinc-950 flex flex-col overflow-hidden">
-      <div className="px-5 py-3 border-b border-zinc-800/50 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-1.5 text-xs">
-          {crumbs.map((c, i) => (
-            <span key={i} className="flex items-center gap-1.5">
-              {i > 0 && <span className="text-zinc-600">›</span>}
-              <span className={i === crumbs.length - 1 ? "text-zinc-300" : i === 1 ? "text-emerald-400" : "text-zinc-500"}>{c}</span>
-            </span>
-          ))}
+    <div className="flex-1 h-full bg-zinc-950 flex flex-col overflow-hidden relative">
+      <div
+        className="absolute top-0 left-0 right-0 pointer-events-none"
+        style={{ height: "120px", background: "linear-gradient(to bottom, rgba(255,255,255,0.03), transparent)" }}
+      />
+      <div className="flex-1 overflow-auto">
+        <div className="max-w-4xl mx-auto w-full px-8 py-10">
+          <div className="flex items-start justify-between gap-6 mb-8">
+            <div>
+              <h2 className="text-white text-xl font-medium tracking-tight">{title}</h2>
+              {subtitle && <p className="text-zinc-500 text-xs mt-1.5 max-w-lg leading-relaxed">{subtitle}</p>}
+            </div>
+            {action}
+          </div>
+          {children}
         </div>
       </div>
-      <div className="flex-1 p-5 overflow-auto">{children}</div>
     </div>
   )
 }
 
-function FullPanel({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
-  return (
-    <div className="flex-1 h-full bg-zinc-950 flex flex-col overflow-hidden">
-      <div className="px-5 py-3 border-b border-zinc-800/50 shrink-0">
-        <h2 className="text-white text-sm font-semibold">{title}</h2>
-        {subtitle && <p className="text-zinc-500 text-xs mt-0.5">{subtitle}</p>}
-      </div>
-      <div className="flex-1 p-5 overflow-auto">{children}</div>
-    </div>
-  )
-}
+const card = "rounded-xl border border-zinc-800 bg-zinc-900/50"
 
 function StatTile({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
-      <div className="text-2xl font-semibold text-white">{value}</div>
-      <div className="text-xs text-zinc-500 mt-1">{label}</div>
+    <div className={`${card} p-5 relative overflow-hidden`}>
+      <div
+        className="absolute inset-x-0 top-0 pointer-events-none"
+        style={{ height: "40%", background: "linear-gradient(to bottom, rgba(255,255,255,0.04), transparent)" }}
+      />
+      <div className="text-3xl font-semibold text-white tracking-tight">{value}</div>
+      <div className="text-xs text-zinc-500 mt-1.5">{label}</div>
     </div>
   )
 }
 
-function EmptyState({ title, hint, cta }: { title: string; hint: string; cta?: { label: string; href: string } }) {
+function EmptyState({
+  icon: Icon = Inbox,
+  title,
+  hint,
+  cta,
+}: {
+  icon?: React.ElementType
+  title: string
+  hint: string
+  cta?: { label: string; href: string }
+}) {
   return (
-    <div className="h-full flex items-center justify-center">
+    <div className="h-full min-h-[300px] flex items-center justify-center p-8">
       <div className="text-center max-w-sm">
-        <p className="text-zinc-300 text-sm font-medium mb-1">{title}</p>
-        <p className="text-zinc-500 text-xs mb-4">{hint}</p>
+        <div className="mx-auto w-12 h-12 rounded-xl bg-zinc-900 border border-zinc-800 flex items-center justify-center mb-4">
+          <Icon className="w-5 h-5 text-zinc-500" />
+        </div>
+        <p className="text-zinc-200 text-sm font-medium mb-1.5">{title}</p>
+        <p className="text-zinc-500 text-xs leading-relaxed mb-5">{hint}</p>
         {cta && (
           <a
             href={cta.href}
@@ -404,8 +425,7 @@ function CatchesView({
         {items.length === 0 ? (
           <EmptyState
             title="No catches yet"
-            hint="Install Orin on a repo, record a rejection, then open a PR that re-proposes it."
-            cta={{ label: "Install on GitHub", href: GITHUB_APP_URL }}
+            hint="Every PR and issue Orin checks lands here. Close an issue that records a decision, then open a PR that re-proposes it and watch the check fire."
           />
         ) : (
           items.map((r, i) => (
@@ -423,73 +443,90 @@ function CatchesView({
         )}
       </ListPanel>
 
-      <div className="flex-1 h-full bg-zinc-950 flex flex-col overflow-hidden">
-        <div className="grid grid-cols-3 gap-3 p-5 border-b border-zinc-800/50">
-          <StatTile label="Decisions tracked" value={overview.metrics.decisionsTracked} />
-          <StatTile label="Active rejections" value={overview.metrics.rejectionsActive} />
-          <StatTile label="PRs prevented" value={overview.metrics.prsPrevented} />
-        </div>
+      <div className="flex-1 h-full bg-zinc-950 flex flex-col overflow-hidden relative">
+        <div
+          className="absolute top-0 left-0 right-0 pointer-events-none"
+          style={{ height: "120px", background: "linear-gradient(to bottom, rgba(255,255,255,0.03), transparent)" }}
+        />
         <div className="flex-1 overflow-auto">
-          {!current ? (
-            <EmptyState title="Nothing selected" hint="Catches appear here as Orin checks PRs and issues." />
-          ) : (
-            <div className="p-5">
-              <div className="flex items-center gap-1.5 text-xs mb-4">
-                <span className="text-zinc-500">{current.repo}</span>
-                <span className="text-zinc-600">›</span>
-                <span className="text-emerald-400">Decision memory</span>
-                <span className="text-zinc-600">›</span>
-                <span className="text-zinc-300">
-                  {current.kind.toUpperCase()}-{current.number}
-                </span>
+          <div className="max-w-3xl mx-auto w-full px-8 py-10">
+            <div className="grid grid-cols-3 gap-4 mb-10">
+              <StatTile label="Decisions tracked" value={overview.metrics.decisionsTracked} />
+              <StatTile label="Active rejections" value={overview.metrics.rejectionsActive} />
+              <StatTile label="PRs prevented" value={overview.metrics.prsPrevented} />
+            </div>
+
+            {!current ? (
+              <div className={`${card} p-8`}>
+                <EmptyState
+                  icon={FileText}
+                  title={overview.metrics.decisionsTracked === 0 ? "Memory is empty so far" : "Nothing selected"}
+                  hint={
+                    overview.metrics.decisionsTracked === 0
+                      ? "Orin learns from closed, discussion-rich PRs and issues. Close an issue that records a decision (a rejection with reasoning works best) and it appears in Decisions within a minute."
+                      : "Select a catch on the left to see its citation and evidence."
+                  }
+                />
               </div>
-              <h2 className="text-white text-xl font-semibold mb-5">
-                {current.decisionId ? `Re-proposes ${current.decisionId}` : "No decision conflict"}
-              </h2>
-              {decision && (
-                <div className="bg-zinc-900/80 rounded-lg p-4 text-[12px] font-mono mb-5 border border-zinc-800/50 space-y-2">
-                  <div>
-                    <span className="text-zinc-500">Orin.</span>
-                    <span className="text-amber-300">check_rejected</span>
-                    <span className="text-zinc-400"> flagged this {current.kind} as a </span>
-                    <span className="text-cyan-300">re-proposal</span>
-                  </div>
-                  <div>
-                    <span className="text-purple-400">@decision</span>
-                    <span className="text-zinc-400">(</span>
-                    <span className="text-cyan-300">{decision.decisionId}</span>
-                    <span className="text-zinc-400">, outcome: </span>
-                    <span className="text-orange-300">{decision.outcome}</span>
-                    <span className="text-zinc-400">, superseded: </span>
-                    <span className="text-orange-300">{decision.supersededBy ? decision.supersededBy : "false"}</span>
-                    <span className="text-zinc-400">)</span>
-                  </div>
-                  <div className="text-zinc-400 pt-1">{decision.reasoning}</div>
+            ) : (
+              <div>
+                <div className="flex items-center gap-1.5 text-xs mb-4">
+                  <span className="text-zinc-500">{current.repo}</span>
+                  <span className="text-zinc-600">›</span>
+                  <span className="text-emerald-400">Decision memory</span>
+                  <span className="text-zinc-600">›</span>
+                  <span className="text-zinc-300">
+                    {current.kind.toUpperCase()}-{current.number}
+                  </span>
                 </div>
-              )}
-              <div className="flex items-center gap-3 text-xs">
-                <a
-                  href={`https://github.com/${current.repo}/${current.kind === "pr" ? "pull" : "issues"}/${current.number}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="flex items-center gap-1.5 text-zinc-400 hover:text-zinc-200 transition-colors"
-                >
-                  <ExternalLink className="w-3.5 h-3.5" /> Open {current.kind.toUpperCase()}-{current.number} on GitHub
-                </a>
-                {decision?.sourceUrl && (
+                <h2 className="text-white text-xl font-semibold mb-5">
+                  {current.decisionId ? `Re-proposes ${current.decisionId}` : "No decision conflict"}
+                </h2>
+                {decision && (
+                  <div className="bg-zinc-900/80 rounded-xl p-5 text-[12px] font-mono mb-5 border border-zinc-800/50 space-y-2">
+                    <div>
+                      <span className="text-zinc-500">Orin.</span>
+                      <span className="text-amber-300">check_rejected</span>
+                      <span className="text-zinc-400"> flagged this {current.kind} as a </span>
+                      <span className="text-cyan-300">re-proposal</span>
+                    </div>
+                    <div>
+                      <span className="text-purple-400">@decision</span>
+                      <span className="text-zinc-400">(</span>
+                      <span className="text-cyan-300">{decision.decisionId}</span>
+                      <span className="text-zinc-400">, outcome: </span>
+                      <span className="text-orange-300">{decision.outcome}</span>
+                      <span className="text-zinc-400">, superseded: </span>
+                      <span className="text-orange-300">{decision.supersededBy ? decision.supersededBy : "false"}</span>
+                      <span className="text-zinc-400">)</span>
+                    </div>
+                    <div className="text-zinc-400 pt-1">{decision.reasoning}</div>
+                  </div>
+                )}
+                <div className="flex items-center gap-4 text-xs">
                   <a
-                    href={decision.sourceUrl}
+                    href={`https://github.com/${current.repo}/${current.kind === "pr" ? "pull" : "issues"}/${current.number}`}
                     target="_blank"
                     rel="noreferrer"
                     className="flex items-center gap-1.5 text-zinc-400 hover:text-zinc-200 transition-colors"
                   >
-                    <ExternalLink className="w-3.5 h-3.5" /> View cited decision
+                    <ExternalLink className="w-3.5 h-3.5" /> Open on GitHub
                   </a>
-                )}
-                <span className="ml-auto text-zinc-600">state: {current.state}</span>
+                  {decision?.sourceUrl && (
+                    <a
+                      href={decision.sourceUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex items-center gap-1.5 text-zinc-400 hover:text-zinc-200 transition-colors"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" /> View cited decision
+                    </a>
+                  )}
+                  <span className="ml-auto text-zinc-600">state: {current.state}</span>
+                </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
     </>
@@ -521,12 +558,12 @@ function DecisionsView({
 
   return (
     <>
-      <ListPanel title={repoFilter ? `Decisions · ${repoFilter}` : "Decisions"}>
+      <ListPanel title={repoFilter ? `Decisions · ${repoFilter.split("/")[1] ?? repoFilter}` : "Decisions"}>
         {items.length === 0 ? (
           <EmptyState
+            icon={FileText}
             title="No decisions recorded"
-            hint="Orin extracts decisions from closed PRs and issues after you install it on a repo."
-            cta={{ label: "Install on GitHub", href: GITHUB_APP_URL }}
+            hint="Orin extracts decisions from closed PRs and issues. Close an issue that records a real decision (a rejection with reasoning works best) and it shows up here."
           />
         ) : (
           items.map((d) => (
@@ -545,35 +582,48 @@ function DecisionsView({
       {!current ? (
         <div className="flex-1 bg-zinc-950" />
       ) : (
-        <DetailPanel crumbs={[current.repo || "workspace", "Decision memory", current.decisionId]}>
-          <h2 className="text-white text-xl font-semibold mb-2">{current.title}</h2>
-          <div className="flex items-center gap-2 mb-5">
-            <span
-              className={`text-[10px] px-2 py-0.5 rounded-full uppercase tracking-wide ${
-                current.outcome === "rejected" ? "bg-red-500/15 text-red-400" : current.outcome === "accepted" ? "bg-emerald-500/15 text-emerald-400" : "bg-yellow-500/15 text-yellow-400"
-              }`}
-            >
-              {current.outcome}
-            </span>
-            {current.supersededBy && (
-              <span className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400">superseded by {current.supersededBy}</span>
+        <div className="flex-1 h-full bg-zinc-950 overflow-auto">
+          <div className="max-w-3xl mx-auto w-full px-8 py-10">
+            <div className="flex items-center gap-1.5 text-xs mb-4">
+              <span className="text-zinc-500">{current.repo || "workspace"}</span>
+              <span className="text-zinc-600">›</span>
+              <span className="text-emerald-400">Decision memory</span>
+              <span className="text-zinc-600">›</span>
+              <span className="text-zinc-300">{current.decisionId}</span>
+            </div>
+            <h2 className="text-white text-xl font-semibold mb-3">{current.title}</h2>
+            <div className="flex items-center gap-2 mb-6">
+              <span
+                className={`text-[10px] px-2 py-0.5 rounded-full uppercase tracking-wide ${
+                  current.outcome === "rejected"
+                    ? "bg-red-500/15 text-red-400"
+                    : current.outcome === "accepted"
+                      ? "bg-emerald-500/15 text-emerald-400"
+                      : "bg-yellow-500/15 text-yellow-400"
+                }`}
+              >
+                {current.outcome}
+              </span>
+              {current.supersededBy && (
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400">superseded by {current.supersededBy}</span>
+              )}
+              {current.decidedAt && <span className="text-zinc-600 text-xs">decided {new Date(current.decidedAt).toLocaleDateString()}</span>}
+            </div>
+            <div className={`${card} p-5 text-xs text-zinc-300 leading-relaxed mb-6`}>
+              {current.reasoning || "No reasoning text recorded."}
+            </div>
+            {current.sourceUrl && (
+              <a
+                href={current.sourceUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 text-xs text-zinc-400 hover:text-zinc-200 transition-colors"
+              >
+                <ExternalLink className="w-3.5 h-3.5" /> Source thread
+              </a>
             )}
-            {current.decidedAt && <span className="text-zinc-600 text-xs">decided {new Date(current.decidedAt).toLocaleDateString()}</span>}
           </div>
-          <div className="bg-zinc-900/80 rounded-lg p-4 text-xs border border-zinc-800/50 text-zinc-300 leading-relaxed mb-5">
-            {current.reasoning || "No reasoning text recorded."}
-          </div>
-          {current.sourceUrl && (
-            <a
-              href={current.sourceUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-1.5 text-xs text-zinc-400 hover:text-zinc-200 transition-colors"
-            >
-              <ExternalLink className="w-3.5 h-3.5" /> Source thread
-            </a>
-          )}
-        </DetailPanel>
+        </div>
       )}
     </>
   )
@@ -596,84 +646,258 @@ function ReposView({
 }) {
   const [selDecision, setSelDecision] = useState<string | null>(null)
   if (!overview || !decisions) return <Loading />
-  const repos = overview.repos
+  const repos = overview.installedRepos.length > 0 ? overview.installedRepos : overview.repos
   const current = selectedRepo && repos.includes(selectedRepo) ? selectedRepo : repos[0]
 
   if (repos.length === 0)
     return (
       <div className="flex-1 bg-zinc-950">
         <EmptyState
-          title="No repos with memory yet"
+          icon={Layers}
+          title="No repos connected"
           hint="Install Orin on a repository; its closed PRs and issues become decision memory."
           cta={{ label: "Install on GitHub", href: GITHUB_APP_URL }}
         />
       </div>
     )
 
+  const decisionCount = (r: string) => decisions.filter((d) => d.repo === r).length
+  const currentDecisions = decisions.filter((d) => d.repo === current)
+
   return (
     <>
-      <ListPanel title="Repos">
+      <ListPanel title="Connected repos">
         {repos.map((r) => (
           <ListItem
             key={r}
             title={r}
-            subtitle={`${decisions.filter((d) => d.repo === r).length} decisions`}
-            status={r === current ? "posted" : "ignored"}
+            subtitle={`${decisionCount(r)} decision${decisionCount(r) === 1 ? "" : "s"} recorded`}
+            status={decisionCount(r) > 0 ? "accepted" : "repo"}
             active={r === current}
             onClick={() => onSelectRepo(r)}
           />
         ))}
       </ListPanel>
-      <DecisionsView decisions={decisions} query={query} repoFilter={current ?? null} selected={selDecision} onSelect={setSelDecision} />
+      {currentDecisions.length === 0 ? (
+        <div className="flex-1 h-full bg-zinc-950 overflow-auto">
+          <div className="max-w-3xl mx-auto w-full px-8 py-10">
+            <div className="flex items-center gap-1.5 text-xs mb-6">
+              <span className="text-zinc-500">{current}</span>
+              <span className="text-zinc-600">›</span>
+              <span className="text-emerald-400">Decision memory</span>
+            </div>
+            <div className={`${card} p-8`}>
+              <EmptyState
+                icon={FileText}
+                title="Connected, no decisions yet"
+                hint={`Orin is watching ${current} but hasn't found decision-rich closed threads. It learns the moment a PR or issue closes with a real decision in it, and checks every new PR either way.`}
+              />
+            </div>
+          </div>
+        </div>
+      ) : (
+        <DecisionsView decisions={decisions} query={query} repoFilter={current ?? null} selected={selDecision} onSelect={setSelDecision} />
+      )}
     </>
+  )
+}
+
+/* ── Knowledge graph ────────────────────────────────────────────────── */
+
+function GraphView({ inst, account }: { inst: number; account: string }) {
+  const [status, setStatus] = useState<"loading" | "ok" | "empty" | "error">("loading")
+
+  useEffect(() => {
+    let alive = true
+    setStatus("loading")
+    fetch(api.graphUrl(inst))
+      .then((r) => {
+        if (!alive) return
+        setStatus(r.ok ? "ok" : r.status === 404 ? "empty" : "error")
+      })
+      .catch(() => alive && setStatus("error"))
+    return () => {
+      alive = false
+    }
+  }, [inst])
+
+  return (
+    <FullPanel title="Knowledge graph" subtitle={`Cognee's decision graph for ${account}: entities, decisions, and the reasoning that links them.`}>
+      {status === "loading" && <div className="text-zinc-600 text-xs">Loading…</div>}
+      {status === "ok" && (
+        <iframe
+          src={api.graphUrl(inst)}
+          sandbox="allow-scripts"
+          className="w-full h-[70vh] rounded-xl border border-zinc-800/50 bg-zinc-950"
+          title="Knowledge graph"
+        />
+      )}
+      {status === "empty" && (
+        <div className={`${card} p-8`}>
+          <EmptyState
+            icon={LayoutGrid}
+            title="No graph yet"
+            hint="The knowledge graph is built from recorded decisions. As soon as Orin ingests the first one (a closed PR or issue with a real decision), it appears here."
+          />
+        </div>
+      )}
+      {status === "error" && (
+        <div className={`${card} p-8`}>
+          <EmptyState icon={LayoutGrid} title="Graph unavailable" hint="The graph engine did not respond. Try again in a moment." />
+        </div>
+      )}
+    </FullPanel>
   )
 }
 
 /* ── Integrations ───────────────────────────────────────────────────── */
 
-function IntegrationsView({ overview }: { overview: Overview | null }) {
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <button
+      onClick={() => {
+        navigator.clipboard.writeText(text)
+        setCopied(true)
+        setTimeout(() => setCopied(false), 1500)
+      }}
+      className="text-zinc-500 hover:text-zinc-200 transition-colors"
+      title="Copy"
+    >
+      {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+    </button>
+  )
+}
+
+function IntegrationsView({ inst, overview }: { inst: number; overview: Overview | null }) {
   if (!overview) return <Loading />
   const has = (p: string) => overview.links.some((l) => l.platform === p)
   const rows = [
-    { name: "GitHub App", desc: "Required check + @orin commands on PRs and issues", linked: true, href: GITHUB_APP_URL, action: "Manage" },
-    { name: "Slack app", desc: "/why in channels, 🧠 reactions record decisions", linked: has("slack"), href: "https://orin-bot.duckdns.org/slack/install", action: has("slack") ? "Linked" : "Install" },
-    { name: "Linear agent", desc: "Agent sessions in issues + collision warnings", linked: has("linear"), href: "https://orin-bot.duckdns.org/linear/install", action: has("linear") ? "Linked" : "Install" },
+    {
+      Icon: SiGithub,
+      name: "GitHub App",
+      desc: `Required check + @orin commands. Connected to ${overview.installedRepos.length} repo${overview.installedRepos.length === 1 ? "" : "s"}.`,
+      linked: true,
+      href: GITHUB_APP_URL,
+      action: "Manage repos",
+    },
+    {
+      Icon: SlackIcon,
+      name: "Slack",
+      desc: "/why in channels, 🧠 reactions record decisions. Link it to this org's memory with /orin link.",
+      linked: has("slack"),
+      href: "https://orin-bot.duckdns.org/slack/install",
+      action: has("slack") ? "Linked" : "Add to Slack",
+    },
+    {
+      Icon: SiLinear,
+      name: "Linear",
+      desc: "Agent sessions in issues plus collision warnings on issue create.",
+      linked: has("linear"),
+      href: "https://orin-bot.duckdns.org/linear/install",
+      action: has("linear") ? "Linked" : "Add to Linear",
+    },
   ]
+
+  const mcpJson = `{\n  "mcpServers": {\n    "orin": {\n      "url": "https://orin-bot.duckdns.org/mcp",\n      "headers": { "Authorization": "Bearer <your orin_ key>" }\n    }\n  }\n}`
+
   return (
-    <FullPanel title="Integrations" subtitle="One memory, every surface. Each workspace is an isolated tenant.">
-      <div className="space-y-3 max-w-2xl">
+    <FullPanel title="Integrations" subtitle="One memory, every surface. Each workspace install is an isolated tenant; nothing is shared until you link it.">
+      <div className="space-y-3">
         {rows.map((r) => (
-          <div key={r.name} className="flex items-center justify-between rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
-            <div>
-              <div className="text-white text-sm font-medium flex items-center gap-2">
-                {r.name}
-                {r.linked && <span className="w-2 h-2 rounded-full bg-emerald-500" />}
+          <div key={r.name} className={`${card} p-5 flex items-center justify-between gap-6`}>
+            <div className="flex items-start gap-3.5 min-w-0">
+              <div className="w-9 h-9 rounded-lg bg-zinc-800/80 border border-zinc-700/50 flex items-center justify-center shrink-0">
+                <r.Icon className="w-4.5 h-4.5 text-white" />
               </div>
-              <div className="text-zinc-500 text-xs mt-0.5">{r.desc}</div>
+              <div className="min-w-0">
+                <div className="text-white text-sm font-medium flex items-center gap-2">
+                  {r.name}
+                  {r.linked && (
+                    <span className="flex items-center gap-1 text-[10px] text-emerald-400 font-normal">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> connected
+                    </span>
+                  )}
+                </div>
+                <div className="text-zinc-500 text-xs mt-1 leading-relaxed">{r.desc}</div>
+              </div>
             </div>
             <a
               href={r.href}
               target="_blank"
               rel="noreferrer"
-              className="text-xs px-3 py-1.5 rounded-md border border-zinc-700 text-zinc-300 hover:bg-zinc-800 transition-colors"
+              className="shrink-0 text-xs px-3.5 py-2 rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800 transition-colors"
             >
               {r.action}
             </a>
           </div>
         ))}
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
-          <div className="text-white text-sm font-medium mb-1">MCP (Cursor, Claude Code, CLI)</div>
-          <div className="text-zinc-500 text-xs mb-3">Mint a repo-scoped key under Keys, then add:</div>
-          <pre className="bg-zinc-950 rounded-lg p-3 text-[11px] font-mono text-zinc-400 overflow-x-auto border border-zinc-800/50">
-{`{ "mcpServers": { "orin": {
-    "url": "https://orin-bot.duckdns.org/mcp",
-    "headers": { "Authorization": "Bearer <your orin_ key>" } } } }`}
-          </pre>
+
+        {/* MCP: syntax-colored config, same treatment as the landing page */}
+        <div className={`${card} p-5`}>
+          <div className="flex items-start gap-3.5 mb-4">
+            <div className="w-9 h-9 rounded-lg bg-zinc-800/80 border border-zinc-700/50 flex items-center justify-center shrink-0">
+              <KeyRound className="w-4.5 h-4.5 text-white" />
+            </div>
+            <div>
+              <div className="text-white text-sm font-medium">MCP · Cursor, Claude Code, CLI</div>
+              <div className="text-zinc-500 text-xs mt-1 leading-relaxed">
+                Your coding agents ask Orin before repeating history. Mint a repo-scoped key under Keys, then add this to
+                your MCP client config:
+              </div>
+            </div>
+          </div>
+          <div className="bg-zinc-950 border border-zinc-800/60 rounded-xl p-5 font-mono text-xs relative">
+            <div className="absolute top-4 right-4">
+              <CopyButton text={mcpJson} />
+            </div>
+            <p className="text-zinc-700 mb-3">{"//"}orin-bot.duckdns.org/mcp</p>
+            <p>
+              <span className="text-zinc-500">{"{"}</span>
+            </p>
+            <p className="pl-4">
+              <span className="text-orange-400/70">&quot;mcpServers&quot;</span>
+              <span className="text-zinc-500">: {"{"}</span>
+            </p>
+            <p className="pl-8">
+              <span className="text-orange-400/70">&quot;orin&quot;</span>
+              <span className="text-zinc-500">: {"{"}</span>
+            </p>
+            <p className="pl-12">
+              <span className="text-orange-400/70">&quot;url&quot;</span>
+              <span className="text-zinc-500">: </span>
+              <span className="text-green-400/70">&quot;https://orin-bot.duckdns.org/mcp&quot;</span>
+              <span className="text-zinc-500">,</span>
+            </p>
+            <p className="pl-12">
+              <span className="text-orange-400/70">&quot;headers&quot;</span>
+              <span className="text-zinc-500">: {"{ "}</span>
+              <span className="text-orange-400/70">&quot;Authorization&quot;</span>
+              <span className="text-zinc-500">: </span>
+              <span className="text-green-400/70">&quot;Bearer &lt;your orin_ key&gt;&quot;</span>
+              <span className="text-zinc-500">{" }"}</span>
+            </p>
+            <p className="pl-8">
+              <span className="text-zinc-500">{"}"}</span>
+            </p>
+            <p className="pl-4">
+              <span className="text-zinc-500">{"}"}</span>
+            </p>
+            <p>
+              <span className="text-zinc-500">{"}"}</span>
+            </p>
+          </div>
         </div>
-        <p className="text-zinc-600 text-xs">
-          Cross-platform linking: in Slack run <span className="text-zinc-400 font-mono">/orin link</span>, then comment{" "}
-          <span className="text-zinc-400 font-mono">@orin link CODE</span> on any issue in this org.
-        </p>
+
+        <div className={`${card} p-5`}>
+          <div className="text-white text-sm font-medium mb-1.5">Cross-platform linking</div>
+          <p className="text-zinc-500 text-xs leading-relaxed">
+            To make Slack answer from this org&apos;s GitHub memory: in Slack run{" "}
+            <span className="text-zinc-300 font-mono">/orin link</span>, then have someone with write access comment{" "}
+            <span className="text-zinc-300 font-mono">@orin link CODE</span> on any issue or PR in this org. Codes are
+            single-use and expire in 15 minutes.
+          </p>
+        </div>
       </div>
     </FullPanel>
   )
@@ -681,7 +905,7 @@ function IntegrationsView({ overview }: { overview: Overview | null }) {
 
 /* ── Keys ───────────────────────────────────────────────────────────── */
 
-function KeysView({ inst }: { inst: number }) {
+function KeysView({ inst, overview }: { inst: number; overview: Overview | null }) {
   const [keys, setKeys] = useState<KeyRow[] | null>(null)
   const [repo, setRepo] = useState("")
   const [label, setLabel] = useState("")
@@ -705,109 +929,138 @@ function KeysView({ inst }: { inst: number }) {
     }
   }
 
-  return (
-    <FullPanel title="Keys" subtitle="Repo-scoped orin_ keys for CI pre-flight, the GitHub Action, and MCP clients.">
-      <div className="max-w-3xl">
-        <Dialog
-          open={open}
-          onOpenChange={(o) => {
-            setOpen(o)
-            if (!o) {
-              setMinted(null)
-              setRepo("")
-              setLabel("")
-              setError(null)
-            }
-          }}
-        >
-          <DialogTrigger asChild>
-            <button className="mb-4 px-4 py-2 bg-white text-zinc-900 font-medium rounded-lg hover:bg-zinc-100 transition-colors text-xs">
-              Mint new key
-            </button>
-          </DialogTrigger>
-          <DialogContent className="bg-zinc-900 border-zinc-800 text-zinc-200">
-            <DialogHeader>
-              <DialogTitle className="text-sm">Mint a repo-scoped key</DialogTitle>
-            </DialogHeader>
-            {minted ? (
-              <div>
-                <p className="text-xs text-zinc-400 mb-2">Copy it now; it is shown only once and stored hashed.</p>
-                <div className="flex items-center gap-2 bg-zinc-950 rounded-lg p-3 border border-zinc-800">
-                  <code className="text-[11px] text-emerald-400 break-all flex-1">{minted}</code>
-                  <button onClick={() => navigator.clipboard.writeText(minted)} className="text-zinc-400 hover:text-white shrink-0">
-                    <Copy className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                <Input
-                  placeholder="repo (owner/name)"
-                  value={repo}
-                  onChange={(e) => setRepo(e.target.value)}
-                  className="bg-zinc-950 border-zinc-800 text-zinc-200 text-xs"
-                />
-                <Input
-                  placeholder="label (e.g. ci-gate)"
-                  value={label}
-                  onChange={(e) => setLabel(e.target.value)}
-                  className="bg-zinc-950 border-zinc-800 text-zinc-200 text-xs"
-                />
-                {error && <p className="text-red-400 text-xs">{error}</p>}
-                <button
-                  onClick={mint}
-                  disabled={!repo.trim()}
-                  className="px-4 py-2 bg-white text-zinc-900 font-medium rounded-lg hover:bg-zinc-100 transition-colors text-xs disabled:opacity-40"
-                >
-                  Mint
-                </button>
-              </div>
-            )}
-          </DialogContent>
-        </Dialog>
-
-        {!keys ? (
-          <p className="text-zinc-600 text-xs">Loading…</p>
-        ) : keys.length === 0 ? (
-          <p className="text-zinc-500 text-xs">No keys yet. Mint one to use the CLI, GitHub Action, or MCP.</p>
+  const mintButton = (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        setOpen(o)
+        if (!o) {
+          setMinted(null)
+          setRepo("")
+          setLabel("")
+          setError(null)
+        }
+      }}
+    >
+      <DialogTrigger asChild>
+        <button className="px-4 py-2 bg-white text-zinc-900 font-medium rounded-lg hover:bg-zinc-100 transition-colors text-xs shrink-0">
+          Mint new key
+        </button>
+      </DialogTrigger>
+      <DialogContent className="bg-zinc-900 border-zinc-800 text-zinc-200">
+        <DialogHeader>
+          <DialogTitle className="text-sm">Mint a repo-scoped key</DialogTitle>
+        </DialogHeader>
+        {minted ? (
+          <div>
+            <p className="text-xs text-zinc-400 mb-2">Copy it now; it is shown only once and stored hashed.</p>
+            <div className="flex items-center gap-2 bg-zinc-950 rounded-lg p-3 border border-zinc-800">
+              <code className="text-[11px] text-emerald-400 break-all flex-1">{minted}</code>
+              <CopyButton text={minted} />
+            </div>
+          </div>
         ) : (
-          <div className="rounded-xl border border-zinc-800 overflow-hidden">
-            <table className="w-full text-xs">
-              <thead className="bg-zinc-900/80 text-zinc-500">
-                <tr>
-                  <th className="text-left px-4 py-2 font-medium">Label</th>
-                  <th className="text-left px-4 py-2 font-medium">Repo</th>
-                  <th className="text-left px-4 py-2 font-medium">Created</th>
-                  <th className="text-left px-4 py-2 font-medium">Status</th>
-                  <th className="px-4 py-2" />
-                </tr>
-              </thead>
-              <tbody>
-                {keys.map((k) => (
-                  <tr key={k.keyHash} className="border-t border-zinc-800/50 text-zinc-300">
-                    <td className="px-4 py-2">{k.label || <span className="text-zinc-600">(no label)</span>}</td>
-                    <td className="px-4 py-2 font-mono text-[11px]">{k.repo}</td>
-                    <td className="px-4 py-2 text-zinc-500">{new Date(k.createdAt).toLocaleDateString()}</td>
-                    <td className="px-4 py-2">
-                      {k.revokedAt ? <span className="text-zinc-600">revoked</span> : <span className="text-emerald-400">active</span>}
-                    </td>
-                    <td className="px-4 py-2 text-right">
-                      {!k.revokedAt && (
-                        <button
-                          onClick={() => api.revokeKey(inst, k.keyHash).then(refresh)}
-                          className="text-red-400/80 hover:text-red-300 text-[11px]"
-                        >
-                          Revoke
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="space-y-3">
+            {overview && overview.installedRepos.length > 0 ? (
+              <Select value={repo} onValueChange={setRepo}>
+                <SelectTrigger className="bg-zinc-950 border-zinc-800 text-zinc-200 text-xs">
+                  <SelectValue placeholder="Choose a connected repo" />
+                </SelectTrigger>
+                <SelectContent className="bg-zinc-900 border-zinc-800 text-zinc-200">
+                  {overview.installedRepos.map((r) => (
+                    <SelectItem key={r} value={r}>
+                      {r}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <Input
+                placeholder="repo (owner/name)"
+                value={repo}
+                onChange={(e) => setRepo(e.target.value)}
+                className="bg-zinc-950 border-zinc-800 text-zinc-200 text-xs"
+              />
+            )}
+            <Input
+              placeholder="label (e.g. ci-gate, cursor)"
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              className="bg-zinc-950 border-zinc-800 text-zinc-200 text-xs"
+            />
+            {error && <p className="text-red-400 text-xs">{error}</p>}
+            <button
+              onClick={mint}
+              disabled={!repo.trim()}
+              className="px-4 py-2 bg-white text-zinc-900 font-medium rounded-lg hover:bg-zinc-100 transition-colors text-xs disabled:opacity-40"
+            >
+              Mint
+            </button>
           </div>
         )}
-      </div>
+      </DialogContent>
+    </Dialog>
+  )
+
+  return (
+    <FullPanel
+      title="Keys"
+      subtitle="Repo-scoped orin_ keys authenticate the CI pre-flight, the GitHub Action, and MCP clients. Stored hashed; shown once."
+      action={mintButton}
+    >
+      {!keys ? (
+        <p className="text-zinc-600 text-xs">Loading…</p>
+      ) : keys.length === 0 ? (
+        <div className={`${card} p-8`}>
+          <EmptyState
+            icon={KeyRound}
+            title="No keys yet"
+            hint="Mint a key to let CI or your IDE agents query this org's memory. Each key is scoped to a single repo."
+          />
+        </div>
+      ) : (
+        <div className={`${card} overflow-hidden`}>
+          <table className="w-full text-xs">
+            <thead className="bg-zinc-900/80 text-zinc-500">
+              <tr>
+                <th className="text-left px-5 py-3 font-medium">Label</th>
+                <th className="text-left px-5 py-3 font-medium">Repo</th>
+                <th className="text-left px-5 py-3 font-medium">Created</th>
+                <th className="text-left px-5 py-3 font-medium">Status</th>
+                <th className="px-5 py-3" />
+              </tr>
+            </thead>
+            <tbody>
+              {keys.map((k) => (
+                <tr key={k.keyHash} className="border-t border-zinc-800/50 text-zinc-300">
+                  <td className="px-5 py-3">{k.label || <span className="text-zinc-600">(no label)</span>}</td>
+                  <td className="px-5 py-3 font-mono text-[11px]">{k.repo}</td>
+                  <td className="px-5 py-3 text-zinc-500">{new Date(k.createdAt).toLocaleDateString()}</td>
+                  <td className="px-5 py-3">
+                    {k.revokedAt ? (
+                      <span className="text-zinc-600">revoked</span>
+                    ) : (
+                      <span className="flex items-center gap-1.5 text-emerald-400">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> active
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-5 py-3 text-right">
+                    {!k.revokedAt && (
+                      <button
+                        onClick={() => api.revokeKey(inst, k.keyHash).then(refresh)}
+                        className="text-red-400/80 hover:text-red-300 text-[11px]"
+                      >
+                        Revoke
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </FullPanel>
   )
 }
@@ -838,18 +1091,33 @@ function SettingsView({ inst }: { inst: number }) {
   }
 
   const Row = ({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) => (
-    <div className="flex items-center justify-between gap-6 py-3 border-b border-zinc-800/50">
+    <div className="flex items-center justify-between gap-8 px-5 py-4 border-b border-zinc-800/50 last:border-b-0">
       <div>
         <div className="text-zinc-200 text-xs font-medium">{label}</div>
-        {hint && <div className="text-zinc-600 text-[11px] mt-0.5">{hint}</div>}
+        {hint && <div className="text-zinc-600 text-[11px] mt-1 leading-relaxed max-w-md">{hint}</div>}
       </div>
       <div className="shrink-0">{children}</div>
     </div>
   )
 
   return (
-    <FullPanel title="Settings" subtitle="How Orin delivers and judges catches for this installation.">
-      <div className="max-w-2xl">
+    <FullPanel
+      title="Settings"
+      subtitle="How Orin delivers and judges catches for this installation."
+      action={
+        <div className="flex items-center gap-3">
+          {saved && <span className="text-emerald-400 text-xs">Saved</span>}
+          <button
+            onClick={save}
+            disabled={saving}
+            className="px-4 py-2 bg-white text-zinc-900 font-medium rounded-lg hover:bg-zinc-100 transition-colors text-xs disabled:opacity-40 shrink-0"
+          >
+            {saving ? "Saving…" : "Save changes"}
+          </button>
+        </div>
+      }
+    >
+      <div className={card}>
         <Row label="Delivery mode" hint="check = merge-blocking status check, review = inline PR review, comment = plain comment">
           <Select value={s.deliveryMode} onValueChange={(v) => setS({ ...s, deliveryMode: v })}>
             <SelectTrigger className="w-36 bg-zinc-950 border-zinc-800 text-zinc-200 text-xs h-8">
@@ -865,7 +1133,7 @@ function SettingsView({ inst }: { inst: number }) {
         <Row label="Block on re-proposal" hint="Fail the required check when a PR re-proposes a rejected decision">
           <Switch checked={s.blockOnRepropose} onCheckedChange={(v) => setS({ ...s, blockOnRepropose: v })} />
         </Row>
-        <Row label="Auto-comment" hint="Let Orin write on PRs/issues (off = silent, log-only)">
+        <Row label="Auto-comment" hint="Let Orin write on PRs and issues (off = silent, log-only)">
           <Switch checked={s.autoComment} onCheckedChange={(v) => setS({ ...s, autoComment: v })} />
         </Row>
         <Row label="LLM provider" hint="Model used for extraction and judgment">
@@ -881,7 +1149,7 @@ function SettingsView({ inst }: { inst: number }) {
             </SelectContent>
           </Select>
         </Row>
-        <Row label="Grounding threshold" hint="Minimum shared terms before a decision is even considered (precision gate)">
+        <Row label="Grounding threshold" hint="Minimum shared significant terms before a decision is even considered (the precision gate)">
           <Input
             type="number"
             min={1}
@@ -902,7 +1170,7 @@ function SettingsView({ inst }: { inst: number }) {
             className="w-20 bg-zinc-950 border-zinc-800 text-zinc-200 text-xs h-8"
           />
         </Row>
-        <div className="py-3 border-b border-zinc-800/50">
+        <div className="px-5 py-4">
           <div className="text-zinc-200 text-xs font-medium mb-2">Custom instructions</div>
           <Textarea
             value={s.customInstructions}
@@ -910,16 +1178,6 @@ function SettingsView({ inst }: { inst: number }) {
             placeholder="Extra guidance for Orin's judgment, e.g. what counts as a decision in this org."
             className="bg-zinc-950 border-zinc-800 text-zinc-200 text-xs min-h-20"
           />
-        </div>
-        <div className="pt-4 flex items-center gap-3">
-          <button
-            onClick={save}
-            disabled={saving}
-            className="px-4 py-2 bg-white text-zinc-900 font-medium rounded-lg hover:bg-zinc-100 transition-colors text-xs disabled:opacity-40"
-          >
-            {saving ? "Saving…" : "Save changes"}
-          </button>
-          {saved && <span className="text-emerald-400 text-xs">Saved.</span>}
         </div>
       </div>
     </FullPanel>
