@@ -76,10 +76,13 @@ const checkState = (req: IncomingMessage, state: string): boolean => {
 
 // Origin that served the request: Vercel/Caddy set x-forwarded-host/proto. Falls back to WEB_ORIGIN.
 export function requestOrigin(req: IncomingMessage): string {
-  const host = (req.headers["x-forwarded-host"] ?? req.headers.host) as string | undefined;
+  const first = (v: unknown): string => String(v ?? "").split(",")[0].trim();
+  // Prefer the ORIGINAL host as forwarded by the front proxy (Next dev / Vercel rewrite), which
+  // Caddy is configured to pass through; fall back to the direct Host header, then WEB_ORIGIN.
+  const host = first(req.headers["x-forwarded-host"]) || first(req.headers.host);
   if (!host) return config.webOrigin;
-  const proto = (req.headers["x-forwarded-proto"] as string | undefined) ?? (host.startsWith("localhost") ? "http" : "https");
-  return `${proto.split(",")[0]}://${host.split(",")[0]}`;
+  const proto = first(req.headers["x-forwarded-proto"]) || (host.startsWith("localhost") || host.startsWith("127.") ? "http" : "https");
+  return `${proto}://${host}`;
 }
 
 const oauthConfigured = () => Boolean(config.oauth.clientId && config.oauth.clientSecret);

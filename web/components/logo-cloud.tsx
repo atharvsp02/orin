@@ -1,9 +1,9 @@
 "use client"
 
 import { motion } from "framer-motion"
-import { Slack, Network } from "lucide-react"
+import { Slack } from "lucide-react"
 import { SiGithub, SiLinear, SiVscodium } from "@icons-pack/react-simple-icons"
-import { Claude, Cursor, DeepSeek } from "@lobehub/icons"
+import { Claude, Cursor, DeepSeek, OpenAI } from "@lobehub/icons"
 
 export function LogoCloud() {
   return (
@@ -47,7 +47,7 @@ export function LogoCloud() {
                 { name: "Claude Code", Icon: Claude },
                 { name: "VS Code", Icon: SiVscodium },
                 { name: "DeepSeek", Icon: DeepSeek },
-                { name: "Cognee", Icon: Network },
+                { name: "Codex", Icon: OpenAI },
               ].map(({ name, Icon }) => (
                 <div key={name} className="text-white font-semibold text-xl flex items-center gap-2">
                   <Icon className="w-5 h-5" />
