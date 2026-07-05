@@ -36,3 +36,6 @@ coverage/
 
 # GitHub App private keys — never commit
 *.pem
+
+# local config with real keys — never commit
+*.local.json

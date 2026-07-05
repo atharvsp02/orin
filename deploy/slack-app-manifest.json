@@ -1,0 +1,38 @@
+{
+  "display_information": {
+    "name": "Orin",
+    "description": "Institutional memory — recalls past decisions and flags re-proposals",
+    "background_color": "#2c2d30"
+  },
+  "features": {
+    "bot_user": { "display_name": "Orin", "always_online": true },
+    "slash_commands": [
+      {
+        "command": "/why",
+        "url": "https://orin-bot.duckdns.org/slack/events",
+        "description": "Ask Orin why a past decision was made",
+        "usage_hint": "[your question]",
+        "should_escape": false
+      }
+    ]
+  },
+  "oauth_config": {
+    "redirect_urls": ["https://orin-bot.duckdns.org/slack/oauth_redirect"],
+    "scopes": {
+      "bot": ["commands", "chat:write", "reactions:read", "channels:history", "app_mentions:read"]
+    }
+  },
+  "settings": {
+    "event_subscriptions": {
+      "request_url": "https://orin-bot.duckdns.org/slack/events",
+      "bot_events": ["message.channels", "reaction_added"]
+    },
+    "interactivity": {
+      "is_enabled": true,
+      "request_url": "https://orin-bot.duckdns.org/slack/events"
+    },
+    "org_deploy_enabled": false,
+    "socket_mode_enabled": false,
+    "token_rotation_enabled": false
+  }
+}

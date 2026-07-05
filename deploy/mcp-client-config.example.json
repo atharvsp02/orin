@@ -1,0 +1,12 @@
+{
+  "//": "Orin MCP server config for Cursor / Claude Desktop / any MCP client (streamable HTTP).",
+  "//key": "Replace the token with a repo-scoped orin_ key (minted per installation). Never commit a real key.",
+  "mcpServers": {
+    "orin": {
+      "url": "https://orin-bot.duckdns.org/mcp",
+      "headers": {
+        "Authorization": "Bearer orin_YOUR_REPO_SCOPED_KEY_HERE"
+      }
+    }
+  }
+}
