@@ -1,6 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { createServer } from "node:http";
-import { createNodeMiddleware } from "octokit";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { config } from "./config.js";
 import { app } from "./github.js";
 import * as db from "./db.js";
@@ -105,8 +104,11 @@ async function main() {
     });
   });
 
-  const middleware = createNodeMiddleware(app);
   createServer((req, res) => {
+    if (req.method === "POST" && req.url === "/api/github/webhooks") {
+      void handleWebhook(req, res);
+      return;
+    }
     if (req.method === "POST" && req.url === "/v1/preflight") {
       void handlePreflight(req, res);
       return;
@@ -123,8 +125,32 @@ async function main() {
       void handleGraph(req, res);
       return;
     }
-    void middleware(req, res);
+    res.writeHead(404, { "Content-Type": "application/json" }).end('{"error":"not found"}');
   }).listen(config.port, () => console.log(`Orin bot listening on :${config.port}`));
+}
+
+// Verify + dispatch a GitHub App webhook using the App's own webhooks instance (App-JWT auth, no OAuth).
+async function handleWebhook(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const id = String(req.headers["x-github-delivery"] ?? "");
+  const name = String(req.headers["x-github-event"] ?? "");
+  const signature = String(req.headers["x-hub-signature-256"] ?? "");
+  if (!id || !name || !signature) {
+    res.writeHead(400).end("missing webhook headers");
+    return;
+  }
+  const chunks: Buffer[] = [];
+  req.on("data", (c: Buffer) => chunks.push(c));
+  req.on("end", () => {
+    const payload = Buffer.concat(chunks).toString("utf8"); // exact bytes GitHub signed
+    app.webhooks
+      .verifyAndReceive({ id, name: name as never, signature, payload })
+      .then(() => res.writeHead(200, { "Content-Type": "application/json" }).end('{"ok":true}'))
+      .catch((e: Error) => {
+        console.warn("webhook rejected:", e.message);
+        res.writeHead(400).end("invalid signature or handler error");
+      });
+  });
+  req.on("error", () => res.writeHead(400).end("read error"));
 }
 
 main().catch((err) => {
