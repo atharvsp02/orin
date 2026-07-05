@@ -129,7 +129,7 @@ function GitHubMockup() {
         <div className="flex items-center gap-2 text-xs">
           <span className="text-zinc-600">↗</span>
           <span className="text-zinc-500">maya</span>
-          <span className="text-zinc-600">replied @orin good catch...</span>
+          <span className="text-zinc-600">replied @orinbot good catch...</span>
         </div>
         <div className="flex items-center gap-2 text-xs">
           <span className="text-zinc-600">↗</span>

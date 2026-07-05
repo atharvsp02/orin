@@ -316,15 +316,15 @@ export function ProductDirectionSection() {
             <div className="flex flex-col gap-3">
               <div className="flex items-center gap-3">
                 <div className="w-1 h-5 rounded-full bg-green-500" />
-                <span className="text-zinc-200 font-medium">@orin rule: seed standing constraints</span>
+                <span className="text-zinc-200 font-medium">@orinbot rule: seed standing constraints</span>
               </div>
               <div className="flex items-center gap-3">
                 <div className="w-1 h-5 rounded-full bg-green-500/50" />
-                <span className="text-zinc-400">@orin override: supersede with receipts</span>
+                <span className="text-zinc-400">@orinbot override: supersede with receipts</span>
               </div>
               <div className="flex items-center gap-3">
                 <div className="w-1 h-5 rounded-full bg-green-500/30" />
-                <span className="text-zinc-500">@orin good / bad: tune precision</span>
+                <span className="text-zinc-500">@orinbot good / bad: tune precision</span>
               </div>
             </div>
           </div>

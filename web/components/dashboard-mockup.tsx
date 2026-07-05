@@ -174,7 +174,7 @@ export function DashboardMockup() {
           <InboxItem
             id="DOC-7"
             title="Rule: no new runtime deps"
-            subtitle="seeded via @orin rule"
+            subtitle="seeded via @orinbot rule"
             time="4h"
             avatar="https://i.pravatar.cc/32?img=4"
             status="todo"
@@ -306,7 +306,7 @@ export function DashboardMockup() {
                 avatar="https://i.pravatar.cc/24?img=2"
                 name="maya"
                 action="replied"
-                from="@orin good"
+                from="@orinbot good"
                 time="1 minute ago"
               />
             </div>

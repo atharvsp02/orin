@@ -100,7 +100,7 @@ function ConnectHub({ me }: { me: Me }) {
       Icon: Slack,
       name: "Slack",
       what: "Ask /why in the channel where the debate started. Works standalone with its own workspace memory, or connected to your GitHub org's memory.",
-      how: "Install to your workspace, then either use it as-is or run /orin link and paste the code in a GitHub comment (@orin link CODE) to connect it to repo memory.",
+      how: "Install to your workspace, then either use it as-is or run /orin link and paste the code in a GitHub comment (@orinbot link CODE) to connect it to repo memory.",
       href: "https://orin-bot.duckdns.org/slack/install",
       action: "Add to Slack",
     },

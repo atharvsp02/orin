@@ -428,8 +428,8 @@ const CatchesRail = () => (
     </RailSection>
     <RailSection title="React on the PR">
       <RailP>
-        <Cmd>@orin good</Cmd> / <Cmd>@orin bad</Cmd> rate the catch and reweight memory. <Cmd>@orin override</Cmd>{" "}
-        supersedes the decision with receipts. <Cmd>@orin ignore</Cmd> mutes the thread.
+        <Cmd>@orinbot good</Cmd> / <Cmd>@orinbot bad</Cmd> rate the catch and reweight memory. <Cmd>@orinbot override</Cmd>{" "}
+        supersedes the decision with receipts. <Cmd>@orinbot ignore</Cmd> mutes the thread.
       </RailP>
     </RailSection>
   </>
@@ -454,7 +454,7 @@ const DecisionsRail = () => (
     </RailSection>
     <RailSection title="Supersession">
       <RailP>
-        Decisions are never deleted, they are <b>superseded</b>. <Cmd>@orin override REF &quot;reason&quot;</Cmd> on the
+        Decisions are never deleted, they are <b>superseded</b>. <Cmd>@orinbot override REF &quot;reason&quot;</Cmd> on the
         flagged thread records the reversal and stops future flags.
       </RailP>
     </RailSection>
@@ -504,7 +504,7 @@ const RulesRail = () => (
     </RailSection>
     <RailSection title="From GitHub">
       <RailP>
-        <Cmd>@orin rule &lt;text&gt;</Cmd> on any thread seeds that repo&apos;s scope. <Cmd>@orin rules</Cmd> lists
+        <Cmd>@orinbot rule &lt;text&gt;</Cmd> on any thread seeds that repo&apos;s scope. <Cmd>@orinbot rules</Cmd> lists
         both scopes.
       </RailP>
     </RailSection>
@@ -580,7 +580,7 @@ const IntegrationsRail = () => (
             In Slack: <Cmd>/orin link</Cmd> (workspace admins) returns a one-time code.
           </>,
           <>
-            On GitHub: comment <Cmd>@orin link CODE</Cmd> on any issue here (write access required).
+            On GitHub: comment <Cmd>@orinbot link CODE</Cmd> on any issue here (write access required).
           </>,
           <>
             Slack&apos;s <Cmd>/why</Cmd> now answers from this org&apos;s memory.
@@ -1322,7 +1322,7 @@ function IntegrationsView({ inst, overview }: { inst: number; overview: Overview
     {
       Icon: SiGithub,
       name: "GitHub App",
-      desc: `Required check + @orin commands. Connected to ${overview.installedRepos.length} repo${overview.installedRepos.length === 1 ? "" : "s"}.`,
+      desc: `Required check + @orinbot commands. Connected to ${overview.installedRepos.length} repo${overview.installedRepos.length === 1 ? "" : "s"}.`,
       linked: true,
       href: GITHUB_APP_URL,
       action: "Manage repos",
@@ -1440,7 +1440,7 @@ function IntegrationsView({ inst, overview }: { inst: number; overview: Overview
           <p className="text-zinc-500 text-xs leading-relaxed">
             To make Slack answer from this org&apos;s GitHub memory: in Slack run{" "}
             <span className="text-zinc-300 font-mono">/orin link</span>, then have someone with write access comment{" "}
-            <span className="text-zinc-300 font-mono">@orin link CODE</span> on any issue or PR in this org. Codes are
+            <span className="text-zinc-300 font-mono">@orinbot link CODE</span> on any issue or PR in this org. Codes are
             single-use and expire in 15 minutes.
           </p>
         </div>
@@ -1763,7 +1763,7 @@ function RulesView({ inst, overview }: { inst: number; overview: Overview | null
   return (
     <FullPanel
       title="Rules"
-      subtitle="Standing constraints Orin enforces alongside decision memory. Org-wide rules apply to every repo; repo rules apply only there. @orin rule on GitHub seeds that repo's scope."
+      subtitle="Standing constraints Orin enforces alongside decision memory. Org-wide rules apply to every repo; repo rules apply only there. @orinbot rule on GitHub seeds that repo's scope."
       rail={<RulesRail />}
       action={
         <Select value={scope || "__org__"} onValueChange={(v) => setScope(v === "__org__" ? "" : v)}>
@@ -1832,7 +1832,7 @@ function RulesView({ inst, overview }: { inst: number; overview: Overview | null
           <EmptyState
             icon={BookOpen}
             title={scope ? `No rules for ${scope} yet` : "No org-wide rules yet"}
-            hint="Rules you add here (or via @orin rule on GitHub) appear on catches when a PR touches them. Newly added rules can take a minute to index."
+            hint="Rules you add here (or via @orinbot rule on GitHub) appear on catches when a PR touches them. Newly added rules can take a minute to index."
           />
         </div>
       ) : (
