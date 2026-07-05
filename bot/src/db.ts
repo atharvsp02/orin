@@ -96,6 +96,14 @@ export async function initSchema(): Promise<void> {
       expires_at  TIMESTAMPTZ NOT NULL,
       used_at     TIMESTAMPTZ
     );
+    CREATE TABLE IF NOT EXISTS docs (
+      installation_id BIGINT NOT NULL,
+      filename        TEXT   NOT NULL,
+      title           TEXT   NOT NULL,
+      repo            TEXT   NOT NULL DEFAULT '',  -- '' = org-wide
+      created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (installation_id, filename)
+    );
     ALTER TABLE preflight_keys ADD COLUMN IF NOT EXISTS label TEXT NOT NULL DEFAULT '';
   `);
 }
@@ -593,6 +601,29 @@ export async function linksFor(installationId: number): Promise<Array<{ platform
     [installationId],
   );
   return rows.map((r) => ({ platform: r.platform, externalId: r.external_id }));
+}
+
+export interface DocRow {
+  filename: string;
+  title: string;
+  repo: string;
+  createdAt: string;
+}
+
+export async function insertDoc(installationId: number, filename: string, title: string, repo: string): Promise<void> {
+  await pool.query(
+    `INSERT INTO docs (installation_id, filename, title, repo) VALUES ($1, $2, $3, $4)
+     ON CONFLICT (installation_id, filename) DO UPDATE SET title = EXCLUDED.title, repo = EXCLUDED.repo, created_at = now()`,
+    [installationId, filename, title, repo],
+  );
+}
+
+export async function listDocs(installationId: number): Promise<DocRow[]> {
+  const { rows } = await pool.query(
+    `SELECT filename, title, repo, created_at FROM docs WHERE installation_id = $1 ORDER BY created_at DESC`,
+    [installationId],
+  );
+  return rows.map((r) => ({ filename: r.filename, title: r.title, repo: r.repo, createdAt: String(r.created_at) }));
 }
 
 // --- feedback lifecycle: sessions that got a 👍/👎 and are due for /improve ---

@@ -7,7 +7,7 @@ import * as db from "./db.js";
 import * as cognee from "./cognee.js";
 import { sessionFrom, send } from "./auth.js";
 import { installationOctokit } from "./github.js";
-import { listRules } from "./pipeline.js";
+import { listRules, rulesNodeset } from "./pipeline.js";
 import * as llm from "./llm.js";
 import { ONTOLOGY_KEY } from "./ontology.js";
 import type { TenantCredentials } from "./cognee.js";
@@ -143,14 +143,15 @@ export async function handleDash(req: IncomingMessage, res: ServerResponse, path
   }
 
   if (resource === "rules" && req.method === "GET") {
+    const scope = new URL(req.url ?? "/", "http://x").searchParams.get("repo") || undefined;
     const creds: TenantCredentials = { apiKey: installation.cogneeApiKey, tenantId: "" };
     let rules: string[] = [];
     try {
-      rules = await listRules(installation, creds);
+      rules = await listRules(installation, creds, scope);
     } catch {
       rules = []; // dataset may not exist yet: an honest empty list
     }
-    send(res, 200, { rules });
+    send(res, 200, { rules, scope: scope ?? "" });
     return true;
   }
 
@@ -163,6 +164,7 @@ export async function handleDash(req: IncomingMessage, res: ServerResponse, path
       return true;
     }
     const text = (body.text ?? "").trim();
+    const scope = typeof (body as { repo?: unknown }).repo === "string" ? ((body as { repo: string }).repo.trim() || undefined) : undefined;
     if (!text) {
       send(res, 400, { error: "text required" });
       return true;
@@ -175,14 +177,19 @@ export async function handleDash(req: IncomingMessage, res: ServerResponse, path
       void cognee
         .remember(cog, creds, {
           datasetName: installation.datasetName,
-          filename: "coding-rules.txt",
+          filename: scope ? `coding-rules-${scope.replace(/[^a-zA-Z0-9]+/g, "-")}.txt` : "coding-rules.txt",
           content: rules.map((r) => `- ${r}`).join("\n"),
-          nodeSet: "coding_agent_rules",
+          nodeSet: rulesNodeset(scope),
           ontologyKey: ONTOLOGY_KEY,
         })
         .catch((e) => console.warn("rules remember failed:", (e as Error).message));
     }
-    send(res, 200, { rules, indexing: rules.length > 0 });
+    send(res, 200, { rules, indexing: rules.length > 0, scope: scope ?? "" });
+    return true;
+  }
+
+  if (resource === "docs" && req.method === "GET") {
+    send(res, 200, { docs: await db.listDocs(inst) });
     return true;
   }
 
@@ -196,16 +203,20 @@ export async function handleDash(req: IncomingMessage, res: ServerResponse, path
     }
     const title = (body.title ?? "").trim().slice(0, 120);
     const content = (body.content ?? "").trim();
+    const repoScope = typeof (body as { repo?: unknown }).repo === "string" ? ((body as { repo: string }).repo.trim() || "") : "";
     if (!title || !content) {
       send(res, 400, { error: "title and content required" });
       return true;
     }
     const creds: TenantCredentials = { apiKey: installation.cogneeApiKey, tenantId: "" };
     const filename = `${title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "doc"}.md`;
+    // Repo attribution steers retrieval and shows in citations; '' means org-wide.
+    const header = repoScope ? `${title}\nRepo: ${repoScope}\n\n` : `${title}\n\n`;
     // Cognify takes tens of seconds; ingest in the background and acknowledge now.
     void cognee
-      .remember(cog, creds, { datasetName: installation.datasetName, filename, content: `${title}\n\n${content}`, ontologyKey: ONTOLOGY_KEY })
+      .remember(cog, creds, { datasetName: installation.datasetName, filename, content: header + content, ontologyKey: ONTOLOGY_KEY })
       .catch((e) => console.warn("doc remember failed:", (e as Error).message));
+    await db.insertDoc(inst, filename, title, repoScope);
     let rules: string[] = [];
     if (body.extractRules) {
       const cfg = await db.getTenantConfig(inst);
@@ -214,15 +225,15 @@ export async function handleDash(req: IncomingMessage, res: ServerResponse, path
         void cognee
           .remember(cog, creds, {
             datasetName: installation.datasetName,
-            filename: "coding-rules.txt",
+            filename: repoScope ? `coding-rules-${repoScope.replace(/[^a-zA-Z0-9]+/g, "-")}.txt` : "coding-rules.txt",
             content: rules.map((r) => `- ${r}`).join("\n"),
-            nodeSet: "coding_agent_rules",
+            nodeSet: rulesNodeset(repoScope || undefined),
             ontologyKey: ONTOLOGY_KEY,
           })
           .catch((e) => console.warn("doc rules remember failed:", (e as Error).message));
       }
     }
-    send(res, 202, { accepted: true, filename, rules });
+    send(res, 202, { accepted: true, filename, rules, repo: repoScope });
     return true;
   }
 

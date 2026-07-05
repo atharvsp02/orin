@@ -217,8 +217,8 @@ export function DashboardShell({ me }: { me: Me }) {
       {view === "repos" && (
         <ReposView overview={overview} decisions={decisions} selectedRepo={selectedRepo} onSelectRepo={setSelectedRepo} query={query} />
       )}
-      {view === "rules" && <RulesView inst={inst} />}
-      {view === "docs" && <DocsView inst={inst} />}
+      {view === "rules" && <RulesView inst={inst} overview={overview} />}
+      {view === "docs" && <DocsView inst={inst} overview={overview} />}
       {view === "graph" && <GraphView inst={inst} account={account} />}
       {view === "integrations" && <IntegrationsView inst={inst} overview={overview} />}
       {view === "keys" && <KeysView inst={inst} overview={overview} />}
@@ -1194,15 +1194,20 @@ function SettingsView({ inst }: { inst: number }) {
 
 /* ── Rules ──────────────────────────────────────────────────────────── */
 
-function RulesView({ inst }: { inst: number }) {
+function RulesView({ inst, overview }: { inst: number; overview: Overview | null }) {
+  const [scope, setScope] = useState<string>("") // '' = org-wide
   const [rules, setRules] = useState<string[] | null>(null)
   const [text, setText] = useState("")
   const [busy, setBusy] = useState(false)
   const [added, setAdded] = useState<string[] | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  const refresh = useCallback(() => api.rules(inst).then((r) => setRules(r.rules)).catch(() => setRules([])), [inst])
+  const refresh = useCallback(
+    () => api.rules(inst, scope || undefined).then((r) => setRules(r.rules)).catch(() => setRules([])),
+    [inst, scope],
+  )
   useEffect(() => {
+    setRules(null)
     refresh()
   }, [refresh])
 
@@ -1211,7 +1216,7 @@ function RulesView({ inst }: { inst: number }) {
     setError(null)
     setAdded(null)
     try {
-      const r = await api.addRule(inst, text.trim())
+      const r = await api.addRule(inst, text.trim(), scope || undefined)
       setAdded(r.rules)
       if (r.rules.length > 0) setText("")
       setTimeout(refresh, 4000) // indexing runs in the background; refresh shortly after
@@ -1225,7 +1230,22 @@ function RulesView({ inst }: { inst: number }) {
   return (
     <FullPanel
       title="Rules"
-      subtitle="Standing constraints Orin enforces alongside decision memory. Seed them here or with @orin rule on any GitHub thread; matched rules are cited on catches."
+      subtitle="Standing constraints Orin enforces alongside decision memory. Org-wide rules apply to every repo; repo rules apply only there. @orin rule on GitHub seeds that repo's scope."
+      action={
+        <Select value={scope || "__org__"} onValueChange={(v) => setScope(v === "__org__" ? "" : v)}>
+          <SelectTrigger className="w-52 bg-zinc-950 border-zinc-800 text-zinc-200 text-xs h-8">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent className="bg-zinc-900 border-zinc-800 text-zinc-200">
+            <SelectItem value="__org__">Org-wide (all repos)</SelectItem>
+            {(overview?.installedRepos ?? []).map((r) => (
+              <SelectItem key={r} value={r}>
+                {r}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      }
     >
       <div className={`${card} p-5 mb-4`}>
         <div className="text-zinc-200 text-xs font-medium mb-2">Add rules</div>
@@ -1277,7 +1297,7 @@ function RulesView({ inst }: { inst: number }) {
         <div className={`${card} p-8`}>
           <EmptyState
             icon={BookOpen}
-            title="No rules yet"
+            title={scope ? `No rules for ${scope} yet` : "No org-wide rules yet"}
             hint="Rules you add here (or via @orin rule on GitHub) appear on catches when a PR touches them. Newly added rules can take a minute to index."
           />
         </div>
@@ -1297,13 +1317,20 @@ function RulesView({ inst }: { inst: number }) {
 
 /* ── Docs ───────────────────────────────────────────────────────────── */
 
-function DocsView({ inst }: { inst: number }) {
+function DocsView({ inst, overview }: { inst: number; overview: Overview | null }) {
   const [title, setTitle] = useState("")
   const [content, setContent] = useState("")
+  const [repo, setRepo] = useState<string>("") // '' = org-wide
   const [extract, setExtract] = useState(true)
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<{ filename: string; rules: string[] } | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [docs, setDocs] = useState<Array<{ filename: string; title: string; repo: string; createdAt: string }> | null>(null)
+
+  const refreshDocs = useCallback(() => api.docs(inst).then((r) => setDocs(r.docs)).catch(() => setDocs([])), [inst])
+  useEffect(() => {
+    refreshDocs()
+  }, [refreshDocs])
 
   const onFile = (f: File | null) => {
     if (!f) return
@@ -1318,10 +1345,11 @@ function DocsView({ inst }: { inst: number }) {
     setError(null)
     setResult(null)
     try {
-      const r = await api.uploadDoc(inst, title.trim(), content.trim(), extract)
+      const r = await api.uploadDoc(inst, title.trim(), content.trim(), extract, repo || undefined)
       setResult({ filename: r.filename, rules: r.rules })
       setTitle("")
       setContent("")
+      refreshDocs()
     } catch (e) {
       setError((e as Error).message)
     } finally {
@@ -1354,6 +1382,19 @@ function DocsView({ inst }: { inst: number }) {
               Choose .md / .txt file
               <input type="file" accept=".md,.txt,.markdown" className="hidden" onChange={(e) => onFile(e.target.files?.[0] ?? null)} />
             </label>
+            <Select value={repo || "__org__"} onValueChange={(v) => setRepo(v === "__org__" ? "" : v)}>
+              <SelectTrigger className="w-48 bg-zinc-950 border-zinc-800 text-zinc-200 text-xs h-8">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="bg-zinc-900 border-zinc-800 text-zinc-200">
+                <SelectItem value="__org__">Org-wide</SelectItem>
+                {(overview?.installedRepos ?? []).map((r) => (
+                  <SelectItem key={r} value={r}>
+                    {r}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <label className="flex items-center gap-2 text-xs text-zinc-400 cursor-pointer">
               <Switch checked={extract} onCheckedChange={setExtract} />
               Also extract coding rules
@@ -1388,6 +1429,20 @@ function DocsView({ inst }: { inst: number }) {
               </ul>
             </>
           )}
+        </div>
+      )}
+
+      {docs && docs.length > 0 && (
+        <div className={`${card} mt-4 divide-y divide-zinc-800/50`}>
+          <div className="px-5 py-3 text-zinc-500 text-[11px] font-medium uppercase tracking-wider">Uploaded docs</div>
+          {docs.map((d) => (
+            <div key={d.filename} className="px-5 py-3.5 flex items-center gap-3">
+              <FileText className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
+              <span className="text-zinc-300 text-xs flex-1 truncate">{d.title}</span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400">{d.repo || "org-wide"}</span>
+              <span className="text-zinc-600 text-[10px]">{new Date(d.createdAt).toLocaleDateString()}</span>
+            </div>
+          ))}
         </div>
       )}
     </FullPanel>

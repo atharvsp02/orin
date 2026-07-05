@@ -109,7 +109,7 @@ async function catchWorker(jobs: PgBoss.Job<CatchJob>[]): Promise<void> {
     const sessionId = `orin-pr-${data.installationId}-${data.number}`;
     const judgment = await evaluatePr(inst, cfg, creds, prText, data.repo, sessionId);
     // Advisory coding-rule hints only enrich an existing re-proposal finding (kept out of the blocking gate).
-    const rules = judgment.matches ? await matchRules(inst, cfg, creds, prText) : [];
+    const rules = judgment.matches ? await matchRules(inst, cfg, creds, prText, data.repo) : [];
     const decision = await buildDecision(inst, cfg, data.repo, pr, judgment, rules);
 
     if (cfg.autoComment) {

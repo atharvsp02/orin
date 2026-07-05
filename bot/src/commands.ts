@@ -173,8 +173,18 @@ export async function handleCommand(job: CommandJob, boss: PgBoss): Promise<void
       break;
     }
     case "rules": {
-      const rules = await listRules(inst, creds);
-      await reply(rules.length ? `**Coding rules Orin tracks:**\n${rules.map((r) => `- ${r}`).join("\n")}` : "No coding rules recorded yet — add one with `@orin rule <text>`.");
+      const [org, scoped] = await Promise.all([
+        listRules(inst, creds).catch(() => [] as string[]),
+        listRules(inst, creds, job.repo).catch(() => [] as string[]),
+      ]);
+      if (org.length === 0 && scoped.length === 0) {
+        await reply("No coding rules recorded yet. Add one with `@orin rule <text>` (scoped to this repo).");
+        break;
+      }
+      const parts: string[] = [];
+      if (scoped.length) parts.push(`**Rules for ${job.repo}:**\n${scoped.map((r) => `- ${r}`).join("\n")}`);
+      if (org.length) parts.push(`**Org-wide rules:**\n${org.map((r) => `- ${r}`).join("\n")}`);
+      await reply(parts.join("\n\n"));
       break;
     }
     case "link": {
@@ -207,8 +217,8 @@ export async function handleCommand(job: CommandJob, boss: PgBoss): Promise<void
         break;
       }
       const cfg = await db.getTenantConfig(job.installationId);
-      const seeded = await seedRules(inst, cfg, creds, cmd.text);
-      await reply(seeded.length ? `📏 Recorded ${seeded.length} rule(s):\n${seeded.map((r) => `- ${r}`).join("\n")}` : "Couldn't extract a concrete rule from that — try phrasing it as a constraint.");
+      const seeded = await seedRules(inst, cfg, creds, cmd.text, job.repo);
+      await reply(seeded.length ? `📏 Recorded ${seeded.length} rule(s) for **${job.repo}**:\n${seeded.map((r) => `- ${r}`).join("\n")}` : "Couldn't extract a concrete rule from that. Phrase it as a constraint.");
       break;
     }
   }

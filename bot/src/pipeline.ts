@@ -194,40 +194,48 @@ export async function improveTenant(creds: TenantCredentials, datasetName: strin
 // --- coding rules: CODING_RULES enforcement (REST-native) + seeding via node_set ---
 
 const RULES_NODESET = "coding_agent_rules";
+// Repo-scoped rules live in their own nodeset so enforcement never crosses repos.
+export const rulesNodeset = (repo?: string) => (repo ? `${RULES_NODESET}::${repo}` : RULES_NODESET);
 
-/** Mine rules from freeform text and seed them into the graph under the coding-rules nodeset. */
+/** Mine rules from freeform text and seed them (org-wide by default, or scoped to one repo). */
 export async function seedRules(
   inst: Installation,
   cfg: TenantConfig,
   creds: TenantCredentials,
   text: string,
+  repo?: string,
 ): Promise<string[]> {
   const rules = await llm.extractRules(cfg.llmProvider, text);
   if (rules.length === 0) return [];
   await cognee.remember(cog, creds, {
     datasetName: inst.datasetName,
-    filename: "coding-rules.txt",
+    filename: repo ? `coding-rules-${repo.replace(/[^a-zA-Z0-9]+/g, "-")}.txt` : "coding-rules.txt",
     content: rules.map((r) => `- ${r}`).join("\n"),
-    nodeSet: RULES_NODESET,
+    nodeSet: rulesNodeset(repo),
     ontologyKey: ONTOLOGY_KEY,
   });
   return rules;
 }
 
-/** List the repo's coding rules (deterministic CODING_RULES search — no LLM). */
-export async function listRules(inst: Installation, creds: TenantCredentials): Promise<string[]> {
-  return cognee.searchCodingRules(cog, creds, { datasetName: inst.datasetName, nodeset: RULES_NODESET });
+/** List coding rules for one scope: org-wide (no repo) or a single repo. Deterministic, no LLM. */
+export async function listRules(inst: Installation, creds: TenantCredentials, repo?: string): Promise<string[]> {
+  return cognee.searchCodingRules(cog, creds, { datasetName: inst.datasetName, nodeset: rulesNodeset(repo) });
 }
 
-/** Which seeded rules does this PR text plausibly touch (grounding gate; advisory, non-blocking). */
+/** Which rules does this PR text plausibly touch: org-wide rules + the PR's repo rules. */
 export async function matchRules(
   inst: Installation,
   cfg: TenantConfig,
   creds: TenantCredentials,
   prText: string,
+  repo?: string,
 ): Promise<string[]> {
-  const rules = await listRules(inst, creds);
-  return rules.filter((r) => grounded(prText, r, Math.max(2, cfg.confidenceThreshold)));
+  const [org, scoped] = await Promise.all([
+    listRules(inst, creds).catch(() => [] as string[]),
+    repo ? listRules(inst, creds, repo).catch(() => [] as string[]) : Promise.resolve([] as string[]),
+  ]);
+  const all = [...new Set([...org, ...scoped])];
+  return all.filter((r) => grounded(prText, r, Math.max(2, cfg.confidenceThreshold)));
 }
 
 /** Cited recall over the tenant's decision graph (for `@orin recall|why`).
