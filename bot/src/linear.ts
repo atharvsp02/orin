@@ -126,8 +126,16 @@ function checkState(secret: string, state: string): boolean {
   return Date.now() - Number(ts) < 15 * 60_000;
 }
 
+// Escape untrusted values before interpolating into HTML (org names are attacker-chosen).
+const esc = (s: string): string =>
+  s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] as string);
+
 function html(res: ServerResponse, status: number, body: string): void {
-  res.writeHead(status, { "Content-Type": "text/html; charset=utf-8" });
+  res.writeHead(status, {
+    "Content-Type": "text/html; charset=utf-8",
+    "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",
+    "X-Content-Type-Options": "nosniff",
+  });
   res.end(`<!doctype html><meta charset="utf-8"><body style="font-family:system-ui;max-width:36rem;margin:4rem auto">${body}</body>`);
 }
 
@@ -175,7 +183,7 @@ async function handleOAuthCallback(req: IncomingMessage, res: ServerResponse, se
   await provisionAndLink({ platform: "linear", externalId: org.id }, `linear:${org.name}`).catch((e) =>
     console.error("linear auto-provision failed:", (e as Error).message),
   );
-  html(res, 200, `<h2>✅ Orin installed for ${org.name}</h2><p>Your workspace has its own isolated decision memory. Create an issue (or @mention Orin) to try it.</p>`);
+  html(res, 200, `<h2>✅ Orin installed for ${esc(org.name)}</h2><p>Your workspace has its own isolated decision memory. Create an issue (or @mention Orin) to try it.</p>`);
 }
 
 // --- HTTP server ---
