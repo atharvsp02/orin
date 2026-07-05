@@ -1,15 +1,17 @@
 "use client"
 
 import { motion } from "framer-motion"
-import { ChevronRight, Check, Paperclip, Globe, Lightbulb } from "lucide-react"
+import { ChevronRight, Check, Paperclip, Globe, Lightbulb, Workflow } from "lucide-react"
+import { SiGithubcopilot } from "@icons-pack/react-simple-icons"
+import { Claude, Cursor, OpenAI, Windsurf } from "@lobehub/icons"
 
 const agents = [
-  { name: "Cursor", isAgent: true, selected: true, icon: "◇" },
-  { name: "GitHub Copilot", isAgent: true, selected: false, icon: "◉" },
-  { name: "Claude Code", isAgent: true, selected: false, icon: "◈" },
-  { name: "Windsurf", isAgent: false, selected: false, icon: "○" },
-  { name: "Codex", isAgent: true, selected: false, icon: "◎" },
-  { name: "CI pipeline", isAgent: false, selected: false, icon: "○" },
+  { name: "Cursor", isAgent: true, selected: true, Icon: Cursor },
+  { name: "GitHub Copilot", isAgent: true, selected: false, Icon: SiGithubcopilot },
+  { name: "Claude Code", isAgent: true, selected: false, Icon: Claude },
+  { name: "Windsurf", isAgent: false, selected: false, Icon: Windsurf },
+  { name: "Codex", isAgent: true, selected: false, Icon: OpenAI },
+  { name: "CI pipeline", isAgent: false, selected: false, Icon: Workflow },
 ]
 
 export function AISection() {
@@ -174,7 +176,7 @@ export function AISection() {
                         }}
                       >
                         <div className="flex items-center gap-3">
-                          <span className="text-zinc-400 text-lg">{agent.icon}</span>
+                          <agent.Icon className="w-[18px] h-[18px] text-zinc-400" />
                           <span className={agent.selected ? "text-white font-medium" : "text-zinc-300"}>
                             {agent.name}
                           </span>
@@ -316,7 +318,7 @@ export function AISection() {
                       <span className="text-zinc-600">Why did we reject redis?</span>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <button className="flex items-center gap-1.5 border border-zinc-700/60 text-zinc-500 text-sm px-3 py-1.5 rounded-full hover:bg-zinc-700/30 transition-colors">
                         <Paperclip className="w-3.5 h-3.5" />
                         ask_decision

@@ -1,7 +1,9 @@
 "use client"
 
 import { motion } from "framer-motion"
-import { Github, Slack, Layers, MousePointer2, Sparkles, Code2, Brain, Network } from "lucide-react"
+import { Slack, Network } from "lucide-react"
+import { SiGithub, SiLinear, SiVscodium } from "@icons-pack/react-simple-icons"
+import { Claude, Cursor, DeepSeek } from "@lobehub/icons"
 
 export function LogoCloud() {
   return (
@@ -37,13 +39,13 @@ export function LogoCloud() {
             {/* Logo grid */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-x-16 gap-y-10 items-center justify-items-center transition-all duration-300 group-hover:blur-[2.5px] group-hover:opacity-50">
               {[
-                { name: "GitHub", Icon: Github },
+                { name: "GitHub", Icon: SiGithub },
                 { name: "Slack", Icon: Slack },
-                { name: "Linear", Icon: Layers },
-                { name: "Cursor", Icon: MousePointer2 },
-                { name: "Claude Code", Icon: Sparkles },
-                { name: "VS Code", Icon: Code2 },
-                { name: "DeepSeek", Icon: Brain },
+                { name: "Linear", Icon: SiLinear },
+                { name: "Cursor", Icon: Cursor },
+                { name: "Claude Code", Icon: Claude },
+                { name: "VS Code", Icon: SiVscodium },
+                { name: "DeepSeek", Icon: DeepSeek },
                 { name: "Cognee", Icon: Network },
               ].map(({ name, Icon }) => (
                 <div key={name} className="text-white font-semibold text-xl flex items-center gap-2">
