@@ -34,11 +34,22 @@ Secrets live only in `~/codeguard/bot/.env` (chmod 600, git-ignored) and never i
 - Paste [`slack-app-manifest.json`](slack-app-manifest.json) at **api.slack.com/apps → App Manifest (JSON)** → Save.
 - Install via `https://orin-bot.duckdns.org/slack/install`.
 - App ID `A0BF7VA9TJN`. Secrets (signing/client/state) are in the VM `.env`.
-- After install, link the workspace to a tenant (no silent default — isolation by design).
+- **Self-serve:** every new workspace is auto-provisioned its own isolated memory on install.
+- **Commands:** `/why [repo:owner/name] <question>` · `/orin link|status|repos|unlink|help` ·
+  react `:decision:` on a message to record it.
+
+## Linking a Slack workspace to a GitHub org's memory (cross-platform)
+1. In Slack: `/orin link` → Orin replies (ephemeral) with a one-time code (15 min, single-use,
+   bound to that workspace).
+2. On GitHub: someone with **write access** comments `@orin link <CODE>` on any issue/PR in the
+   org → Orin links the workspace to that installation's memory.
+Security: minting is ephemeral + workspace-bound; consuming is write-access-gated; a used/leaked
+code grants nothing. `/orin unlink` reverts the workspace to a fresh memory of its own.
 
 ## Linear adapter (pending credentials)
 - Needs a Linear OAuth token/API key + webhook signing secret. Then: env + `start-linear.sh` +
   Caddy `/linear` route. Webhook URL `https://orin-bot.duckdns.org/linear`.
+- **Self-serve:** an unknown Linear org is auto-provisioned its own memory on first event.
 
 ## Add a new adapter route (Caddy)
 `/etc/caddy/Caddyfile` on rey3 — add a `handle /x* { reverse_proxy localhost:PORT }` block inside the

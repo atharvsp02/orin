@@ -11,7 +11,14 @@
         "command": "/why",
         "url": "https://orin-bot.duckdns.org/slack/events",
         "description": "Ask Orin why a past decision was made",
-        "usage_hint": "[your question]",
+        "usage_hint": "[repo:owner/name] your question",
+        "should_escape": false
+      },
+      {
+        "command": "/orin",
+        "url": "https://orin-bot.duckdns.org/slack/events",
+        "description": "Manage Orin: link to GitHub memory, status, repos, unlink",
+        "usage_hint": "link | status | repos | unlink | help",
         "should_escape": false
       }
     ]
