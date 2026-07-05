@@ -317,26 +317,28 @@ function ListItem({
   )
 }
 
-/** Full-width view: centered content column + landing-style header, no more left-hugging. */
+/** Full-width view: centered content column, landing-style header, contextual guide rail. */
 function FullPanel({
   title,
   subtitle,
   action,
+  rail,
   children,
 }: {
   title: string
   subtitle?: string
   action?: React.ReactNode
+  rail?: React.ReactNode
   children: React.ReactNode
 }) {
   return (
-    <div className="flex-1 h-full bg-zinc-950 flex flex-col overflow-hidden relative">
+    <div className="flex-1 h-full bg-zinc-950 flex overflow-hidden relative">
       <div
         className="absolute top-0 left-0 right-0 pointer-events-none"
         style={{ height: "120px", background: "linear-gradient(to bottom, rgba(255,255,255,0.03), transparent)" }}
       />
       <div className="flex-1 overflow-auto">
-        <div className="max-w-4xl mx-auto w-full px-8 py-10">
+        <div className="max-w-3xl mx-auto w-full px-8 py-10">
           <div className="flex items-start justify-between gap-6 mb-8">
             <div>
               <h2 className="text-white text-xl font-medium tracking-tight">{title}</h2>
@@ -347,6 +349,311 @@ function FullPanel({
           {children}
         </div>
       </div>
+      {rail && <HelpRail>{rail}</HelpRail>}
+    </div>
+  )
+}
+
+/* ── Guide rail: quiet, contextual instructions on the right of every view ── */
+
+function HelpRail({ children }: { children: React.ReactNode }) {
+  return (
+    <aside className="hidden xl:flex w-[290px] shrink-0 h-full border-l border-zinc-800/50 bg-zinc-900/20 flex-col relative z-10">
+      <div className="flex-1 overflow-auto px-6 py-10 space-y-8">{children}</div>
+    </aside>
+  )
+}
+
+function RailSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <div className="text-[10px] text-zinc-500 font-medium uppercase tracking-wider mb-2.5">{title}</div>
+      <div className="space-y-2.5">{children}</div>
+    </div>
+  )
+}
+
+const RailP = ({ children }: { children: React.ReactNode }) => (
+  <p className="text-xs text-zinc-500 leading-relaxed [&_b]:text-zinc-300 [&_b]:font-medium">{children}</p>
+)
+
+const Cmd = ({ children }: { children: React.ReactNode }) => (
+  <code className="text-[11px] font-mono text-zinc-300 bg-zinc-800/70 border border-zinc-700/50 rounded px-1.5 py-0.5 whitespace-nowrap">
+    {children}
+  </code>
+)
+
+function RailSteps({ steps }: { steps: React.ReactNode[] }) {
+  return (
+    <ol className="space-y-2.5">
+      {steps.map((st, i) => (
+        <li key={i} className="flex items-start gap-2.5">
+          <span className="w-4.5 h-4.5 min-w-[18px] h-[18px] rounded-full bg-zinc-800 border border-zinc-700/60 text-zinc-400 text-[10px] flex items-center justify-center mt-px">
+            {i + 1}
+          </span>
+          <span className="text-xs text-zinc-500 leading-relaxed [&_b]:text-zinc-300 [&_b]:font-medium">{st}</span>
+        </li>
+      ))}
+    </ol>
+  )
+}
+
+const CatchesRail = () => (
+  <>
+    <RailSection title="What a catch is">
+      <RailP>
+        Orin checks every PR and issue against this org&apos;s recorded decisions. A <b>catch</b> is a match: the check
+        fails (or warns) with a citation to the original decision.
+      </RailP>
+    </RailSection>
+    <RailSection title="How it flows">
+      <RailSteps
+        steps={[
+          <>A PR opens or updates in a connected repo.</>,
+          <>Orin grounds it against decision memory. Nothing relevant: the check passes silently.</>,
+          <>
+            A re-proposal fails the check with the cited decision, right on the PR.
+          </>,
+        ]}
+      />
+    </RailSection>
+    <RailSection title="States">
+      <RailLegend
+        items={[
+          { color: "bg-red-500", label: "posted: flagged with a citation" },
+          { color: "bg-emerald-500", label: "clear: checked, no conflict" },
+          { color: "bg-zinc-600", label: "ignored: muted by a maintainer" },
+        ]}
+      />
+    </RailSection>
+    <RailSection title="React on the PR">
+      <RailP>
+        <Cmd>@orin good</Cmd> / <Cmd>@orin bad</Cmd> rate the catch and reweight memory. <Cmd>@orin override</Cmd>{" "}
+        supersedes the decision with receipts. <Cmd>@orin ignore</Cmd> mutes the thread.
+      </RailP>
+    </RailSection>
+  </>
+)
+
+const DecisionsRail = () => (
+  <>
+    <RailSection title="Where these come from">
+      <RailP>
+        When a PR or issue <b>closes</b>, Orin reads the thread and extracts the decision: outcome, reasoning, and key
+        terms. Docs you upload become memory too.
+      </RailP>
+    </RailSection>
+    <RailSection title="Outcomes">
+      <RailLegend
+        items={[
+          { color: "bg-red-500", label: "rejected: guarded against re-proposal" },
+          { color: "bg-emerald-500", label: "accepted: context for recall" },
+          { color: "bg-yellow-500", label: "reverted: was accepted, then undone" },
+        ]}
+      />
+    </RailSection>
+    <RailSection title="Supersession">
+      <RailP>
+        Decisions are never deleted, they are <b>superseded</b>. <Cmd>@orin override REF &quot;reason&quot;</Cmd> on the
+        flagged thread records the reversal and stops future flags.
+      </RailP>
+    </RailSection>
+    <RailSection title="Fastest way to seed one">
+      <RailP>
+        Close an issue whose last comment states a real decision with reasoning. It appears here within a minute.
+      </RailP>
+    </RailSection>
+  </>
+)
+
+const ReposRail = () => (
+  <>
+    <RailSection title="Connected repos">
+      <RailP>
+        These are the repositories the GitHub App is installed on, live from GitHub. Each one&apos;s closed PRs and
+        issues were backfilled on install.
+      </RailP>
+    </RailSection>
+    <RailSection title="Add or remove">
+      <RailP>
+        Manage repo access from the GitHub App settings (Integrations → <b>Manage repos</b>). New repos backfill
+        automatically; removals stop new checks.
+      </RailP>
+    </RailSection>
+    <RailSection title="Scoping">
+      <RailP>
+        Decision ids like <Cmd>PR-42</Cmd> are scoped per repo, so identical numbers in different repos never collide.
+      </RailP>
+    </RailSection>
+  </>
+)
+
+const RulesRail = () => (
+  <>
+    <RailSection title="Two scopes">
+      <RailP>
+        <b>Org-wide</b> rules apply to every connected repo. <b>Repo</b> rules apply only there. A PR is checked against
+        both sets, never another repo&apos;s.
+      </RailP>
+    </RailSection>
+    <RailSection title="How they surface">
+      <RailP>
+        Rules are <b>advisory</b>: when a catch fires and the PR text touches a rule, the rule is cited alongside the
+        decision. They never block on their own.
+      </RailP>
+    </RailSection>
+    <RailSection title="From GitHub">
+      <RailP>
+        <Cmd>@orin rule &lt;text&gt;</Cmd> on any thread seeds that repo&apos;s scope. <Cmd>@orin rules</Cmd> lists
+        both scopes.
+      </RailP>
+    </RailSection>
+    <RailSection title="Writing good rules">
+      <RailP>
+        One constraint per sentence, imperative, concrete: &quot;Do not add new runtime dependencies without maintainer
+        approval.&quot; Indexing takes about a minute.
+      </RailP>
+    </RailSection>
+  </>
+)
+
+const DocsRail = () => (
+  <>
+    <RailSection title="What to upload">
+      <RailP>
+        Documents that carry decisions: ADRs, CONTRIBUTING, postmortems, design docs, migration notes. Not code; Orin
+        reads reasoning, not diffs.
+      </RailP>
+    </RailSection>
+    <RailSection title="What happens">
+      <RailSteps
+        steps={[
+          <>The doc is ingested into the knowledge graph (about a minute).</>,
+          <>
+            It becomes citable memory for catches, <Cmd>/why</Cmd> in Slack, and MCP agents.
+          </>,
+          <>With the toggle on, concrete rules are extracted in the same pass.</>,
+        ]}
+      />
+    </RailSection>
+    <RailSection title="Repo attribution">
+      <RailP>
+        Scoping a doc to a repo steers retrieval and citations toward it. <b>Org-wide</b> fits standards and
+        cross-cutting ADRs.
+      </RailP>
+    </RailSection>
+  </>
+)
+
+const GraphRail = () => (
+  <>
+    <RailSection title="What you are seeing">
+      <RailP>
+        Cognee&apos;s knowledge graph of this org&apos;s memory: decisions, entities they touch, and the reasoning
+        edges between them, grounded by Orin&apos;s decision ontology.
+      </RailP>
+    </RailSection>
+    <RailSection title="How it grows">
+      <RailP>
+        Every ingested decision and doc adds nodes and edges. Maintainer <Cmd>good</Cmd>/<Cmd>bad</Cmd> feedback
+        reweights the exact nodes behind each verdict, hourly.
+      </RailP>
+    </RailSection>
+    <RailSection title="Interaction">
+      <RailP>Drag to pan, scroll to zoom, hover nodes for labels. The graph runs sandboxed for safety.</RailP>
+    </RailSection>
+  </>
+)
+
+const IntegrationsRail = () => (
+  <>
+    <RailSection title="Isolation model">
+      <RailP>
+        Every install (GitHub org, Slack workspace, Linear org) gets its <b>own isolated memory</b>. Nothing is shared
+        until an admin explicitly links it.
+      </RailP>
+    </RailSection>
+    <RailSection title="Link Slack to this org">
+      <RailSteps
+        steps={[
+          <>
+            In Slack: <Cmd>/orin link</Cmd> (workspace admins) returns a one-time code.
+          </>,
+          <>
+            On GitHub: comment <Cmd>@orin link CODE</Cmd> on any issue here (write access required).
+          </>,
+          <>
+            Slack&apos;s <Cmd>/why</Cmd> now answers from this org&apos;s memory.
+          </>,
+        ]}
+      />
+    </RailSection>
+    <RailSection title="Codes">
+      <RailP>Single-use, 15-minute expiry, bound to the minting workspace. A leaked used code grants nothing.</RailP>
+    </RailSection>
+  </>
+)
+
+const KeysRail = () => (
+  <>
+    <RailSection title="What keys unlock">
+      <RailP>
+        A key authenticates the <b>pre-flight API</b>, the <b>GitHub Action</b>, and <b>MCP clients</b> (Cursor, Claude
+        Code, the CLI) against this org&apos;s memory.
+      </RailP>
+    </RailSection>
+    <RailSection title="Scope and storage">
+      <RailP>
+        Each key is scoped to <b>one repo</b>. Only a SHA-256 hash is stored; the plaintext is shown once at mint.
+        Revocation is immediate.
+      </RailP>
+    </RailSection>
+    <RailSection title="Use it">
+      <RailSteps
+        steps={[
+          <>Mint a key for the repo your agent or CI works in.</>,
+          <>Paste the MCP snippet from Integrations with your key.</>,
+          <>
+            In CI: the pre-flight exits non-zero when a change re-proposes a rejected decision.
+          </>,
+        ]}
+      />
+    </RailSection>
+  </>
+)
+
+const SettingsRail = () => (
+  <>
+    <RailSection title="Delivery modes">
+      <RailP>
+        <b>check</b> is a status check that can block merges. <b>review</b> posts an inline PR review. <b>comment</b> is
+        a plain comment, the gentlest option.
+      </RailP>
+    </RailSection>
+    <RailSection title="Precision knobs">
+      <RailP>
+        <b>Grounding threshold</b>: shared significant terms required before a decision is even considered; raise it if
+        you see false positives. <b>Semantic cutoff</b>: lower is stricter.
+      </RailP>
+    </RailSection>
+    <RailSection title="Philosophy">
+      <RailP>
+        Orin is precision-first: when evidence is weak it stays <b>silent</b> rather than guessing. Blocking only fires
+        on a cited re-proposal.
+      </RailP>
+    </RailSection>
+  </>
+)
+
+function RailLegend({ items }: { items: Array<{ color: string; label: string }> }) {
+  return (
+    <div className="space-y-1.5">
+      {items.map((it) => (
+        <div key={it.label} className="flex items-center gap-2">
+          <span className={`w-2 h-2 rounded-full ${it.color}`} />
+          <span className="text-xs text-zinc-500">{it.label}</span>
+        </div>
+      ))}
     </div>
   )
 }
@@ -450,7 +757,7 @@ function CatchesView({
         )}
       </ListPanel>
 
-      <div className="flex-1 h-full bg-zinc-950 flex flex-col overflow-hidden relative">
+      <div className="flex-1 h-full bg-zinc-950 flex overflow-hidden relative">
         <div
           className="absolute top-0 left-0 right-0 pointer-events-none"
           style={{ height: "120px", background: "linear-gradient(to bottom, rgba(255,255,255,0.03), transparent)" }}
@@ -535,6 +842,9 @@ function CatchesView({
             )}
           </div>
         </div>
+        <HelpRail>
+          <CatchesRail />
+        </HelpRail>
       </div>
     </>
   )
@@ -589,7 +899,8 @@ function DecisionsView({
       {!current ? (
         <div className="flex-1 bg-zinc-950" />
       ) : (
-        <div className="flex-1 h-full bg-zinc-950 overflow-auto">
+        <div className="flex-1 h-full bg-zinc-950 flex overflow-hidden">
+          <div className="flex-1 overflow-auto">
           <div className="max-w-3xl mx-auto w-full px-8 py-10">
             <div className="flex items-center gap-1.5 text-xs mb-4">
               <span className="text-zinc-500">{current.repo || "workspace"}</span>
@@ -630,6 +941,10 @@ function DecisionsView({
               </a>
             )}
           </div>
+          </div>
+          <HelpRail>
+            <DecisionsRail />
+          </HelpRail>
         </div>
       )}
     </>
@@ -686,7 +1001,8 @@ function ReposView({
         ))}
       </ListPanel>
       {currentDecisions.length === 0 ? (
-        <div className="flex-1 h-full bg-zinc-950 overflow-auto">
+        <div className="flex-1 h-full bg-zinc-950 flex overflow-hidden">
+          <div className="flex-1 overflow-auto">
           <div className="max-w-3xl mx-auto w-full px-8 py-10">
             <div className="flex items-center gap-1.5 text-xs mb-6">
               <span className="text-zinc-500">{current}</span>
@@ -701,6 +1017,10 @@ function ReposView({
               />
             </div>
           </div>
+          </div>
+          <HelpRail>
+            <ReposRail />
+          </HelpRail>
         </div>
       ) : (
         <DecisionsView decisions={decisions} query={query} repoFilter={current ?? null} selected={selDecision} onSelect={setSelDecision} />
@@ -729,7 +1049,7 @@ function GraphView({ inst, account }: { inst: number; account: string }) {
   }, [inst])
 
   return (
-    <FullPanel title="Knowledge graph" subtitle={`Cognee's decision graph for ${account}: entities, decisions, and the reasoning that links them.`}>
+    <FullPanel title="Knowledge graph" subtitle={`Cognee's decision graph for ${account}: entities, decisions, and the reasoning that links them.`} rail={<GraphRail />}>
       {status === "loading" && <div className="text-zinc-600 text-xs">Loading…</div>}
       {status === "ok" && (
         <iframe
@@ -809,7 +1129,7 @@ function IntegrationsView({ inst, overview }: { inst: number; overview: Overview
   const mcpJson = `{\n  "mcpServers": {\n    "orin": {\n      "url": "https://orin-bot.duckdns.org/mcp",\n      "headers": { "Authorization": "Bearer <your orin_ key>" }\n    }\n  }\n}`
 
   return (
-    <FullPanel title="Integrations" subtitle="One memory, every surface. Each workspace install is an isolated tenant; nothing is shared until you link it.">
+    <FullPanel title="Integrations" subtitle="One memory, every surface. Each workspace install is an isolated tenant; nothing is shared until you link it." rail={<IntegrationsRail />}>
       <div className="space-y-3">
         {rows.map((r) => (
           <div key={r.name} className={`${card} p-5 flex items-center justify-between gap-6`}>
@@ -1014,6 +1334,7 @@ function KeysView({ inst, overview }: { inst: number; overview: Overview | null 
       title="Keys"
       subtitle="Repo-scoped orin_ keys authenticate the CI pre-flight, the GitHub Action, and MCP clients. Stored hashed; shown once."
       action={mintButton}
+      rail={<KeysRail />}
     >
       {!keys ? (
         <p className="text-zinc-600 text-xs">Loading…</p>
@@ -1111,6 +1432,7 @@ function SettingsView({ inst }: { inst: number }) {
     <FullPanel
       title="Settings"
       subtitle="How Orin delivers and judges catches for this installation."
+      rail={<SettingsRail />}
       action={
         <div className="flex items-center gap-3">
           {saved && <span className="text-emerald-400 text-xs">Saved</span>}
@@ -1231,6 +1553,7 @@ function RulesView({ inst, overview }: { inst: number; overview: Overview | null
     <FullPanel
       title="Rules"
       subtitle="Standing constraints Orin enforces alongside decision memory. Org-wide rules apply to every repo; repo rules apply only there. @orin rule on GitHub seeds that repo's scope."
+      rail={<RulesRail />}
       action={
         <Select value={scope || "__org__"} onValueChange={(v) => setScope(v === "__org__" ? "" : v)}>
           <SelectTrigger className="w-52 bg-zinc-950 border-zinc-800 text-zinc-200 text-xs h-8">
@@ -1361,6 +1684,7 @@ function DocsView({ inst, overview }: { inst: number; overview: Overview | null 
     <FullPanel
       title="Docs"
       subtitle="Feed Orin the documents that carry decisions: ADRs, CONTRIBUTING, postmortems, design docs. They become citable memory for catches, /why, and your IDE agents."
+      rail={<DocsRail />}
     >
       <div className={`${card} p-5`}>
         <div className="grid gap-3">
