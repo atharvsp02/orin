@@ -5,7 +5,7 @@
 // sheen, syntax-colored code, brand icons. Every value comes from the API; empty states are
 // honest and specific. No fabricated data, ever.
 import type React from "react"
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   CirclePower,
   Inbox,
@@ -42,7 +42,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { api, timeAgo, type Me, type Overview, type Decision, type KeyRow, type Settings } from "@/lib/orin-api"
+import { api, timeAgo, type Me, type Overview, type Decision, type KeyRow, type Settings, type GraphData } from "@/lib/orin-api"
 
 type View = "catches" | "decisions" | "repos" | "rules" | "docs" | "graph" | "integrations" | "keys" | "settings"
 
@@ -1032,15 +1032,22 @@ function ReposView({
 /* ── Knowledge graph ────────────────────────────────────────────────── */
 
 function GraphView({ inst, account }: { inst: number; account: string }) {
+  const [data, setData] = useState<GraphData | null>(null)
   const [status, setStatus] = useState<"loading" | "ok" | "empty" | "error">("loading")
 
   useEffect(() => {
     let alive = true
     setStatus("loading")
-    fetch(api.graphUrl(inst))
-      .then((r) => {
+    setData(null)
+    api
+      .graphData(inst)
+      .then((d) => {
         if (!alive) return
-        setStatus(r.ok ? "ok" : r.status === 404 ? "empty" : "error")
+        if (!d.nodes.length) setStatus("empty")
+        else {
+          setData(d)
+          setStatus("ok")
+        }
       })
       .catch(() => alive && setStatus("error"))
     return () => {
@@ -1049,16 +1056,13 @@ function GraphView({ inst, account }: { inst: number; account: string }) {
   }, [inst])
 
   return (
-    <FullPanel title="Knowledge graph" subtitle={`Cognee's decision graph for ${account}: entities, decisions, and the reasoning that links them.`} rail={<GraphRail />}>
-      {status === "loading" && <div className="text-zinc-600 text-xs">Loading…</div>}
-      {status === "ok" && (
-        <iframe
-          src={api.graphUrl(inst)}
-          sandbox="allow-scripts"
-          className="w-full h-[70vh] rounded-xl border border-zinc-800/50 bg-zinc-950"
-          title="Knowledge graph"
-        />
-      )}
+    <FullPanel
+      title="Knowledge graph"
+      subtitle={`${account}'s decision memory: every decision, the entities Cognee extracted from it, and how they connect. Shared entities pull related decisions together.`}
+      rail={<GraphRail />}
+    >
+      {status === "loading" && <div className="text-zinc-600 text-xs">Building graph…</div>}
+      {status === "ok" && data && <ForceGraph data={data} />}
       {status === "empty" && (
         <div className={`${card} p-8`}>
           <EmptyState
@@ -1070,10 +1074,225 @@ function GraphView({ inst, account }: { inst: number; account: string }) {
       )}
       {status === "error" && (
         <div className={`${card} p-8`}>
-          <EmptyState icon={LayoutGrid} title="Graph unavailable" hint="The graph engine did not respond. Try again in a moment." />
+          <EmptyState icon={LayoutGrid} title="Graph unavailable" hint="Couldn't load the decision graph. Try again in a moment." />
         </div>
       )}
     </FullPanel>
+  )
+}
+
+type SimNode = GraphData["nodes"][number] & { x: number; y: number; vx: number; vy: number }
+
+const NODE_COLOR = (n: SimNode) =>
+  n.type === "repo"
+    ? "#3b82f6"
+    : n.type === "term"
+      ? "#8b5cf6"
+      : n.outcome === "rejected"
+        ? "#ef4444"
+        : n.outcome === "accepted"
+          ? "#10b981"
+          : "#eab308"
+const NODE_R = (n: SimNode) =>
+  n.type === "repo" ? 13 : n.type === "decision" ? 8 + Math.min(6, n.degree ?? 1) : 3.5 + Math.min(5, n.degree ?? 1)
+
+function ForceGraph({ data }: { data: GraphData }) {
+  const W = 960
+  const H = 640
+  const nodesRef = useRef<SimNode[]>([])
+  const [, setTick] = useState(0)
+  const [hover, setHover] = useState<string | null>(null)
+  const [zoom, setZoom] = useState(1)
+  const drag = useRef<string | null>(null)
+  const svgRef = useRef<SVGSVGElement>(null)
+  const alphaRef = useRef(1)
+
+  // neighbor lookup for hover highlighting
+  const neighbors = useMemo(() => {
+    const m = new Map<string, Set<string>>()
+    for (const e of data.edges) {
+      if (!m.has(e.source)) m.set(e.source, new Set())
+      if (!m.has(e.target)) m.set(e.target, new Set())
+      m.get(e.source)!.add(e.target)
+      m.get(e.target)!.add(e.source)
+    }
+    return m
+  }, [data])
+
+  useEffect(() => {
+    const N = data.nodes.length
+    nodesRef.current = data.nodes.map((n, i) => {
+      const a = (i / N) * Math.PI * 2
+      return { ...n, x: W / 2 + Math.cos(a) * 220 + (i % 9), y: H / 2 + Math.sin(a) * 170 + (i % 7), vx: 0, vy: 0 }
+    })
+    const byId = new Map(nodesRef.current.map((n) => [n.id, n]))
+    alphaRef.current = 1
+    let raf = 0
+    const tick = () => {
+      const ns = nodesRef.current
+      const alpha = alphaRef.current
+      for (let i = 0; i < ns.length; i++) {
+        for (let j = i + 1; j < ns.length; j++) {
+          const a = ns[i]
+          const b = ns[j]
+          let dx = a.x - b.x
+          let dy = a.y - b.y
+          let d2 = dx * dx + dy * dy || 0.01
+          const d = Math.sqrt(d2)
+          const f = (2600 / d2) * alpha
+          const ux = dx / d
+          const uy = dy / d
+          a.vx += ux * f
+          a.vy += uy * f
+          b.vx -= ux * f
+          b.vy -= uy * f
+        }
+      }
+      for (const e of data.edges) {
+        const a = byId.get(e.source)
+        const b = byId.get(e.target)
+        if (!a || !b) continue
+        const L = e.kind === "has-term" ? 74 : e.kind === "in-repo" ? 104 : 130
+        let dx = b.x - a.x
+        let dy = b.y - a.y
+        const d = Math.sqrt(dx * dx + dy * dy) || 0.01
+        const f = (d - L) * 0.03 * alpha
+        const ux = dx / d
+        const uy = dy / d
+        a.vx += ux * f
+        a.vy += uy * f
+        b.vx -= ux * f
+        b.vy -= uy * f
+      }
+      for (const n of ns) {
+        if (drag.current === n.id) continue
+        n.vx += (W / 2 - n.x) * 0.006 * alpha
+        n.vy += (H / 2 - n.y) * 0.006 * alpha
+        n.vx *= 0.85
+        n.vy *= 0.85
+        n.x += n.vx
+        n.y += n.vy
+      }
+      alphaRef.current = alpha * 0.986
+      setTick((t) => t + 1)
+      if (alphaRef.current > 0.02) raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [data])
+
+  const toSvg = (clientX: number, clientY: number) => {
+    const r = svgRef.current!.getBoundingClientRect()
+    return { x: ((clientX - r.left) / r.width) * W, y: ((clientY - r.top) / r.height) * H }
+  }
+  const onMove = (e: React.PointerEvent) => {
+    if (!drag.current) return
+    const p = toSvg(e.clientX, e.clientY)
+    const n = nodesRef.current.find((x) => x.id === drag.current)
+    if (n) {
+      n.x = p.x
+      n.y = p.y
+      n.vx = 0
+      n.vy = 0
+      alphaRef.current = Math.max(alphaRef.current, 0.3)
+      setTick((t) => t + 1)
+    }
+  }
+
+  const ns = nodesRef.current
+  const byId = new Map(ns.map((n) => [n.id, n]))
+  const dim = (id: string) => hover !== null && hover !== id && !neighbors.get(hover)?.has(id)
+
+  return (
+    <div className={`${card} relative overflow-hidden`}>
+      {/* controls */}
+      <div className="absolute top-3 right-3 z-10 flex items-center gap-1">
+        <button onClick={() => setZoom((z) => Math.min(2.2, z + 0.15))} className="w-7 h-7 rounded-md bg-zinc-800/80 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 text-sm">+</button>
+        <button onClick={() => setZoom((z) => Math.max(0.5, z - 0.15))} className="w-7 h-7 rounded-md bg-zinc-800/80 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 text-sm">−</button>
+        <button onClick={() => { setZoom(1); alphaRef.current = 0.6 }} className="h-7 px-2 rounded-md bg-zinc-800/80 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 text-[11px]">Reset</button>
+      </div>
+      {/* stats */}
+      <div className="absolute top-3 left-4 z-10 text-[11px] text-zinc-500">
+        <span className="text-zinc-300 font-medium">{data.stats.decisions}</span> decisions ·{" "}
+        <span className="text-zinc-300 font-medium">{data.stats.entities}</span> entities
+      </div>
+
+      <svg
+        ref={svgRef}
+        viewBox={`0 0 ${W} ${H}`}
+        className="w-full h-[68vh] block cursor-grab active:cursor-grabbing"
+        onPointerMove={onMove}
+        onPointerUp={() => (drag.current = null)}
+        onPointerLeave={() => (drag.current = null)}
+      >
+        <g transform={`translate(${W / 2} ${H / 2}) scale(${zoom}) translate(${-W / 2} ${-H / 2})`}>
+          {data.edges.map((e, i) => {
+            const a = byId.get(e.source)
+            const b = byId.get(e.target)
+            if (!a || !b) return null
+            const faded = dim(e.source) || dim(e.target)
+            return (
+              <line
+                key={i}
+                x1={a.x}
+                y1={a.y}
+                x2={b.x}
+                y2={b.y}
+                stroke={e.kind === "supersedes" ? "#f59e0b" : e.kind === "in-repo" ? "#3b82f6" : "#a1a1aa"}
+                strokeOpacity={faded ? 0.04 : e.kind === "has-term" ? 0.14 : 0.28}
+                strokeWidth={e.kind === "supersedes" ? 1.6 : 1}
+                strokeDasharray={e.kind === "supersedes" ? "4 3" : undefined}
+              />
+            )
+          })}
+          {ns.map((n) => {
+            const r = NODE_R(n)
+            const faded = dim(n.id)
+            const showLabel = n.type !== "term" || (n.degree ?? 0) >= 2 || hover === n.id
+            return (
+              <g key={n.id} opacity={faded ? 0.25 : 1} style={{ cursor: "pointer" }}>
+                <circle
+                  cx={n.x}
+                  cy={n.y}
+                  r={r}
+                  fill={NODE_COLOR(n)}
+                  stroke={hover === n.id ? "#fff" : "rgba(0,0,0,0.4)"}
+                  strokeWidth={hover === n.id ? 1.5 : 1}
+                  onPointerDown={(e) => {
+                    drag.current = n.id
+                    ;(e.target as Element).setPointerCapture?.(e.pointerId)
+                  }}
+                  onMouseEnter={() => setHover(n.id)}
+                  onMouseLeave={() => setHover((h) => (h === n.id ? null : h))}
+                />
+                {showLabel && (
+                  <text
+                    x={n.x}
+                    y={n.y + r + 9}
+                    textAnchor="middle"
+                    fontSize={n.type === "term" ? 7.5 : 9}
+                    fill={n.type === "decision" ? "#e4e4e7" : n.type === "repo" ? "#93c5fd" : "#a1a1aa"}
+                    className="pointer-events-none select-none"
+                    style={{ fontWeight: n.type === "decision" ? 600 : 400 }}
+                  >
+                    {n.label.length > 22 ? n.label.slice(0, 21) + "…" : n.label}
+                  </text>
+                )}
+              </g>
+            )
+          })}
+        </g>
+      </svg>
+
+      {/* legend */}
+      <div className="absolute bottom-3 left-4 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-zinc-500">
+        <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-red-500" /> rejected</span>
+        <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-emerald-500" /> accepted</span>
+        <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style={{ background: "#8b5cf6" }} /> entity</span>
+        <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-blue-500" /> repo</span>
+        <span className="text-zinc-600">drag nodes · hover to focus</span>
+      </div>
+    </div>
   )
 }
 

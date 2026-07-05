@@ -90,6 +90,48 @@ export async function handleDash(req: IncomingMessage, res: ServerResponse, path
     return true;
   }
 
+  if (resource === "graphdata" && req.method === "GET") {
+    // Clean, self-contained graph built from this tenant's real decision memory: decisions,
+    // the entities/terms Cognee extracted from each, the repo, and supersession links. Rendered
+    // by our own themed force layout (no third-party embed, no runtime fetch).
+    const records = await db.getDecisionRecords(inst);
+    type GNode = { id: string; type: "decision" | "term" | "repo"; label: string; outcome?: string; title?: string; repo?: string; url?: string; degree?: number };
+    const nodes = new Map<string, GNode>();
+    const edges: Array<{ source: string; target: string; kind: "has-term" | "in-repo" | "supersedes" }> = [];
+    const add = (id: string, n: GNode) => { if (!nodes.has(id)) nodes.set(id, n); };
+    const norm = (t: string) => t.toLowerCase().trim();
+    for (const r of records) {
+      const did = `d:${r.repo}:${r.decisionId}`;
+      add(did, { id: did, type: "decision", label: r.decisionId, title: r.title, outcome: r.outcome, repo: r.repo, url: r.sourceUrl });
+      const rid = `r:${r.repo}`;
+      add(rid, { id: rid, type: "repo", label: r.repo.split("/")[1] ?? r.repo });
+      edges.push({ source: did, target: rid, kind: "in-repo" });
+      for (const t of (r.terms ?? []).map(norm).filter((t) => t.length > 1).slice(0, 6)) {
+        const tid = `t:${t}`;
+        add(tid, { id: tid, type: "term", label: t });
+        edges.push({ source: did, target: tid, kind: "has-term" });
+      }
+      if (r.supersededBy) edges.push({ source: `d:${r.repo}:${r.supersededBy}`, target: did, kind: "supersedes" });
+    }
+    // degree (for node sizing on the client)
+    for (const e of edges) {
+      const a = nodes.get(e.source); const b = nodes.get(e.target);
+      if (a) a.degree = (a.degree ?? 0) + 1;
+      if (b) b.degree = (b.degree ?? 0) + 1;
+    }
+    // drop supersession edges whose endpoint decision was not ingested
+    const valid = edges.filter((e) => nodes.has(e.source) && nodes.has(e.target));
+    send(res, 200, {
+      nodes: [...nodes.values()],
+      edges: valid,
+      stats: {
+        decisions: [...nodes.values()].filter((n) => n.type === "decision").length,
+        entities: [...nodes.values()].filter((n) => n.type === "term").length,
+      },
+    });
+    return true;
+  }
+
   if (resource === "graph" && req.method === "GET") {
     const creds: TenantCredentials = { apiKey: installation.cogneeApiKey, tenantId: "" };
     try {

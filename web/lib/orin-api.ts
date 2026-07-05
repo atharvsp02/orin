@@ -22,6 +22,22 @@ export interface Catch {
   updatedAt: string;
 }
 
+export interface GraphNode {
+  id: string;
+  type: "decision" | "term" | "repo";
+  label: string;
+  outcome?: string;
+  title?: string;
+  repo?: string;
+  url?: string;
+  degree?: number;
+}
+export interface GraphData {
+  nodes: GraphNode[];
+  edges: Array<{ source: string; target: string; kind: "has-term" | "in-repo" | "supersedes" }>;
+  stats: { decisions: number; entities: number };
+}
+
 export interface Overview {
   account: string;
   metrics: Metrics;
@@ -97,6 +113,7 @@ export const api = {
   saveSettings: (inst: number, patch: Partial<Settings>) =>
     req<Settings>(`/v1/dash/${inst}/settings`, { method: "PUT", body: JSON.stringify(patch) }),
   graphUrl: (inst: number) => `/v1/dash/${inst}/graph`,
+  graphData: (inst: number) => req<GraphData>(`/v1/dash/${inst}/graphdata`),
   rules: (inst: number, repo?: string) =>
     req<{ rules: string[] }>(`/v1/dash/${inst}/rules${repo ? `?repo=${encodeURIComponent(repo)}` : ""}`),
   addRule: (inst: number, text: string, repo?: string) =>
