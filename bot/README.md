@@ -17,11 +17,11 @@ One package, several `npm run` targets (they share the decision core in `src/pip
 
 ## HTTP endpoints (webhook server)
 
-- `POST /` — GitHub webhooks (handled by Octokit middleware).
-- `POST /v1/preflight` — contributor pre-flight check (below), preflight-key auth.
-- `POST /v1/preflight-keys` — mint a preflight key (admin-only; disabled unless `ADMIN_TOKEN` is set).
-- `GET /v1/metrics` — `{prsPrevented, decisionsTracked, rejectionsActive}` for a repo, preflight-key auth.
-- `GET /v1/graph` — interactive knowledge-graph HTML (CSP-sandboxed), preflight-key auth.
+- `POST /` - GitHub webhooks (handled by Octokit middleware).
+- `POST /v1/preflight` - contributor pre-flight check (below), preflight-key auth.
+- `POST /v1/preflight-keys` - mint a preflight key (admin-only; disabled unless `ADMIN_TOKEN` is set).
+- `GET /v1/metrics` - `{prsPrevented, decisionsTracked, rejectionsActive}` for a repo, preflight-key auth.
+- `GET /v1/graph` - interactive knowledge-graph HTML (CSP-sandboxed), preflight-key auth.
 
 ## Cognee lifecycle (all four verbs fire live)
 
@@ -39,18 +39,18 @@ during catch) → `improve` (hourly worker applies maintainer feedback) → `for
 - **MCP** (`npm run mcp`): tools `ask_decision`→ask, `check_rejected`→warn, `record_decision`→ingest.
   Auth via a repo-scoped `orin_` key in `ORIN_TOKEN`; the server always calls Cognee with the
   tenant's own key, never the client's token. `bot/cli/orin-mcp.mjs` is a CI gate over stdio.
-- **Slack** (`npm run slack`): `/why`, react `:decision:` to ingest, proposal-shaped messages get a
+- **Slack** (`npm run slack`): `/why`, react `:brain:` to ingest, proposal-shaped messages get a
   collision-warn. Multi-workspace OAuth; install tokens encrypted at rest.
 - **Linear** (`npm run linear`): `AgentSessionEvent` → `thought` then cited `response`; issue-create
   collision-warn via comment. HMAC-verified webhook.
 
 Non-GitHub adapters resolve their tenant via `tenant_links` (a Slack team / Linear workspace linked
-to a GitHub installation) — there is **no** silent default-tenant fallback, so an unlinked workspace
+to a GitHub installation) - there is **no** silent default-tenant fallback, so an unlinked workspace
 can never read or poison another tenant's memory.
 
 ## Contributor pre-flight (A5)
 
-Lets a contributor check a change against the repo's recorded decisions **before** opening a PR —
+Lets a contributor check a change against the repo's recorded decisions **before** opening a PR -
 no GitHub writes, no feedback session, just the read-side catch pipeline.
 
 Mint a repo-scoped key (once, out-of-band until the dashboard owns this):

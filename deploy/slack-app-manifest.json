@@ -1,11 +1,14 @@
 {
   "display_information": {
     "name": "Orin",
-    "description": "Institutional memory — recalls past decisions and flags re-proposals",
+    "description": "Institutional memory: recalls past decisions and flags re-proposals",
     "background_color": "#2c2d30"
   },
   "features": {
-    "bot_user": { "display_name": "Orin", "always_online": true },
+    "bot_user": {
+      "display_name": "Orin",
+      "always_online": true
+    },
     "slash_commands": [
       {
         "command": "/why",
@@ -24,15 +27,28 @@
     ]
   },
   "oauth_config": {
-    "redirect_urls": ["https://orin-bot.duckdns.org/slack/oauth_redirect"],
+    "redirect_urls": [
+      "https://orin-bot.duckdns.org/slack/oauth_redirect"
+    ],
     "scopes": {
-      "bot": ["commands", "chat:write", "reactions:read", "channels:history", "app_mentions:read", "users:read"]
+      "bot": [
+        "commands",
+        "chat:write",
+        "reactions:read",
+        "channels:history",
+        "app_mentions:read",
+        "users:read"
+      ]
     }
   },
   "settings": {
     "event_subscriptions": {
       "request_url": "https://orin-bot.duckdns.org/slack/events",
-      "bot_events": ["message.channels", "reaction_added"]
+      "bot_events": [
+        "message.channels",
+        "reaction_added",
+        "app_mention"
+      ]
     },
     "interactivity": {
       "is_enabled": true,

@@ -1,4 +1,4 @@
-# Orin — live deployment reference
+# Orin - live deployment reference
 
 Everything runs on the **rey3** Azure VM (`ssh rey3`, key `~/.ssh/rey3_key.pem`), behind Caddy on
 `orin-bot.duckdns.org` (own duckdns subdomain, TLS auto, kept pointed at the IP by a cron so it
@@ -14,7 +14,7 @@ port 8787). Shared core for every adapter: **Postgres + Cognee 1.2.2 (DeepSeek +
 | `/mcp` | MCP server (IDE agents / CI) | 8788 | `orin-mcp` |
 | `/slack/*` | Slack app (events, commands, OAuth) | 3001 | `orin-slack` |
 | `/linear` | Linear adapter (planned) | 3002 | `orin-linear` |
-| — | Cognee engine (internal) | 8000 | `orin-cognee` |
+| - | Cognee engine (internal) | 8000 | `orin-cognee` |
 
 Each adapter runs from a wrapper script (`~/codeguard/start-*.sh`) under pm2 (`pm2 save`d).
 Secrets live only in `~/codeguard/bot/.env` (chmod 600, git-ignored) and never in this repo.
@@ -36,7 +36,7 @@ Secrets live only in `~/codeguard/bot/.env` (chmod 600, git-ignored) and never i
 - App ID `A0BF7VA9TJN`. Secrets (signing/client/state) are in the VM `.env`.
 - **Self-serve:** every new workspace is auto-provisioned its own isolated memory on install.
 - **Commands:** `/why [repo:owner/name] <question>` · `/orin link|status|repos|unlink|help` ·
-  react `:decision:` on a message to record it.
+  react `:brain:` on a message to record it.
 
 ## Linking a Slack workspace to a GitHub org's memory (cross-platform)
 1. In Slack: `/orin link` → Orin replies (ephemeral) with a one-time code (15 min, single-use,
@@ -56,6 +56,6 @@ code grants nothing. `/orin unlink` reverts the workspace to a fresh memory of i
   per-org token stored encrypted → its own isolated memory auto-provisioned.
 
 ## Add a new adapter route (Caddy)
-`/etc/caddy/Caddyfile` on rey3 — add a `handle /x* { reverse_proxy localhost:PORT }` block inside the
+`/etc/caddy/Caddyfile` on rey3 - add a `handle /x* { reverse_proxy localhost:PORT }` block inside the
 `orin-bot.duckdns.org { … }` site, keeping the final `handle { reverse_proxy localhost:3000 }` catch-all.
 `sudo caddy validate` → `sudo systemctl reload caddy`. Never touch the `moros-market.duckdns.org` block.

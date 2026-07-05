@@ -161,14 +161,23 @@ function registerHandlers(app: InstanceType<typeof App>): void {
             "• `/orin status` — what memory this workspace uses\n" +
             "• `/orin repos` — repos with recorded decisions\n" +
             "• `/orin unlink` — detach and start a fresh workspace memory\n" +
-            "• React with :decision: on any message to record it as a decision",
+            "• React with :brain: on any message to record it as a decision",
         );
     }
   });
 
-  // React with :decision: on a message to record it into memory.
+  // @Orin <question> in a channel answers like /why (mention-driven recall).
+  app.event("app_mention", async ({ event, body, say }) => {
+    const tenant = await tenantForTeam((body as { team_id?: string }).team_id);
+    if (!tenant) return;
+    const question = (event.text ?? "").replace(/<@[^>]+>/g, "").trim();
+    const answer = await prim.ask(tenant, question || "Summarize the most relevant past decision and why it was made.");
+    await say({ thread_ts: event.ts, text: answer || "No relevant decision found in memory." });
+  });
+
+  // React with :brain: (or SLACK_INGEST_EMOJI) on a message to record it into memory.
   app.event("reaction_added", async ({ event, client, body }) => {
-    if (event.reaction !== (process.env.SLACK_INGEST_EMOJI ?? "decision")) return;
+    if (event.reaction !== (process.env.SLACK_INGEST_EMOJI ?? "brain")) return;
     if (event.item.type !== "message") return;
     const tenant = await tenantForTeam((body as { team_id?: string }).team_id);
     if (!tenant) return;

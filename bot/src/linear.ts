@@ -146,8 +146,11 @@ function handleInstall(res: ServerResponse, secret: string): void {
   u.searchParams.set("client_id", clientId);
   u.searchParams.set("redirect_uri", REDIRECT_URI);
   u.searchParams.set("response_type", "code");
-  u.searchParams.set("scope", process.env.LINEAR_SCOPES ?? "read,write");
-  u.searchParams.set("actor", process.env.LINEAR_ACTOR ?? "app"); // act as the app (agent), not the installing user
+  const actor = process.env.LINEAR_ACTOR ?? "app"; // act as the app (agent), not the installing user
+  // Agent sessions (@mention / assign) require the agent scopes at authorize time.
+  const defaultScopes = actor === "app" ? "read,write,app:mentionable,app:assignable" : "read,write";
+  u.searchParams.set("scope", process.env.LINEAR_SCOPES ?? defaultScopes);
+  u.searchParams.set("actor", actor);
   u.searchParams.set("prompt", "consent");
   u.searchParams.set("state", mintState(secret));
   res.writeHead(302, { Location: u.toString() }).end();
