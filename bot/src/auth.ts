@@ -48,7 +48,13 @@ function setCookie(res: ServerResponse, value: string, maxAgeSec: number): void 
 }
 
 export function send(res: ServerResponse, status: number, body: unknown): void {
-  res.writeHead(status, { "Content-Type": "application/json" });
+  // Authenticated, per-user responses must NEVER be cached by a CDN/proxy (Vercel edge, etc.),
+  // or one user's data (e.g. /v1/me installations) leaks to the next visitor. no-store is mandatory.
+  res.writeHead(status, {
+    "Content-Type": "application/json",
+    "Cache-Control": "private, no-store, max-age=0",
+    Vary: "Cookie",
+  });
   res.end(JSON.stringify(body));
 }
 
@@ -96,7 +102,7 @@ export function handleAuthStart(req: IncomingMessage, res: ServerResponse): void
   u.searchParams.set("redirect_uri", `${requestOrigin(req)}/v1/auth/callback`);
   u.searchParams.set("state", mintState(nonce));
   res.setHeader("Set-Cookie", `${NONCE_COOKIE}=${nonce}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=900`);
-  res.writeHead(302, { Location: u.toString() }).end();
+  res.writeHead(302, { Location: u.toString(), "Cache-Control": "private, no-store, max-age=0" }).end();
 }
 
 /** GET /v1/auth/callback?code&state — exchange, identify, authorize, set session. */
@@ -139,13 +145,14 @@ export async function handleAuthCallback(req: IncomingMessage, res: ServerRespon
     `${COOKIE}=${encodeSession(session)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_TTL_MS / 1000}`,
     `${NONCE_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`,
   ]);
-  res.writeHead(302, { Location: "/dashboard" }).end(); // relative: works on any serving origin
+  // no-store so a CDN never caches this Set-Cookie response and hands one user's session to another.
+  res.writeHead(302, { Location: "/dashboard", "Cache-Control": "private, no-store, max-age=0" }).end();
 }
 
 /** GET/POST /v1/auth/logout — clear the session. */
 export function handleLogout(res: ServerResponse): void {
   setCookie(res, "", 0);
-  res.writeHead(302, { Location: "/" }).end();
+  res.writeHead(302, { Location: "/", "Cache-Control": "private, no-store, max-age=0" }).end();
 }
 
 /** GET /v1/me — who am I + which installations I can see (enriched from our DB). */

@@ -146,6 +146,8 @@ export async function handleDash(req: IncomingMessage, res: ServerResponse, path
         "Content-Type": "text/html; charset=utf-8",
         "Content-Security-Policy": "sandbox allow-scripts; default-src 'self' 'unsafe-inline' data:; frame-ancestors 'self'",
         "X-Content-Type-Options": "nosniff",
+        "Cache-Control": "private, no-store, max-age=0",
+        Vary: "Cookie",
       });
       res.end(html);
     } catch (e) {

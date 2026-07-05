@@ -12,6 +12,12 @@ const nextConfig = {
   async rewrites() {
     return [{ source: "/v1/:path*", destination: `${API_ORIGIN}/v1/:path*` }];
   },
+  // Defense in depth: never let the CDN cache authenticated API responses (per-user data).
+  async headers() {
+    return [
+      { source: "/v1/:path*", headers: [{ key: "Cache-Control", value: "private, no-store, max-age=0" }] },
+    ];
+  },
 };
 
 export default nextConfig;
