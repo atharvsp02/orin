@@ -83,6 +83,11 @@ export async function initSchema(): Promise<void> {
       data       TEXT NOT NULL,      -- AES-256-GCM ciphertext (holds OAuth bot tokens)
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+    CREATE TABLE IF NOT EXISTS linear_installs (
+      id         TEXT PRIMARY KEY,   -- Linear organization id
+      data       TEXT NOT NULL,      -- AES-256-GCM ciphertext (OAuth access token)
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
     CREATE TABLE IF NOT EXISTS link_codes (
       code_hash   TEXT PRIMARY KEY,  -- sha256 of the one-time code
       platform    TEXT NOT NULL,     -- workspace that minted it (e.g. 'slack')
@@ -450,6 +455,24 @@ export async function fetchSlackInstall(id: string): Promise<unknown | null> {
 
 export async function deleteSlackInstall(id: string): Promise<void> {
   await pool.query(`DELETE FROM slack_installs WHERE id = $1`, [id]);
+}
+
+// Linear OAuth installs (one per organization), encrypted at rest like slack_installs.
+export async function storeLinearInstall(id: string, data: unknown): Promise<void> {
+  await pool.query(
+    `INSERT INTO linear_installs (id, data) VALUES ($1, $2)
+     ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`,
+    [id, encrypt(JSON.stringify(data))],
+  );
+}
+
+export async function fetchLinearInstall(id: string): Promise<unknown | null> {
+  const { rows } = await pool.query(`SELECT data FROM linear_installs WHERE id = $1`, [id]);
+  return rows[0] ? JSON.parse(decrypt(rows[0].data)) : null;
+}
+
+export async function deleteLinearInstall(id: string): Promise<void> {
+  await pool.query(`DELETE FROM linear_installs WHERE id = $1`, [id]);
 }
 
 export async function insertPreflightKey(keyHash: string, installationId: number, repo: string): Promise<void> {

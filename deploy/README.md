@@ -46,10 +46,14 @@ Secrets live only in `~/codeguard/bot/.env` (chmod 600, git-ignored) and never i
 Security: minting is ephemeral + workspace-bound; consuming is write-access-gated; a used/leaked
 code grants nothing. `/orin unlink` reverts the workspace to a fresh memory of its own.
 
-## Linear adapter (pending credentials)
-- Needs a Linear OAuth token/API key + webhook signing secret. Then: env + `start-linear.sh` +
-  Caddy `/linear` route. Webhook URL `https://orin-bot.duckdns.org/linear`.
-- **Self-serve:** an unknown Linear org is auto-provisioned its own memory on first event.
+## Linear adapter (multi-workspace OAuth; pending credentials)
+- Create a Linear OAuth application (Settings → API → Applications): callback
+  `https://orin-bot.duckdns.org/linear/oauth`, webhook `https://orin-bot.duckdns.org/linear`
+  (events: Issues + Agent session events), enable the agent option if offered.
+- Env needed: `LINEAR_CLIENT_ID`, `LINEAR_CLIENT_SECRET`, `LINEAR_WEBHOOK_SECRET`
+  (optional `LINEAR_ACCESS_TOKEN` as single-workspace dev fallback; `LINEAR_ACTOR=app` default).
+- **Self-serve:** any org installs at `https://orin-bot.duckdns.org/linear/install` → OAuth consent →
+  per-org token stored encrypted → its own isolated memory auto-provisioned.
 
 ## Add a new adapter route (Caddy)
 `/etc/caddy/Caddyfile` on rey3 — add a `handle /x* { reverse_proxy localhost:PORT }` block inside the
