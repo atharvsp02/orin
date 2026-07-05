@@ -19,6 +19,15 @@ export default function DashboardPage() {
   const [me, setMe] = useState<Me | null>(null)
   const [state, setState] = useState<"loading" | "signedout" | "ready" | "error">("loading")
 
+  // The dashboard reads best ~10% larger. Scaling the root font-size scales every rem-based
+  // size (type, spacing, icons, panels, portals) together, exactly like browser zoom.
+  useEffect(() => {
+    document.documentElement.style.fontSize = "110%"
+    return () => {
+      document.documentElement.style.fontSize = ""
+    }
+  }, [])
+
   useEffect(() => {
     api
       .me()

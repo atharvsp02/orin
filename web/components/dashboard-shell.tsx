@@ -84,7 +84,7 @@ export function DashboardShell({ me }: { me: Me }) {
   return (
     <div className="h-screen w-full bg-zinc-950 flex overflow-hidden text-sm">
       {/* ── Sidebar (mirrors the hero mockup) ─────────────────────────── */}
-      <div className="w-[220px] h-full bg-zinc-900/80 border-r border-zinc-800/50 flex flex-col shrink-0">
+      <div className="w-[13.75rem] h-full bg-zinc-900/80 border-r border-zinc-800/50 flex flex-col shrink-0">
         <div className="p-3 border-b border-zinc-800/50">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -132,7 +132,7 @@ export function DashboardShell({ me }: { me: Me }) {
         </div>
 
         <div className="mt-5 px-3">
-          <div className="px-2 py-1 text-[10px] text-zinc-500 font-medium uppercase tracking-wider">Workspace</div>
+          <div className="px-2 py-1 text-[0.625rem] text-zinc-500 font-medium uppercase tracking-wider">Workspace</div>
           <div className="space-y-0.5 mt-1">
             <NavItem icon={Layers} label="Repos" active={view === "repos"} onClick={() => setView("repos")} />
             <NavItem icon={BookOpen} label="Rules" active={view === "rules"} onClick={() => setView("rules")} />
@@ -146,7 +146,7 @@ export function DashboardShell({ me }: { me: Me }) {
 
         {overview && overview.installedRepos.length > 0 && (
           <div className="mt-5 px-3">
-            <div className="px-2 py-1 text-[10px] text-zinc-500 font-medium uppercase tracking-wider">Connected repos</div>
+            <div className="px-2 py-1 text-[0.625rem] text-zinc-500 font-medium uppercase tracking-wider">Connected repos</div>
             <div className="space-y-0.5 mt-1">
               {overview.installedRepos.slice(0, 4).map((r, i) => (
                 <NavItem
@@ -166,7 +166,7 @@ export function DashboardShell({ me }: { me: Me }) {
 
         {overview && overview.links.length > 0 && (
           <div className="mt-5 px-3">
-            <div className="px-2 py-1 text-[10px] text-zinc-500 font-medium uppercase tracking-wider">Linked workspaces</div>
+            <div className="px-2 py-1 text-[0.625rem] text-zinc-500 font-medium uppercase tracking-wider">Linked workspaces</div>
             <div className="space-y-0.5 mt-1">
               {overview.links.map((l) => (
                 <NavItem
@@ -254,7 +254,7 @@ function NavItem({
       <Icon className={`w-4 h-4 ${color || ""}`} />
       <span className="flex-1 text-xs">{label}</span>
       {badge !== undefined && (
-        <span className="bg-indigo-500/80 text-white text-[10px] min-w-[18px] h-[18px] flex items-center justify-center rounded-full font-medium px-1">
+        <span className="bg-indigo-500/80 text-white text-[0.625rem] min-w-[1.125rem] h-[1.125rem] flex items-center justify-center rounded-full font-medium px-1">
           {badge}
         </span>
       )}
@@ -264,7 +264,7 @@ function NavItem({
 
 function ListPanel({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="w-[320px] h-full bg-zinc-900/40 border-r border-zinc-800/50 flex flex-col shrink-0">
+    <div className="w-[20rem] h-full bg-zinc-900/40 border-r border-zinc-800/50 flex flex-col shrink-0">
       <div className="px-4 py-3 border-b border-zinc-800/50 flex items-center justify-between">
         <h3 className="text-white font-semibold text-sm">{title}</h3>
       </div>
@@ -307,12 +307,12 @@ function ListItem({
       }`}
     >
       <div className="flex items-center gap-2 mb-0.5">
-        {id && <span className="text-zinc-500 text-[10px]">{id}</span>}
+        {id && <span className="text-zinc-500 text-[0.625rem]">{id}</span>}
         <div className={`w-2 h-2 rounded-full ${statusColors[status] || "bg-zinc-500"}`} />
-        {time && <span className="text-zinc-600 text-[10px] ml-auto">{time}</span>}
+        {time && <span className="text-zinc-600 text-[0.625rem] ml-auto">{time}</span>}
       </div>
       <p className="text-white text-xs truncate leading-tight">{title}</p>
-      {subtitle && <p className="text-zinc-500 text-[10px] mt-0.5 truncate">{subtitle}</p>}
+      {subtitle && <p className="text-zinc-500 text-[0.625rem] mt-0.5 truncate">{subtitle}</p>}
     </div>
   )
 }
@@ -358,7 +358,7 @@ function FullPanel({
 
 function HelpRail({ children }: { children: React.ReactNode }) {
   return (
-    <aside className="hidden xl:flex w-[290px] shrink-0 h-full border-l border-zinc-800/50 bg-zinc-900/20 flex-col relative z-10">
+    <aside className="hidden xl:flex w-[18.125rem] shrink-0 h-full border-l border-zinc-800/50 bg-zinc-900/20 flex-col relative z-10">
       <div className="flex-1 overflow-auto px-6 py-10 space-y-8">{children}</div>
     </aside>
   )
@@ -367,7 +367,7 @@ function HelpRail({ children }: { children: React.ReactNode }) {
 function RailSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div>
-      <div className="text-[10px] text-zinc-500 font-medium uppercase tracking-wider mb-2.5">{title}</div>
+      <div className="text-[0.625rem] text-zinc-500 font-medium uppercase tracking-wider mb-2.5">{title}</div>
       <div className="space-y-2.5">{children}</div>
     </div>
   )
@@ -378,7 +378,7 @@ const RailP = ({ children }: { children: React.ReactNode }) => (
 )
 
 const Cmd = ({ children }: { children: React.ReactNode }) => (
-  <code className="text-[11px] font-mono text-zinc-300 bg-zinc-800/70 border border-zinc-700/50 rounded px-1.5 py-0.5 whitespace-nowrap">
+  <code className="text-[0.6875rem] font-mono text-zinc-300 bg-zinc-800/70 border border-zinc-700/50 rounded px-1.5 py-0.5 whitespace-nowrap">
     {children}
   </code>
 )
@@ -388,7 +388,7 @@ function RailSteps({ steps }: { steps: React.ReactNode[] }) {
     <ol className="space-y-2.5">
       {steps.map((st, i) => (
         <li key={i} className="flex items-start gap-2.5">
-          <span className="w-4.5 h-4.5 min-w-[18px] h-[18px] rounded-full bg-zinc-800 border border-zinc-700/60 text-zinc-400 text-[10px] flex items-center justify-center mt-px">
+          <span className="w-[1.125rem] h-[1.125rem] min-w-[1.125rem] h-[1.125rem] rounded-full bg-zinc-800 border border-zinc-700/60 text-zinc-400 text-[0.625rem] flex items-center justify-center mt-px">
             {i + 1}
           </span>
           <span className="text-xs text-zinc-500 leading-relaxed [&_b]:text-zinc-300 [&_b]:font-medium">{st}</span>
@@ -685,7 +685,7 @@ function EmptyState({
   cta?: { label: string; href: string }
 }) {
   return (
-    <div className="h-full min-h-[300px] flex items-center justify-center p-8">
+    <div className="h-full min-h-[18.75rem] flex items-center justify-center p-8">
       <div className="text-center max-w-sm">
         <div className="mx-auto w-12 h-12 rounded-xl bg-zinc-900 border border-zinc-800 flex items-center justify-center mb-4">
           <Icon className="w-5 h-5 text-zinc-500" />
@@ -797,7 +797,7 @@ function CatchesView({
                   {current.decisionId ? `Re-proposes ${current.decisionId}` : "No decision conflict"}
                 </h2>
                 {decision && (
-                  <div className="bg-zinc-900/80 rounded-xl p-5 text-[12px] font-mono mb-5 border border-zinc-800/50 space-y-2">
+                  <div className="bg-zinc-900/80 rounded-xl p-5 text-[0.75rem] font-mono mb-5 border border-zinc-800/50 space-y-2">
                     <div>
                       <span className="text-zinc-500">Orin.</span>
                       <span className="text-amber-300">check_rejected</span>
@@ -912,7 +912,7 @@ function DecisionsView({
             <h2 className="text-white text-xl font-semibold mb-3">{current.title}</h2>
             <div className="flex items-center gap-2 mb-6">
               <span
-                className={`text-[10px] px-2 py-0.5 rounded-full uppercase tracking-wide ${
+                className={`text-[0.625rem] px-2 py-0.5 rounded-full uppercase tracking-wide ${
                   current.outcome === "rejected"
                     ? "bg-red-500/15 text-red-400"
                     : current.outcome === "accepted"
@@ -923,7 +923,7 @@ function DecisionsView({
                 {current.outcome}
               </span>
               {current.supersededBy && (
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400">superseded by {current.supersededBy}</span>
+                <span className="text-[0.625rem] px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400">superseded by {current.supersededBy}</span>
               )}
               {current.decidedAt && <span className="text-zinc-600 text-xs">decided {new Date(current.decidedAt).toLocaleDateString()}</span>}
             </div>
@@ -1135,13 +1135,13 @@ function IntegrationsView({ inst, overview }: { inst: number; overview: Overview
           <div key={r.name} className={`${card} p-5 flex items-center justify-between gap-6`}>
             <div className="flex items-start gap-3.5 min-w-0">
               <div className="w-9 h-9 rounded-lg bg-zinc-800/80 border border-zinc-700/50 flex items-center justify-center shrink-0">
-                <r.Icon className="w-4.5 h-4.5 text-white" />
+                <r.Icon className="w-[1.125rem] h-[1.125rem] text-white" />
               </div>
               <div className="min-w-0">
                 <div className="text-white text-sm font-medium flex items-center gap-2">
                   {r.name}
                   {r.linked && (
-                    <span className="flex items-center gap-1 text-[10px] text-emerald-400 font-normal">
+                    <span className="flex items-center gap-1 text-[0.625rem] text-emerald-400 font-normal">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> connected
                     </span>
                   )}
@@ -1164,7 +1164,7 @@ function IntegrationsView({ inst, overview }: { inst: number; overview: Overview
         <div className={`${card} p-5`}>
           <div className="flex items-start gap-3.5 mb-4">
             <div className="w-9 h-9 rounded-lg bg-zinc-800/80 border border-zinc-700/50 flex items-center justify-center shrink-0">
-              <KeyRound className="w-4.5 h-4.5 text-white" />
+              <KeyRound className="w-[1.125rem] h-[1.125rem] text-white" />
             </div>
             <div>
               <div className="text-white text-sm font-medium">MCP · Cursor, Claude Code, CLI</div>
@@ -1282,7 +1282,7 @@ function KeysView({ inst, overview }: { inst: number; overview: Overview | null 
           <div>
             <p className="text-xs text-zinc-400 mb-2">Copy it now; it is shown only once and stored hashed.</p>
             <div className="flex items-center gap-2 bg-zinc-950 rounded-lg p-3 border border-zinc-800">
-              <code className="text-[11px] text-emerald-400 break-all flex-1">{minted}</code>
+              <code className="text-[0.6875rem] text-emerald-400 break-all flex-1">{minted}</code>
               <CopyButton text={minted} />
             </div>
           </div>
@@ -1362,7 +1362,7 @@ function KeysView({ inst, overview }: { inst: number; overview: Overview | null 
               {keys.map((k) => (
                 <tr key={k.keyHash} className="border-t border-zinc-800/50 text-zinc-300">
                   <td className="px-5 py-3">{k.label || <span className="text-zinc-600">(no label)</span>}</td>
-                  <td className="px-5 py-3 font-mono text-[11px]">{k.repo}</td>
+                  <td className="px-5 py-3 font-mono text-[0.6875rem]">{k.repo}</td>
                   <td className="px-5 py-3 text-zinc-500">{new Date(k.createdAt).toLocaleDateString()}</td>
                   <td className="px-5 py-3">
                     {k.revokedAt ? (
@@ -1377,7 +1377,7 @@ function KeysView({ inst, overview }: { inst: number; overview: Overview | null 
                     {!k.revokedAt && (
                       <button
                         onClick={() => api.revokeKey(inst, k.keyHash).then(refresh)}
-                        className="text-red-400/80 hover:text-red-300 text-[11px]"
+                        className="text-red-400/80 hover:text-red-300 text-[0.6875rem]"
                       >
                         Revoke
                       </button>
@@ -1422,7 +1422,7 @@ function SettingsView({ inst }: { inst: number }) {
     <div className="flex items-center justify-between gap-8 px-5 py-4 border-b border-zinc-800/50 last:border-b-0">
       <div>
         <div className="text-zinc-200 text-xs font-medium">{label}</div>
-        {hint && <div className="text-zinc-600 text-[11px] mt-1 leading-relaxed max-w-md">{hint}</div>}
+        {hint && <div className="text-zinc-600 text-[0.6875rem] mt-1 leading-relaxed max-w-md">{hint}</div>}
       </div>
       <div className="shrink-0">{children}</div>
     </div>
@@ -1572,7 +1572,7 @@ function RulesView({ inst, overview }: { inst: number; overview: Overview | null
     >
       <div className={`${card} p-5 mb-4`}>
         <div className="text-zinc-200 text-xs font-medium mb-2">Add rules</div>
-        <p className="text-zinc-600 text-[11px] mb-3 leading-relaxed">
+        <p className="text-zinc-600 text-[0.6875rem] mb-3 leading-relaxed">
           Write constraints in plain language ("Do not add new runtime dependencies without maintainer approval"). Orin
           extracts each atomic rule and indexes it.
         </p>
@@ -1758,13 +1758,13 @@ function DocsView({ inst, overview }: { inst: number; overview: Overview | null 
 
       {docs && docs.length > 0 && (
         <div className={`${card} mt-4 divide-y divide-zinc-800/50`}>
-          <div className="px-5 py-3 text-zinc-500 text-[11px] font-medium uppercase tracking-wider">Uploaded docs</div>
+          <div className="px-5 py-3 text-zinc-500 text-[0.6875rem] font-medium uppercase tracking-wider">Uploaded docs</div>
           {docs.map((d) => (
             <div key={d.filename} className="px-5 py-3.5 flex items-center gap-3">
               <FileText className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
               <span className="text-zinc-300 text-xs flex-1 truncate">{d.title}</span>
-              <span className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400">{d.repo || "org-wide"}</span>
-              <span className="text-zinc-600 text-[10px]">{new Date(d.createdAt).toLocaleDateString()}</span>
+              <span className="text-[0.625rem] px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400">{d.repo || "org-wide"}</span>
+              <span className="text-zinc-600 text-[0.625rem]">{new Date(d.createdAt).toLocaleDateString()}</span>
             </div>
           ))}
         </div>
