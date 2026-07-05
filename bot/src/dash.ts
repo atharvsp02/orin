@@ -7,6 +7,9 @@ import * as db from "./db.js";
 import * as cognee from "./cognee.js";
 import { sessionFrom, send } from "./auth.js";
 import { installationOctokit } from "./github.js";
+import { listRules } from "./pipeline.js";
+import * as llm from "./llm.js";
+import { ONTOLOGY_KEY } from "./ontology.js";
 import type { TenantCredentials } from "./cognee.js";
 import type { DeliveryMode } from "./types.js";
 
@@ -136,6 +139,90 @@ export async function handleDash(req: IncomingMessage, res: ServerResponse, path
   if (resource === "keys" && req.method === "DELETE" && sub) {
     const ok = await db.revokePreflightKey(inst, sub);
     send(res, ok ? 200 : 404, ok ? { revoked: true } : { error: "key not found or already revoked" });
+    return true;
+  }
+
+  if (resource === "rules" && req.method === "GET") {
+    const creds: TenantCredentials = { apiKey: installation.cogneeApiKey, tenantId: "" };
+    let rules: string[] = [];
+    try {
+      rules = await listRules(installation, creds);
+    } catch {
+      rules = []; // dataset may not exist yet: an honest empty list
+    }
+    send(res, 200, { rules });
+    return true;
+  }
+
+  if (resource === "rules" && req.method === "POST") {
+    let body: { text?: string };
+    try {
+      body = JSON.parse(await readBody(req)) as { text?: string };
+    } catch {
+      send(res, 400, { error: "invalid json" });
+      return true;
+    }
+    const text = (body.text ?? "").trim();
+    if (!text) {
+      send(res, 400, { error: "text required" });
+      return true;
+    }
+    const cfg = await db.getTenantConfig(inst);
+    const creds: TenantCredentials = { apiKey: installation.cogneeApiKey, tenantId: "" };
+    const rules = await llm.extractRules(cfg.llmProvider, text.slice(0, 8000));
+    if (rules.length > 0) {
+      // Indexing (cognify) is slow; run it in the background so the UI answers immediately.
+      void cognee
+        .remember(cog, creds, {
+          datasetName: installation.datasetName,
+          filename: "coding-rules.txt",
+          content: rules.map((r) => `- ${r}`).join("\n"),
+          nodeSet: "coding_agent_rules",
+          ontologyKey: ONTOLOGY_KEY,
+        })
+        .catch((e) => console.warn("rules remember failed:", (e as Error).message));
+    }
+    send(res, 200, { rules, indexing: rules.length > 0 });
+    return true;
+  }
+
+  if (resource === "docs" && req.method === "POST") {
+    let body: { title?: string; content?: string; extractRules?: boolean };
+    try {
+      body = JSON.parse(await readBody(req, 500_000)) as { title?: string; content?: string; extractRules?: boolean };
+    } catch {
+      send(res, 400, { error: "invalid json" });
+      return true;
+    }
+    const title = (body.title ?? "").trim().slice(0, 120);
+    const content = (body.content ?? "").trim();
+    if (!title || !content) {
+      send(res, 400, { error: "title and content required" });
+      return true;
+    }
+    const creds: TenantCredentials = { apiKey: installation.cogneeApiKey, tenantId: "" };
+    const filename = `${title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "doc"}.md`;
+    // Cognify takes tens of seconds; ingest in the background and acknowledge now.
+    void cognee
+      .remember(cog, creds, { datasetName: installation.datasetName, filename, content: `${title}\n\n${content}`, ontologyKey: ONTOLOGY_KEY })
+      .catch((e) => console.warn("doc remember failed:", (e as Error).message));
+    let rules: string[] = [];
+    if (body.extractRules) {
+      const cfg = await db.getTenantConfig(inst);
+      rules = await llm.extractRules(cfg.llmProvider, content.slice(0, 8000));
+      if (rules.length > 0) {
+        void cognee
+          .remember(cog, creds, {
+            datasetName: installation.datasetName,
+            filename: "coding-rules.txt",
+            content: rules.map((r) => `- ${r}`).join("\n"),
+            nodeSet: "coding_agent_rules",
+            ontologyKey: ONTOLOGY_KEY,
+          })
+          .catch((e) => console.warn("doc rules remember failed:", (e as Error).message));
+      }
+    }
+    send(res, 202, { accepted: true, filename, rules });
     return true;
   }
 

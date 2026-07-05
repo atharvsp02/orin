@@ -26,6 +26,9 @@ import {
   Network,
   GitBranch,
   FileText,
+  BookOpen,
+  Upload,
+  Plus,
 } from "lucide-react"
 import { SiGithub, SiLinear } from "@icons-pack/react-simple-icons"
 import {
@@ -41,7 +44,7 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { api, timeAgo, type Me, type Overview, type Decision, type KeyRow, type Settings } from "@/lib/orin-api"
 
-type View = "catches" | "decisions" | "repos" | "graph" | "integrations" | "keys" | "settings"
+type View = "catches" | "decisions" | "repos" | "rules" | "docs" | "graph" | "integrations" | "keys" | "settings"
 
 const GITHUB_APP_URL = "https://github.com/apps/orinbot"
 
@@ -132,6 +135,8 @@ export function DashboardShell({ me }: { me: Me }) {
           <div className="px-2 py-1 text-[10px] text-zinc-500 font-medium uppercase tracking-wider">Workspace</div>
           <div className="space-y-0.5 mt-1">
             <NavItem icon={Layers} label="Repos" active={view === "repos"} onClick={() => setView("repos")} />
+            <NavItem icon={BookOpen} label="Rules" active={view === "rules"} onClick={() => setView("rules")} />
+            <NavItem icon={Upload} label="Docs" active={view === "docs"} onClick={() => setView("docs")} />
             <NavItem icon={LayoutGrid} label="Knowledge graph" active={view === "graph"} onClick={() => setView("graph")} />
             <NavItem icon={Users} label="Integrations" active={view === "integrations"} onClick={() => setView("integrations")} />
             <NavItem icon={KeyRound} label="Keys" active={view === "keys"} onClick={() => setView("keys")} />
@@ -212,6 +217,8 @@ export function DashboardShell({ me }: { me: Me }) {
       {view === "repos" && (
         <ReposView overview={overview} decisions={decisions} selectedRepo={selectedRepo} onSelectRepo={setSelectedRepo} query={query} />
       )}
+      {view === "rules" && <RulesView inst={inst} />}
+      {view === "docs" && <DocsView inst={inst} />}
       {view === "graph" && <GraphView inst={inst} account={account} />}
       {view === "integrations" && <IntegrationsView inst={inst} overview={overview} />}
       {view === "keys" && <KeysView inst={inst} overview={overview} />}
@@ -1180,6 +1187,209 @@ function SettingsView({ inst }: { inst: number }) {
           />
         </div>
       </div>
+    </FullPanel>
+  )
+}
+
+
+/* ── Rules ──────────────────────────────────────────────────────────── */
+
+function RulesView({ inst }: { inst: number }) {
+  const [rules, setRules] = useState<string[] | null>(null)
+  const [text, setText] = useState("")
+  const [busy, setBusy] = useState(false)
+  const [added, setAdded] = useState<string[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const refresh = useCallback(() => api.rules(inst).then((r) => setRules(r.rules)).catch(() => setRules([])), [inst])
+  useEffect(() => {
+    refresh()
+  }, [refresh])
+
+  const submit = async () => {
+    setBusy(true)
+    setError(null)
+    setAdded(null)
+    try {
+      const r = await api.addRule(inst, text.trim())
+      setAdded(r.rules)
+      if (r.rules.length > 0) setText("")
+      setTimeout(refresh, 4000) // indexing runs in the background; refresh shortly after
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <FullPanel
+      title="Rules"
+      subtitle="Standing constraints Orin enforces alongside decision memory. Seed them here or with @orin rule on any GitHub thread; matched rules are cited on catches."
+    >
+      <div className={`${card} p-5 mb-4`}>
+        <div className="text-zinc-200 text-xs font-medium mb-2">Add rules</div>
+        <p className="text-zinc-600 text-[11px] mb-3 leading-relaxed">
+          Write constraints in plain language ("Do not add new runtime dependencies without maintainer approval"). Orin
+          extracts each atomic rule and indexes it.
+        </p>
+        <Textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="No new runtime dependencies without approval. All database access goes through the repository layer. Never log request bodies."
+          className="bg-zinc-950 border-zinc-800 text-zinc-200 text-xs min-h-20 mb-3"
+        />
+        <div className="flex items-center gap-3">
+          <button
+            onClick={submit}
+            disabled={busy || !text.trim()}
+            className="px-4 py-2 bg-white text-zinc-900 font-medium rounded-lg hover:bg-zinc-100 transition-colors text-xs disabled:opacity-40 inline-flex items-center gap-1.5"
+          >
+            <Plus className="w-3.5 h-3.5" /> {busy ? "Extracting…" : "Extract & add"}
+          </button>
+          {error && <span className="text-red-400 text-xs">{error}</span>}
+        </div>
+        {added && (
+          <div className="mt-4 rounded-lg border border-zinc-800 bg-zinc-950 p-4">
+            {added.length === 0 ? (
+              <p className="text-zinc-500 text-xs">No concrete rules found in that text. Phrase it as a constraint.</p>
+            ) : (
+              <>
+                <p className="text-emerald-400 text-xs mb-2">
+                  Extracted {added.length} rule{added.length === 1 ? "" : "s"} (indexing in the background):
+                </p>
+                <ul className="space-y-1.5">
+                  {added.map((r) => (
+                    <li key={r} className="text-zinc-300 text-xs flex items-start gap-2">
+                      <Check className="w-3.5 h-3.5 text-emerald-500 shrink-0 mt-px" /> {r}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+
+      {!rules ? (
+        <p className="text-zinc-600 text-xs">Loading…</p>
+      ) : rules.length === 0 ? (
+        <div className={`${card} p-8`}>
+          <EmptyState
+            icon={BookOpen}
+            title="No rules yet"
+            hint="Rules you add here (or via @orin rule on GitHub) appear on catches when a PR touches them. Newly added rules can take a minute to index."
+          />
+        </div>
+      ) : (
+        <div className={`${card} divide-y divide-zinc-800/50`}>
+          {rules.map((r) => (
+            <div key={r} className="px-5 py-3.5 flex items-start gap-3">
+              <BookOpen className="w-3.5 h-3.5 text-zinc-500 shrink-0 mt-0.5" />
+              <span className="text-zinc-300 text-xs leading-relaxed">{r}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </FullPanel>
+  )
+}
+
+/* ── Docs ───────────────────────────────────────────────────────────── */
+
+function DocsView({ inst }: { inst: number }) {
+  const [title, setTitle] = useState("")
+  const [content, setContent] = useState("")
+  const [extract, setExtract] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [result, setResult] = useState<{ filename: string; rules: string[] } | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const onFile = (f: File | null) => {
+    if (!f) return
+    if (!title) setTitle(f.name.replace(/\.(md|txt|markdown)$/i, ""))
+    const reader = new FileReader()
+    reader.onload = () => setContent(String(reader.result ?? ""))
+    reader.readAsText(f)
+  }
+
+  const submit = async () => {
+    setBusy(true)
+    setError(null)
+    setResult(null)
+    try {
+      const r = await api.uploadDoc(inst, title.trim(), content.trim(), extract)
+      setResult({ filename: r.filename, rules: r.rules })
+      setTitle("")
+      setContent("")
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <FullPanel
+      title="Docs"
+      subtitle="Feed Orin the documents that carry decisions: ADRs, CONTRIBUTING, postmortems, design docs. They become citable memory for catches, /why, and your IDE agents."
+    >
+      <div className={`${card} p-5`}>
+        <div className="grid gap-3">
+          <Input
+            placeholder="Title (e.g. ADR-007: Why we run one Postgres)"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            className="bg-zinc-950 border-zinc-800 text-zinc-200 text-xs"
+          />
+          <Textarea
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+            placeholder="Paste the document, or pick a file below."
+            className="bg-zinc-950 border-zinc-800 text-zinc-200 text-xs min-h-40 font-mono"
+          />
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <label className="text-xs text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer inline-flex items-center gap-2">
+              <Upload className="w-3.5 h-3.5" />
+              Choose .md / .txt file
+              <input type="file" accept=".md,.txt,.markdown" className="hidden" onChange={(e) => onFile(e.target.files?.[0] ?? null)} />
+            </label>
+            <label className="flex items-center gap-2 text-xs text-zinc-400 cursor-pointer">
+              <Switch checked={extract} onCheckedChange={setExtract} />
+              Also extract coding rules
+            </label>
+            <button
+              onClick={submit}
+              disabled={busy || !title.trim() || !content.trim()}
+              className="px-4 py-2 bg-white text-zinc-900 font-medium rounded-lg hover:bg-zinc-100 transition-colors text-xs disabled:opacity-40"
+            >
+              {busy ? "Uploading…" : "Teach Orin"}
+            </button>
+          </div>
+          {error && <p className="text-red-400 text-xs">{error}</p>}
+        </div>
+      </div>
+
+      {result && (
+        <div className={`${card} p-5 mt-4`}>
+          <p className="text-emerald-400 text-xs mb-1.5">
+            Accepted as {result.filename}. Orin is reading it now; it becomes part of the knowledge graph and citable
+            memory within about a minute.
+          </p>
+          {result.rules.length > 0 && (
+            <>
+              <p className="text-zinc-400 text-xs mt-3 mb-2">Rules extracted from the doc:</p>
+              <ul className="space-y-1.5">
+                {result.rules.map((r) => (
+                  <li key={r} className="text-zinc-300 text-xs flex items-start gap-2">
+                    <Check className="w-3.5 h-3.5 text-emerald-500 shrink-0 mt-px" /> {r}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </div>
+      )}
     </FullPanel>
   )
 }

@@ -97,6 +97,14 @@ export const api = {
   saveSettings: (inst: number, patch: Partial<Settings>) =>
     req<Settings>(`/v1/dash/${inst}/settings`, { method: "PUT", body: JSON.stringify(patch) }),
   graphUrl: (inst: number) => `/v1/dash/${inst}/graph`,
+  rules: (inst: number) => req<{ rules: string[] }>(`/v1/dash/${inst}/rules`),
+  addRule: (inst: number, text: string) =>
+    req<{ rules: string[]; indexing: boolean }>(`/v1/dash/${inst}/rules`, { method: "POST", body: JSON.stringify({ text }) }),
+  uploadDoc: (inst: number, title: string, content: string, extractRules: boolean) =>
+    req<{ accepted: boolean; filename: string; rules: string[] }>(`/v1/dash/${inst}/docs`, {
+      method: "POST",
+      body: JSON.stringify({ title, content, extractRules }),
+    }),
   signInUrl: "/v1/auth/github",
   logoutUrl: "/v1/auth/logout",
 };
