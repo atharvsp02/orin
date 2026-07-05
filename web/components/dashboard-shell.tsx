@@ -1465,18 +1465,10 @@ function SettingsView({ inst }: { inst: number }) {
         <Row label="Auto-comment" hint="Let Orin write on PRs and issues (off = silent, log-only)">
           <Switch checked={s.autoComment} onCheckedChange={(v) => setS({ ...s, autoComment: v })} />
         </Row>
-        <Row label="LLM provider" hint="Model used for extraction and judgment">
-          <Select value={s.llmProvider} onValueChange={(v) => setS({ ...s, llmProvider: v })}>
-            <SelectTrigger className="w-36 bg-zinc-950 border-zinc-800 text-zinc-200 text-xs h-8">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent className="bg-zinc-900 border-zinc-800 text-zinc-200">
-              <SelectItem value="deepseek">deepseek</SelectItem>
-              <SelectItem value="google">google</SelectItem>
-              <SelectItem value="openai">openai</SelectItem>
-              <SelectItem value="openrouter">openrouter</SelectItem>
-            </SelectContent>
-          </Select>
+        <Row label="LLM engine" hint="Extraction and judgment run on DeepSeek for every workspace. Fixed, not configurable.">
+          <span className="inline-flex items-center gap-1.5 text-xs text-zinc-300 px-3 py-1.5 rounded-md bg-zinc-800/60 border border-zinc-700/50">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> DeepSeek
+          </span>
         </Row>
         <Row label="Grounding threshold" hint="Minimum shared significant terms before a decision is even considered (the precision gate)">
           <Input

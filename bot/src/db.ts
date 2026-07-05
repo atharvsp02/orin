@@ -22,7 +22,7 @@ export async function initSchema(): Promise<void> {
       score_cutoff         REAL NOT NULL DEFAULT 0.6,
       auto_comment         BOOLEAN NOT NULL DEFAULT true,
       custom_instructions  TEXT NOT NULL DEFAULT '',
-      llm_provider         TEXT NOT NULL DEFAULT 'google',
+      llm_provider         TEXT NOT NULL DEFAULT 'deepseek',
       delivery_mode        TEXT NOT NULL DEFAULT 'check',
       block_on_repropose   BOOLEAN NOT NULL DEFAULT true
     );

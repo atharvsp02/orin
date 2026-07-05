@@ -19,10 +19,10 @@ const DEFAULT_MODEL: Record<string, ModelId> = {
   openrouter: `openrouter:${process.env.ORIN_OPENROUTER_MODEL ?? "google/gemini-2.5-flash"}`,
 };
 
-function model(provider: string) {
-  // OpenRouter: force chat-completions (its Responses-API support is partial) and pick the model directly.
-  if (provider === "openrouter") return openrouter.chat(process.env.ORIN_OPENROUTER_MODEL ?? "google/gemini-2.5-flash");
-  return registry.languageModel(DEFAULT_MODEL[provider] ?? DEFAULT_MODEL.google);
+function model(_provider?: string) {
+  // Orin runs on DeepSeek only. The provider argument is kept for call-site compatibility
+  // but ignored: every model resolves to DeepSeek (deepseek-chat by default).
+  return registry.languageModel(DEFAULT_MODEL.deepseek);
 }
 
 const decisionSchema = z.object({
