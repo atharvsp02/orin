@@ -1,133 +1,156 @@
-# Orin: 3-minute hackathon demo (cut sheet + VO + Remotion)
+# Orin: 3-minute demo shot list (read-and-record)
 
-Target 180s hard cap. Structure is three acts around ONE narrative: a single Redis decision,
-recorded once, then catching / answering / warning / gating across GitHub, Slack, Linear, and
-Cursor. That "one memory, every surface" payoff is the wedge over single-platform review bots.
+How to read this:
+- 🎙️ YOU TALK  = you screen-record this and speak the **SAY** lines word for word.
+- 🔇 NO TALK    = no voice. Just screen action + text on screen + music. I build the text in Remotion.
+- "VO" is gone; it only ever meant voiceover (you talking). Ignore that word anywhere.
 
-Every beat is marked:
-- 🎙️ VOICE  = you talk over it (calm, ~140 wpm)
-- 🔇 SILENT = Remotion text + on-screen action + music bed only, no talking (deliberate rhythm)
+Rhythm you asked for: music+text intro (silent) → you talk → text card (silent) → demo you talk →
+text → demo you talk … it alternates the whole way. Total ~176s, under the 180s cap.
 
-Voiced word budget ≈ 300 words total (only the 🎙️ beats). Keep music low, duck under VO.
-
----
-
-## ACT 1 - The problem, and how memory forms (0:00 - 0:46)
-
-### 0:00 - 0:10 | Cold open  🎙️ (Remotion card, no screen)
-- Black `#09090B`, Orin mark; two lines stagger in: "Every rejected idea comes back." /
-  "Months later. From someone new."
-- VO: "Teams reject ideas for good reasons. Then the person who knew the reason moves on, and
-  months later the same proposal comes back."
-
-### 0:10 - 0:22 | Landing  🎙️ (screen: slow hero scroll)
-- Remotion lower-third: "Orin: institutional memory for engineering teams"
-- VO: "Orin remembers your team's decisions and catches the ones you're about to repeat.
-  Not just on GitHub, everywhere your team works. Here it is, live."
-
-### 0:22 - 0:46 | Teach it once  🎙️ (screen: GitHub issue → dashboard)
-- Record: issue "Add Redis as a caching layer" → maintainer rejection comment with reasoning
-  → close. Remotion jump-card (1.5s): "~a minute later". Cut to dashboard → Decisions →
-  ISSUE-N, REJECTED, reasoning visible.
-- VO: "No setup. A maintainer rejects an idea the way they always do, with reasoning, and
-  closes the thread. A minute later it's a decision in Orin's knowledge graph. Remember that
-  Redis rejection; we only record it once."
+You record the 🎙️ cuts and the raw screen for the 🔇 cuts, and send me the clips in order.
+I assemble + add all text cards, highlights, and music.
 
 ---
 
-## ACT 2 - One decision, every surface (0:46 - 2:02)
+## Demo data (use these EXACT values everywhere; keeps it consistent on screen and in your voice)
 
-### 0:46 - 0:54 | Act card  🔇 (Remotion, full screen)
-- Big: "One decision." → "Every surface." Four small logos animate in: GitHub, Slack, Linear,
-  Cursor. Music lifts here.
-
-### 0:54 - 1:22 | GitHub: the catch  🎙️ (screen: THE money shot, give it air)
-- Record: new PR "add redis cache" → checks pending → **Orin check FAILS** → Details:
-  "Re-proposes ISSUE-N (rejected)" + reasoning + evidence. Remotion red ring/zoom on the
-  citation. Lower-third: "merge blocked · decision cited".
-- VO: "Weeks later, someone new opens exactly that PR. Orin fails the required check with the
-  citation, the real decision and reasoning, and the merge is blocked before the debate even
-  restarts. That's the moment. Now watch the same memory show up everywhere else."
-
-### 1:22 - 1:38 | Slack  🔇 (screen: Slack, captions only)
-- Record: `/why did we reject redis` → cited answer with the Evidence chunk. (Optional 3s: 🧠
-  reaction on a message.)
-- Remotion captions timed to the action: "in Slack: /why" → "same decision, with evidence" →
-  "linked to GitHub memory by a one-time admin code". No VO; let it read.
-
-### 1:38 - 1:54 | Linear  🔇 (screen: Linear, captions only)
-- Record: create an issue proposing Redis → Orin comments a collision warning citing the same
-  decision; or @mention Orin in an issue → agent replies with the cited decision.
-- REQUIRES: Linear linked to the GitHub org memory first (`@Orin link` in Linear → `@orin link
-  CODE` on GitHub). Standalone Linear has its own empty memory and will NOT show the Redis
-  decision. See checklist.
-- Remotion captions: "in Linear: @Orin, or on issue-create" → "same memory, warns before the
-  work starts". No VO.
-
-### 1:54 - 2:02 | Cursor / MCP  🎙️ (screen: IDE)
-- Record: Cursor / Claude Code calling `check_rejected` on a change → tool result flags
-  ISSUE-N, before any PR exists. (Fallback: CLI pre-flight exiting non-zero in a terminal.)
-- VO: "And your coding agents ask Orin over MCP, catching it before a pull request even exists."
+- Repo name: **`payments-api`** (under your demo account, e.g. `your-org/payments-api`)
+- The decision topic: **Redis caching** (universal, everyone gets it)
+- Issue title: **Add Redis as a caching layer**
+- Issue body: "We're seeing slow response times on the analytics endpoints. Proposing we add
+  Redis as a caching layer in front of Postgres."
+- Maintainer's rejection comment (paste this as the reason, then close the issue):
+  "Rejecting this. Redis is another service to run and monitor, and it adds a cache-invalidation
+  problem we don't want. Our Postgres materialized views already cover these queries. Let's
+  revisit only if materialized-view refresh time becomes the bottleneck."
+- The re-proposing PR title: **Add Redis caching for API responses**
+- PR body: "Adds a Redis cache in front of the analytics endpoints to speed up response times."
+- Slack question: **`/why did we say no to redis`**
+- Linear issue title: **Introduce Redis caching for analytics**
+- Override comment (on the failed PR): **`@orin override ISSUE-1 "we now have a platform team to operate Redis"`**
+  (use whatever the real issue number is, e.g. ISSUE-1)
 
 ---
 
-## ACT 3 - Governable, observable, and the engine (2:02 - 3:00)
+## THE CUTS
 
-### 2:02 - 2:16 | Human loop / override  🔇 (screen: GitHub PR, captions)
-- Record: `@orin override ISSUE-N "we have a dedicated infra team now"` → Orin records an
-  OVERRIDE superseding ISSUE-N → `@orin re-scan` → check turns green.
-- Remotion captions: "context changed?" → "@orin override, with receipts" → "superseded, not
-  deleted" → check flips green. No VO.
+### CUT 1: Brand intro  🔇 NO TALK  (~6s)
+- Screen: none (I build it). Black `#09090B`, Orin mark fades in, tagline under it, soft music rising.
+- Text on screen: **Orin** / small under it: **institutional memory for engineering teams**
+- Who makes it: I build in Remotion. You do nothing.
 
-### 2:16 - 2:38 | Dashboard sweep  🔇 (screen: fast pans, music-driven)
-- Record: Catches (stat tiles + a catch detail) → Knowledge graph (drag the live Cognee graph)
-  → Rules (org/repo scope selector) → Docs (upload an ADR, "Teach Orin").
-- Remotion micro-captions per pane: "every catch, cited" / "the graph itself" / "rules, org or
-  per-repo" / "teach it your ADRs". No VO; punchy cuts on the beat.
+### CUT 2: The hook  🎙️ YOU TALK  (~15s)
+- Screen: slow scroll down the Orin homepage (hero + the tilted dashboard). Record ~15s of calm scroll.
+- SAY (word for word):
+  "Every engineering team rejects ideas for good reasons. Then the people who remember those
+  reasons move on. Months later the same idea comes back, and nobody remembers why you said no.
+  Orin is the memory that does."
 
-### 2:38 - 2:54 | Built on Cognee  🎙️ (Remotion diagram card)
-- Animated four-verb loop: remember → recall → improve → forget. Footer: "self-hosted Cognee
-  1.2.2 · EBAC multi-tenant · DeepSeek + local embeddings · one isolated tenant per org".
-- VO: "Under the hood it's Cognee's full lifecycle, live. It remembers, recalls with sessions,
-  and maintainer feedback literally reweights the graph over time. Every workspace is its own
-  isolated tenant."
+### CUT 3: Transition card  🔇 NO TALK  (~4s)
+- Screen: none (I build it).
+- Text on screen: **First, teach it a decision.**
 
-### 2:54 - 3:00 | Close  🎙️ (Remotion card)
-- Orin mark + "Remember the past. Ship the future." + `github.com/apps/orinbot`.
-- VO: "Orin. Remember the past, ship the future."
+### CUT 4: Teach it  🎙️ YOU TALK  (~20s)
+- Screen: GitHub `your-org/payments-api` → open the issue "Add Redis as a caching layer" → show
+  the maintainer's rejection comment → click Close. Record the whole thing.
+- SAY:
+  "Here's a real repo. Someone proposes adding Redis as a caching layer. A maintainer says no:
+  it's another service to run, and Postgres materialized views already cover it. They close the
+  issue. No special syntax, nothing. Orin just read that decision into its memory."
+
+### CUT 5: Time jump  🔇 NO TALK  (~2s)
+- Screen: none.
+- Text on screen: **~a minute later**
+
+### CUT 6: Decision recorded  🎙️ YOU TALK  (~10s)
+- Screen: Orin dashboard → Decisions → the Redis decision showing REJECTED with the reasoning. Record it.
+- SAY:
+  "And there it is in the dashboard. The decision, the reasoning, marked rejected. Remember this,
+  because we only recorded it once."
+
+### CUT 7: Act card  🔇 NO TALK  (~5s, music lifts)
+- Screen: none (I build it).
+- Text on screen: **One decision.** then **Every surface.** with four logos appearing:
+  GitHub, Slack, Linear, Cursor.
+
+### CUT 8: THE CATCH (the big one)  🎙️ YOU TALK  (~26s)
+- Screen: GitHub `payments-api` → a new PR "Add Redis caching for API responses" → the checks run
+  → **Orin's check FAILS (red)** → click "Details" → show the citation (re-proposes ISSUE-1,
+  rejected, with the reasoning). Give this room; let the red check sit on screen.
+- SAY:
+  "Weeks later, someone new opens exactly that pull request. Adds Redis. And Orin fails the check,
+  before anyone wastes time reviewing it. Not 'this looks risky.' It cites the exact past decision,
+  the reasoning, and links the original thread. The merge is blocked until a human decides. That's
+  the whole product, right there."
+
+### CUT 9: Slack  🔇 NO TALK  (~14s)
+- Screen: Slack → type `/why did we say no to redis` → Orin's cited answer appears. Record it.
+- Text on screen (I add): **In Slack: /why** then **Same decision. With evidence.**
+- NOTE: Slack must be linked to this repo's org memory BEFORE recording (see checklist).
+
+### CUT 10: Linear  🔇 NO TALK  (~14s)
+- Screen: Linear → create an issue "Introduce Redis caching for analytics" → Orin comments a
+  collision warning citing the same decision. Record it.
+- Text on screen (I add): **In Linear** then **It warns before the work even starts.**
+- NOTE: Linear must be linked to the same org memory BEFORE recording (see checklist).
+
+### CUT 11: Coding agents / Cursor  🎙️ YOU TALK  (~12s)
+- Screen: Cursor or Claude Code with Orin's MCP configured → ask it to check a change → it calls
+  `check_rejected` and flags the Redis decision. Record it. (Fallback: a terminal running the
+  CLI pre-flight and exiting with an error.)
+- SAY:
+  "And your AI coding agents plug in over MCP. Cursor checks a change against the same memory
+  before a pull request even exists. Same decision, everywhere your team works."
+
+### CUT 12: Override  🔇 NO TALK  (~12s)
+- Screen: on the failed PR, comment `@orin override ISSUE-1 "we now have a platform team to operate
+  Redis"` → Orin replies it recorded an override → comment `@orin re-scan` → the check turns green.
+  Record the whole flow.
+- Text on screen (I add): **Context changed? Override it. With receipts.** then **Superseded, not deleted.**
+
+### CUT 13: Dashboard tour  🔇 NO TALK  (~18s, music-driven)
+- Screen: quick pans, ~4s each: Catches (the stat tiles + a catch) → Knowledge graph (drag the
+  live graph around) → Rules (open the org / repo scope dropdown) → Docs (upload a file, hit
+  "Teach Orin"). Record each.
+- Text on screen (I add, one per pane): **Every catch, cited** / **The graph itself** /
+  **Rules, org or per repo** / **Teach it your docs**
+
+### CUT 14: Built on Cognee  🎙️ YOU TALK  (~14s)
+- Screen: none needed (I build a four-verb loop animation: remember → recall → improve → forget).
+  If you want, screen-record the knowledge graph again as backup B-roll.
+- SAY:
+  "Under the hood this is Cognee's full memory lifecycle, running live. It remembers decisions,
+  recalls them with reasoning, and when a maintainer says good catch or bad catch, it actually
+  reweights the graph. Every workspace is its own private memory."
+
+### CUT 15: Close  🎙️ YOU TALK (short)  (~5s)
+- Screen: none (I build it). Orin mark + tagline + install link.
+- Text on screen (I add): **Orin. Remember the past. Ship the future.** / `github.com/apps/orinbot`
+- SAY (short, optional): "Orin. Remember the past, ship the future."
 
 ---
 
-## Surface balance (so it's not "a GitHub bot")
-GitHub ~50s, Slack ~16s, Linear ~16s, MCP/Cursor ~8s, dashboard ~22s. The act-2 card frames all
-four as equals; GitHub keeps the single deep explained catch, the others land fast as the
-"everywhere" montage.
+## What I build vs what you record
+- I build (no recording needed): CUT 1, 3, 5, 7, 15 text/brand cards, the CUT 14 lifecycle
+  animation, and ALL the on-screen text/highlights/music on top of your clips.
+- You record (screen, some with your voice): CUT 2, 4, 6, 8, 11, 14 (you talk) and CUT 9, 10, 12,
+  13 (screen only, no voice).
 
-## Remotion assets
-1. Cold-open card (2 lines, 10s)
-2. Lower-third component (small caps, zinc-400, thin left border) - reused
-3. Jump/act cards: "~a minute later", "One decision. / Every surface." (+ 4 logos)
-4. Highlight ring + zoom for the failing check + citation
-5. Timed caption tracks for the 🔇 Slack / Linear / override / dashboard beats
-6. Four-verb lifecycle diagram (16s)
-7. Close card (6s)
-- All `#09090B`, Geist, product zinc palette.
+## Before you record (do these in order, or beats will show empty memory)
+1. Fresh repo `your-org/payments-api`; install OrinBot on it; turn ON branch protection that
+   REQUIRES the "Orin" check (that's what makes the red check actually block the merge in CUT 8).
+2. Do the Redis issue once off-camera first so the pipeline is warm, then do it again on camera.
+3. Slack: link it to the org memory before CUT 9: run `/orin link` in Slack, then comment
+   `@orin link CODE` on any issue in the repo. Test `/why did we say no to redis` off-camera.
+4. Linear: link it too before CUT 10: in a Linear issue type `@Orin link`, then comment
+   `@orin link CODE` on GitHub. Test the warning off-camera.
+5. Cursor/Claude Code: add Orin's MCP config with a minted repo key; test `check_rejected` once.
+6. Record the dashboard at normal 100% zoom, big window (1600px+), dark theme, no bookmarks bar.
+7. Screenshot every beat as a backup in case a take flakes.
 
-## Pre-record checklist (in order)
-1. Fresh demo repo; install OrinBot; **enable branch protection requiring the "Orin" check**
-   (this is what makes the red check visibly BLOCK the merge).
-2. Slack workspace pre-linked to the org memory BEFORE recording: `/orin link` in Slack →
-   `@orin link CODE` on a GitHub issue. Test `/why did we reject redis` off-camera.
-3. Linear org authorized AND linked to the same org memory: `@Orin link` in a Linear issue →
-   `@orin link CODE` on GitHub. Without this, Linear's memory is empty and the beat fails.
-   Test the @mention / issue-create warning off-camera after linking.
-4. Cursor/Claude Code MCP configured with a minted repo key; test `check_rejected` once.
-5. Warm the pipeline: run one throwaway ingest so cognify caches are hot.
-6. Record teach + catch in real time; cut the waits with the "~a minute later" card; keep raw
-   footage as proof of a live run.
-7. Dashboard at 100% zoom (already scaled to 110% internally), 1600px+, dark OS theme, no
-   bookmarks bar. Screenshot every beat as a fallback.
+## Total talking words about 285 (fits comfortably; the rest is text + music).
+```
 
-## Deliberately cut
-Key minting UI, settings, self-serve multi-tenancy mechanics, security hardening. One caption
-("one isolated tenant per org") carries it; the README covers the rest for judges who dig.
+Cut times: 6+15+4+20+2+10+5+26+14+14+12+12+18+14+5 = 176s.
+```
