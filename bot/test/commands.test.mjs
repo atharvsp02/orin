@@ -48,6 +48,9 @@ eq("rules (list)", parseCommand("@orin rules"), { name: "rules" });
 eq("rule (seed)", parseCommand("@orin rule Do not add new deps"), { name: "rule", text: "Do not add new deps" });
 eq("link with code", parseCommand("@orin link AB12CD34"), { name: "link", code: "AB12CD34" });
 eq("link without code", parseCommand("@orin link"), { name: "link", code: "" });
+eq("orinbot mention (autocomplete form)", parseCommand("@orinbot why did we do this"), { name: "why" });
+eq("OrinBot case-insensitive", parseCommand("@OrinBot good catch"), { name: "good" });
+eq("orinbot override with ref", parseCommand('@orinbot override PR-42 "changed our mind"'), { name: "override", ref: "PR-42", reason: "changed our mind" });
 eq("no partial-word match (overrides)", parseCommand("@orin overrides everything"), null);
 
 console.log(`\n=== commands.ts: ${pass} passed, ${fail} failed ===`);

@@ -23,7 +23,9 @@ export type Command =
   | { name: "rule"; text: string }
   | { name: "link"; code: string };
 
-const RE = /@orin\s+(recall|why|override|ignore|re-?scan|good|bad|forget|rules|rule|link|👍|👎)(?![a-z0-9])([^\n]*)/i;
+// Accept both the short form (@orin) and the App's real mention handle (@orinbot), which is what
+// GitHub's autocomplete inserts.
+const RE = /@orin(?:bot)?\s+(recall|why|override|ignore|re-?scan|good|bad|forget|rules|rule|link|👍|👎)(?![a-z0-9])([^\n]*)/i;
 
 /** Parse an `@orin <cmd> …` mention (pure — unit-tested). */
 export function parseCommand(body: string): Command | null {
