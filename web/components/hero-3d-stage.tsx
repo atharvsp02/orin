@@ -55,7 +55,7 @@ export function Hero3DStage() {
         {/* Main content */}
         <div className="relative z-10 pt-28 flex flex-col">
           {/* Hero text - contained and centered */}
-          <div className="w-full flex justify-center px-6 mt-16">
+          <div className="relative z-20 w-full flex justify-center px-6 mt-16">
             <div className="w-full max-w-4xl">
               <motion.h1
                 initial={{ opacity: 0, y: 20 }}
@@ -83,10 +83,6 @@ export function Hero3DStage() {
               >
                 <a href="/dashboard" className="px-5 py-2.5 bg-white text-zinc-900 font-medium rounded-lg hover:bg-zinc-100 transition-colors text-sm">
                   Get started
-                </a>
-                <a href="/dashboard" className="text-zinc-300 font-medium hover:text-white transition-colors flex items-center gap-2 text-sm">
-                  <span className="text-zinc-500">New:</span> Orin agent for Slack
-                  <span aria-hidden="true">→</span>
                 </a>
               </motion.div>
             </div>
