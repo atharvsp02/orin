@@ -96,7 +96,9 @@ function registerHandlers(app: InstanceType<typeof App>): void {
       case "link": {
         // Mint a one-time code bound to THIS workspace. It is consumed on GitHub by someone
         // with write access (`@orin link CODE`), which links this workspace to that org's memory.
-        const code = randomBytes(4).toString("hex").toUpperCase();
+        // 16 bytes = 128-bit entropy (hex keeps it case-insensitive for the consume side); combined
+        // with single-use + 15-min expiry + every guess being a public GitHub comment, unguessable.
+        const code = randomBytes(16).toString("hex").toUpperCase();
         await db.insertLinkCode(sha256(code), "slack", teamId, 15);
         await ephemeral(
           `🔗 Link code: \`${code}\` (expires in 15 minutes, single-use).\n` +
