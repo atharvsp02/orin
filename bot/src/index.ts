@@ -130,7 +130,7 @@ async function main() {
     }
     // Dashboard sign-in + API (session-cookie auth).
     if (req.method === "GET" && pathname === "/v1/auth/github") {
-      handleAuthStart(res);
+      handleAuthStart(req, res);
       return;
     }
     if (req.method === "GET" && pathname === "/v1/auth/callback") {
