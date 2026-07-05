@@ -39,3 +39,6 @@ coverage/
 
 # local config with real keys — never commit
 *.local.json
+
+# VM secret backups — never commit
+*.rey3
