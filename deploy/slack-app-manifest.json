@@ -26,7 +26,7 @@
   "oauth_config": {
     "redirect_urls": ["https://orin-bot.duckdns.org/slack/oauth_redirect"],
     "scopes": {
-      "bot": ["commands", "chat:write", "reactions:read", "channels:history", "app_mentions:read"]
+      "bot": ["commands", "chat:write", "reactions:read", "channels:history", "app_mentions:read", "users:read"]
     }
   },
   "settings": {

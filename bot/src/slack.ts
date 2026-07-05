@@ -51,11 +51,21 @@ function buildApp(): InstanceType<typeof App> {
     clientId: reqEnv("SLACK_CLIENT_ID"),
     clientSecret: reqEnv("SLACK_CLIENT_SECRET"),
     stateSecret: reqEnv("SLACK_STATE_SECRET"), // signs the OAuth state param — must not be a known default (CSRF)
-    scopes: ["commands", "chat:write", "reactions:read", "channels:history", "app_mentions:read"],
+    scopes: ["commands", "chat:write", "reactions:read", "channels:history", "app_mentions:read", "users:read"],
     installationStore,
   });
   registerHandlers(app);
   return app;
+}
+
+// Workspace-admin check (needs users:read). Fail closed: unknown → not admin.
+async function isWorkspaceAdmin(client: { users: { info: (a: { user: string }) => Promise<{ user?: { is_admin?: boolean; is_owner?: boolean; is_primary_owner?: boolean } }> } }, userId: string): Promise<boolean> {
+  try {
+    const { user } = await client.users.info({ user: userId });
+    return Boolean(user?.is_admin || user?.is_owner || user?.is_primary_owner);
+  } catch {
+    return false;
+  }
 }
 
 // Cheap gate so we don't run the LLM on ordinary chatter — only on proposal-shaped messages.
@@ -86,14 +96,21 @@ function registerHandlers(app: InstanceType<typeof App>): void {
   });
 
   // /orin — workspace management: link to a GitHub org's memory, status, repos, unlink, help.
-  app.command("/orin", async ({ command, ack, respond }) => {
+  // link/unlink change what memory the whole workspace uses → workspace admins only.
+  app.command("/orin", async ({ command, ack, respond, client }) => {
     await ack();
     const teamId = command.team_id ?? "";
     const [sub = "help", ...rest] = (command.text ?? "").trim().split(/\s+/);
     const ephemeral = (text: string) => respond({ response_type: "ephemeral", text });
+    const requireAdmin = async (): Promise<boolean> => {
+      if (await isWorkspaceAdmin(client, command.user_id)) return true;
+      await ephemeral("⛔ `link` and `unlink` change this workspace's memory — workspace admins only.");
+      return false;
+    };
 
     switch (sub.toLowerCase()) {
       case "link": {
+        if (!(await requireAdmin())) break;
         // Mint a one-time code bound to THIS workspace. It is consumed on GitHub by someone
         // with write access (`@orin link CODE`), which links this workspace to that org's memory.
         // 16 bytes = 128-bit entropy (hex keeps it case-insensitive for the consume side); combined
@@ -128,6 +145,7 @@ function registerHandlers(app: InstanceType<typeof App>): void {
         break;
       }
       case "unlink": {
+        if (!(await requireAdmin())) break;
         // Detach from the current memory and provision a fresh, empty one for this workspace.
         await db.unlinkTenant("slack", teamId);
         await provisionAndLink({ platform: "slack", externalId: teamId }, `slack:${teamId}`);
