@@ -1,4 +1,4 @@
-# CodeGuard
+# Orin
 
 Institutional-memory GitHub App for open-source maintainers. It ingests a repo's issues, PRs, and maintainer decisions into a self-hosted Cognee knowledge graph, answers onboarding questions with citations, and comments on new PRs that re-propose something already tried and rejected.
 
@@ -20,4 +20,4 @@ Each component is its own project — e.g. `cd bot && npm install`.
 2. **bot** — `cd bot`, `npm install`, `cp .env.example .env`, `npm run dev`.
 3. **web** — scaffolded at Milestone B.
 
-See `docs/plans/codeguard-plan.md` for the full build plan and `docs/specs/` for the verified specs.
+See `docs/plans/orin-plan.md` for the full build plan and `docs/specs/` for the verified specs.

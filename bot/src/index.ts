@@ -24,7 +24,7 @@ async function main() {
     const datasetName = `repo-${installationId}`;
 
     const creds = await cognee.provisionTenant(cog, {
-      email: `bot-${installationId}@codeguard.io`,
+      email: `bot-${installationId}@orin.io`,
       password: randomBytes(18).toString("hex"),
       tenantName: `install-${installationId}`,
     });
@@ -73,7 +73,7 @@ async function main() {
     });
   });
 
-  // `@codeguard <cmd>` in a PR/issue comment -> command queue (recall/why/override/ignore/rescan).
+  // `@orin <cmd>` in a PR/issue comment -> command queue (recall/why/override/ignore/rescan).
   app.webhooks.on("issue_comment.created", async ({ payload }) => {
     if (!payload.installation || payload.comment.user?.type === "Bot") return;
     await boss.send(QUEUE.command, {
@@ -124,7 +124,7 @@ async function main() {
       return;
     }
     void middleware(req, res);
-  }).listen(config.port, () => console.log(`CodeGuard bot listening on :${config.port}`));
+  }).listen(config.port, () => console.log(`Orin bot listening on :${config.port}`));
 }
 
 main().catch((err) => {

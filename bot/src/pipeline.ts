@@ -167,7 +167,7 @@ function firstAnswer(res: unknown): string {
 // --- lifecycle: maintainer feedback → reweight the exact decision nodes → improve ---
 
 /** Attach a maintainer 👍/👎 to the recall QA that produced a verdict on this PR.
- *  Returns false when there is no such QA (e.g. a thread CodeGuard never flagged). */
+ *  Returns false when there is no such QA (e.g. a thread Orin never flagged). */
 export async function submitFeedback(
   creds: TenantCredentials,
   opts: { datasetName: string; sessionId: string; question: string; score: 1 | 2 | 3 | 4 | 5 },
@@ -230,7 +230,7 @@ export async function matchRules(
   return rules.filter((r) => grounded(prText, r, Math.max(2, cfg.confidenceThreshold)));
 }
 
-/** Cited recall over the tenant's decision graph (for `@codeguard recall|why`).
+/** Cited recall over the tenant's decision graph (for `@orin recall|why`).
  *  Date-scoped questions ("what did we reject in Q1?") route to the TEMPORAL retriever. */
 export async function ask(inst: Installation, creds: TenantCredentials, query: string): Promise<string> {
   const res = await cognee.search(cog, creds, {
@@ -242,7 +242,7 @@ export async function ask(inst: Installation, creds: TenantCredentials, query: s
   return firstAnswer(res);
 }
 
-/** Mint a NEW accepted decision that SUPERSEDES a cited rejection (the `@codeguard override` loop). */
+/** Mint a NEW accepted decision that SUPERSEDES a cited rejection (the `@orin override` loop). */
 export async function overrideDecision(
   inst: Installation,
   creds: TenantCredentials,

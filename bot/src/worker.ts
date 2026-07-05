@@ -61,7 +61,7 @@ async function catchWorker(jobs: PgBoss.Job<CatchJob>[]): Promise<void> {
     // Issues have no diff/check — deliver a plain comment before code is written.
     if (data.kind === "issue") {
       const it = await gh.fetchItem(data.installationId, data.repo, data.number);
-      const sessionId = `codeguard-issue-${data.installationId}-${data.number}`;
+      const sessionId = `orin-issue-${data.installationId}-${data.number}`;
       const judgment = await evaluatePr(inst, cfg, creds, `${it.title}\n\n${it.body}`, data.repo, sessionId);
       if (judgment.matches && judgment.decisionId && judgment.comment && cfg.autoComment) {
         await gh.postComment(data.installationId, data.repo, data.number, `⚠️ ${judgment.comment}`);
@@ -106,7 +106,7 @@ async function catchWorker(jobs: PgBoss.Job<CatchJob>[]): Promise<void> {
     if (cfg.autoComment && !refs) refs = await delivery.open(ctx); // show the check in_progress while we work
 
     const prText = `${pr.title}\n\n${pr.body}\n\nFiles: ${pr.files.map((f) => f.path).join(", ")}`;
-    const sessionId = `codeguard-pr-${data.installationId}-${data.number}`;
+    const sessionId = `orin-pr-${data.installationId}-${data.number}`;
     const judgment = await evaluatePr(inst, cfg, creds, prText, data.repo, sessionId);
     // Advisory coding-rule hints only enrich an existing re-proposal finding (kept out of the blocking gate).
     const rules = judgment.matches ? await matchRules(inst, cfg, creds, prText) : [];

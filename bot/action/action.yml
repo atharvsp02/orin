@@ -1,13 +1,13 @@
-name: CodeGuard Preflight
+name: Orin Preflight
 description: Check a PR against your repo's recorded decisions before requesting review.
 inputs:
   token:
-    description: CodeGuard repo-scoped preflight key (cg_…)
+    description: Orin repo-scoped preflight key (orin_…)
     required: true
   endpoint:
-    description: CodeGuard preflight endpoint URL
+    description: Orin preflight endpoint URL
     required: false
-    default: https://codeguard.example/v1/preflight
+    default: https://orin.example/v1/preflight
 runs:
   using: composite
   steps:
@@ -26,6 +26,6 @@ runs:
           -H "Authorization: Bearer $CG_TOKEN" -H "Content-Type: application/json" -d "$BODY")"
         echo "$RESP" | jq .
         if [ "$(echo "$RESP" | jq -r '.blocking // false')" = "true" ]; then
-          echo "::error::CodeGuard: this re-proposes a rejected decision ($(echo "$RESP" | jq -r '.decisionId // "?"'))"
+          echo "::error::Orin: this re-proposes a rejected decision ($(echo "$RESP" | jq -r '.decisionId // "?"'))"
           exit 1
         fi

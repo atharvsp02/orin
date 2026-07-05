@@ -21,9 +21,9 @@ export type Command =
   | { name: "rules" }
   | { name: "rule"; text: string };
 
-const RE = /@codeguard\s+(recall|why|override|ignore|re-?scan|good|bad|forget|rules|rule|👍|👎)(?![a-z0-9])([^\n]*)/i;
+const RE = /@orin\s+(recall|why|override|ignore|re-?scan|good|bad|forget|rules|rule|👍|👎)(?![a-z0-9])([^\n]*)/i;
 
-/** Parse an `@codeguard <cmd> …` mention (pure — unit-tested). */
+/** Parse an `@orin <cmd> …` mention (pure — unit-tested). */
 export function parseCommand(body: string): Command | null {
   const m = body.match(RE);
   if (!m) return null;
@@ -50,7 +50,7 @@ export function parseCommand(body: string): Command | null {
     case "rule":
       return { name: "rule", text: rest };
     case "override": {
-      // @codeguard override [REF] "reason"   (REF like PR-42 optional; quotes optional)
+      // @orin override [REF] "reason"   (REF like PR-42 optional; quotes optional)
       const quoted = rest.match(/^(\S+)?\s*"([^"]*)"/);
       if (quoted) return { name: "override", ref: quoted[1], reason: quoted[2].trim() };
       const refThenText = rest.match(/^([A-Za-z]+-\d+)\s+(.+)$/);
@@ -111,14 +111,14 @@ export async function handleCommand(job: CommandJob, boss: PgBoss): Promise<void
         await reply("Nothing to override — no decision was cited on this thread.");
         break;
       }
-      // Cross-repo IDOR guard: only a decision CodeGuard flagged on THIS repo+thread may be overridden.
+      // Cross-repo IDOR guard: only a decision Orin flagged on THIS repo+thread may be overridden.
       if (!(await db.decisionFlaggedOnThread(job.installationId, job.repo, job.number, ref))) {
-        await reply(`@${job.sender} — \`${ref}\` was not flagged by CodeGuard on this thread, so it can't be overridden here.`);
+        await reply(`@${job.sender} — \`${ref}\` was not flagged by Orin on this thread, so it can't be overridden here.`);
         break;
       }
       const sourceUrl = `https://github.com/${job.repo}/${job.isPr ? "pull" : "issues"}/${job.number}`;
       const newId = await overrideDecision(inst, creds, { repo: job.repo, citedRef: ref, reason: cmd.reason, by: job.sender, number: job.number, sourceUrl });
-      await reply(`✅ Recorded **${newId}** superseding **${ref}** — CodeGuard will no longer flag this decision.`);
+      await reply(`✅ Recorded **${newId}** superseding **${ref}** — Orin will no longer flag this decision.`);
       break;
     }
     case "ignore": {
@@ -127,7 +127,7 @@ export async function handleCommand(job: CommandJob, boss: PgBoss): Promise<void
         break;
       }
       await db.ignoreDeliveries(job.installationId, job.repo, job.number);
-      await reply("👍 CodeGuard will stop flagging this thread.");
+      await reply("👍 Orin will stop flagging this thread.");
       break;
     }
     case "rescan": {
@@ -151,24 +151,24 @@ export async function handleCommand(job: CommandJob, boss: PgBoss): Promise<void
       const ok = await recordThreadFeedback(inst, job.repo, job.number, score);
       await reply(
         ok
-          ? `📝 Thanks — recorded this as a **${cmd.name === "good" ? "good" : "bad"}** call. CodeGuard will reweight its memory.`
-          : "Nothing to score here — CodeGuard hasn't flagged a decision on this thread.",
+          ? `📝 Thanks — recorded this as a **${cmd.name === "good" ? "good" : "bad"}** call. Orin will reweight its memory.`
+          : "Nothing to score here — Orin hasn't flagged a decision on this thread.",
       );
       break;
     }
     case "forget": {
       // Destructive: prunes the whole tenant decision graph. Admin-only.
       if (!(await isAdmin(octokit, owner, repo, job.sender))) {
-        await reply(`@${job.sender} — \`forget\` prunes all of CodeGuard's memory and needs **admin** access.`);
+        await reply(`@${job.sender} — \`forget\` prunes all of Orin's memory and needs **admin** access.`);
         break;
       }
       await forgetTenant(inst);
-      await reply("🧹 Pruned CodeGuard's decision memory for this account.");
+      await reply("🧹 Pruned Orin's decision memory for this account.");
       break;
     }
     case "rules": {
       const rules = await listRules(inst, creds);
-      await reply(rules.length ? `**Coding rules CodeGuard tracks:**\n${rules.map((r) => `- ${r}`).join("\n")}` : "No coding rules recorded yet — add one with `@codeguard rule <text>`.");
+      await reply(rules.length ? `**Coding rules Orin tracks:**\n${rules.map((r) => `- ${r}`).join("\n")}` : "No coding rules recorded yet — add one with `@orin rule <text>`.");
       break;
     }
     case "rule": {
@@ -177,7 +177,7 @@ export async function handleCommand(job: CommandJob, boss: PgBoss): Promise<void
         break;
       }
       if (!cmd.text.trim()) {
-        await reply("Usage: `@codeguard rule <the rule text>`");
+        await reply("Usage: `@orin rule <the rule text>`");
         break;
       }
       const cfg = await db.getTenantConfig(job.installationId);

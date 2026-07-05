@@ -1,6 +1,6 @@
-# CodeGuard — Master Build & Design Spec
+# Orin — Master Build & Design Spec
 
-_The **how** (companion to `docs/plans/codeguard-roadmap.md`, the what/why). Every API/mechanism below was verified against source (`inspiration/cognee` 1.2.2) or official platform docs; reference SDKs are cloned under `inspiration/` (`mcp-typescript-sdk`, `bolt-js`, `linear-agent-demo`)._
+_The **how** (companion to `docs/plans/orin-roadmap.md`, the what/why). Every API/mechanism below was verified against source (`inspiration/cognee` 1.2.2) or official platform docs; reference SDKs are cloned under `inspiration/` (`mcp-typescript-sdk`, `bolt-js`, `linear-agent-demo`)._
 
 > **LIVE-VERIFIED (Jul 2 2026) — ran the whole Cognee-side design against a running engine before implementing:**
 > - ✅ **Feedback loop end-to-end**: recall-with-`sessionId` writes a QA entry; `GET /sessions/{id}` exposes `qa_id` + a populated `used_graph_element_ids`; `POST /remember/entry` (feedback) → 200; `POST /improve` → `PipelineRunCompleted`.
@@ -43,7 +43,7 @@ Every surface — GitHub, MCP, Slack, Linear, CLI — is a **thin adapter that o
 |---|---|---|
 | `tenant_links` | **NEW** `(platform, external_id) → installation_id` | map any platform identity to the one Cognee tenant; GitHub short-circuits to `installationId` |
 | `deliveries` | **replaces `pr_comments`**; PK `(installation_id, repo, number, head_sha)`; `mode check\|review\|comment`, `check_run_id/review_id/comment_id`, `state posted\|clear\|overridden\|ignored`, **`session_id`** | idempotent per-commit delivery + the feedback session link |
-| `preflight_keys` | **NEW** `(key_hash, installation_id, repo)` | repo-scoped CI/pre-flight auth (sha256-hashed `cg_…` keys) |
+| `preflight_keys` | **NEW** `(key_hash, installation_id, repo)` | repo-scoped CI/pre-flight auth (sha256-hashed `orin_…` keys) |
 | `decision_records` | unchanged (already has `superseded_by`) | — |
 
 ---
@@ -70,22 +70,22 @@ interface Delivery {
 }
 resolveDelivery(cfg): Delivery   // cfg.deliveryMode, fallback check→review→comment on 403/404/422
 ```
-- **CheckRunDelivery** — `checks.create` (`head_sha`, `name:"CodeGuard"` = the required-check context, `status:"in_progress"`, `external_id`) → `checks.update` (`status:"completed"`, `conclusion: blocking ? "failure" : "neutral"`, `output.{title,summary,text}` + `output.annotations` **≤50/request**, `annotation_level notice|warning|failure`). New check run **per `head_sha`** (a run is bound to one commit).
+- **CheckRunDelivery** — `checks.create` (`head_sha`, `name:"Orin"` = the required-check context, `status:"in_progress"`, `external_id`) → `checks.update` (`status:"completed"`, `conclusion: blocking ? "failure" : "neutral"`, `output.{title,summary,text}` + `output.annotations` **≤50/request**, `annotation_level notice|warning|failure`). New check run **per `head_sha`** (a run is bound to one commit).
 - **ReviewDelivery** — `pulls.createReview` (`commit_id: head_sha`, `event: blocking ? REQUEST_CHANGES : COMMENT`, `comments[]` anchored via `path`+`start_line/start_side`+`line`+`side`) with a ```suggestion``` block (fence widens to ```` ```` ```` when the replacement itself contains backticks). Reviews aren't editable → on re-run `dismissReview` the stale one, repost.
 - **Anchoring (`patch.ts`, pure/unit-testable)** — parse `pulls.listFiles` unified-diff hunks (`@@ -a,b +c,d @@`), walk lines tracking head/base line + side (`+`→RIGHT/head, `-`→LEFT/base, ` `→both); `anchorFor(files, terms)` scores added (RIGHT) lines by overlap with the decision's `terms` (reuse `pipeline.grounded`'s tokenizer) and picks the best contiguous run. Anchors must be diff lines or GitHub 422s.
 
 ### A2. Required-status-check gate (lifecycle)
-`opened/reopened/ready_for_review` → create check `in_progress`; catch completes clean → `success` (unblocks); re-proposal + `cfg.blockOnRepropose && !draft` → `failure` (blocks); advisory/draft → `neutral`; `synchronize` → new check for the new `head_sha`; `override` → `success`. One-time manual step: repo admin adds context `CodeGuard` to branch protection (don't auto-register — needs `Administration:write`).
+`opened/reopened/ready_for_review` → create check `in_progress`; catch completes clean → `success` (unblocks); re-proposal + `cfg.blockOnRepropose && !draft` → `failure` (blocks); advisory/draft → `neutral`; `synchronize` → new check for the new `head_sha`; `override` → `success`. One-time manual step: repo admin adds context `Orin` to branch protection (don't auto-register — needs `Administration:write`).
 
 ### A3. Trigger expansion
 Subscribe `pull_request` `opened`(incl. draft)/`reopened`/`ready_for_review`/`synchronize`, and `issues.opened` (run the same catch on issue title/body — stop a dead-end before code). Idempotency keyed by `head_sha` in `deliveries`. **New App permissions:** Checks **R/W (new)**, Pull requests **R→R/W**, Issues **R→R/W**; subscribe Pull request / Issues / Issue comment events.
 
-### A4. Slash commands (`@codeguard …`) + the override→supersede loop
-`issue_comment.created` → parse `@codeguard (recall|why|override|ignore|re-scan)`; ack with an `eyes` reaction (`reactions.createForIssueComment`), swap to `rocket` on success. Auth for mutating cmds via `repos.getCollaboratorPermissionLevel` (`admin|write` or an allowlist).
+### A4. Slash commands (`@orin …`) + the override→supersede loop
+`issue_comment.created` → parse `@orin (recall|why|override|ignore|re-scan)`; ack with an `eyes` reaction (`reactions.createForIssueComment`), swap to `rocket` on success. Auth for mutating cmds via `repos.getCollaboratorPermissionLevel` (`admin|write` or an allowlist).
 - **`override "<reason>"`** is the killer loop: mint a NEW `accepted` decision that **supersedes** the cited rejection — reuse the ingest path: `cognee.remember` + `db.upsertDecisionRecord({outcome:"accepted", supersedes…})` + `db.markSuperseded(inst, [citedRef], newId)`. The future `evaluatePr` then filters the now-superseded rejection out automatically, and `delivery.override` flips the check green.
 
 ### A5. Contributor pre-flight (shift-left)
-`POST /v1/preflight` on the same HTTP server (route in front of `createNodeMiddleware`); body `{repo,title,description,diff}`; auth **repo-scoped `cg_…` key, sha256-hashed at rest** (never a GitHub token in CI) → `evaluatePr` with NO GitHub writes → JSON findings. A ~30-line composite **GitHub Action** and a **CLI** both POST the same endpoint (single source of truth); Action exits non-zero on `blocking:true`.
+`POST /v1/preflight` on the same HTTP server (route in front of `createNodeMiddleware`); body `{repo,title,description,diff}`; auth **repo-scoped `orin_…` key, sha256-hashed at rest** (never a GitHub token in CI) → `evaluatePr` with NO GitHub writes → JSON findings. A ~30-line composite **GitHub Action** and a **CLI** both POST the same endpoint (single source of truth); Action exits non-zero on `blocking:true`.
 
 **Build order (A):** `patch.ts` → `github.ts` (`fetchPr → PrSnapshot` w/ `head.sha`+patch+draft) → `deliveries` table → `CheckRunDelivery`+fallback comment (ships the gate) → `buildDecision` (anchors + `blocking`) → `ReviewDelivery`+suggestions → trigger expansion → slash commands+override → pre-flight+Action+CLI.
 
@@ -95,10 +95,10 @@ Subscribe `pull_request` `opened`(incl. draft)/`reopened`/`ready_for_review`/`sy
 
 ### B1. Four-verb lifecycle + feedback learning (the flagship "Best Use of Cognee")
 The full chain, all REST-native (verified). **Key discovery: feedback rides on `/api/v1/recall` (which has `session_id`), NOT `/api/v1/search` (which doesn't).**
-1. **Catch recall** → `POST /api/v1/recall` `{query, searchType:"GRAPH_COMPLETION_COT", datasets:[ds], sessionId:"codeguard-pr-<inst>-<n>", includeReferences:true, topK:10}` (camelCase) → engine writes a QA entry with `used_graph_element_ids` (`graph_completion_retriever.py:351-364`, live-confirmed). Store the session id on the delivery row.
-2. **Maintainer 👍/👎** (reaction or `@codeguard good|bad`) → recall doesn't return `qa_id`, so `GET /api/v1/sessions/{session_id}` → match the QA by `question` → read `qa_id` → `POST /api/v1/remember/entry` `{entry:{type:"feedback", qa_id, feedback_score}, session_id, dataset_name}` (score **int 1–5**; 👍=5, 👎=1).
+1. **Catch recall** → `POST /api/v1/recall` `{query, searchType:"GRAPH_COMPLETION_COT", datasets:[ds], sessionId:"orin-pr-<inst>-<n>", includeReferences:true, topK:10}` (camelCase) → engine writes a QA entry with `used_graph_element_ids` (`graph_completion_retriever.py:351-364`, live-confirmed). Store the session id on the delivery row.
+2. **Maintainer 👍/👎** (reaction or `@orin good|bad`) → recall doesn't return `qa_id`, so `GET /api/v1/sessions/{session_id}` → match the QA by `question` → read `qa_id` → `POST /api/v1/remember/entry` `{entry:{type:"feedback", qa_id, feedback_score}, session_id, dataset_name}` (score **int 1–5**; 👍=5, 👎=1).
 3. **Hourly `lifecycle` worker** → `POST /api/v1/improve` `{datasetName, sessionIds:[…]}` (camelCase) → applies feedback weights (EMA `w += 0.1·(rating−w)`) to the exact nodes/edges that produced the answer; higher weight → lower effective distance → ranked higher.
-4. **`forget()`** wired to an event (e.g. `installation.deleted` → prune tenant, or `@codeguard forget`) so **all four verbs fire live**.
+4. **`forget()`** wired to an event (e.g. `installation.deleted` → prune tenant, or `@orin forget`) so **all four verbs fire live**.
 
 New `cognee.ts`: `recallWithSession`, `getSessionQAs`, `addFeedback`, `improve`, `visualize`, `uploadOntology`. New `bot/src/lifecycle.ts` + a `feedback` queue. **Effort L**, but every endpoint exists.
 
@@ -133,7 +133,7 @@ One-line `search_type` swap — an iterative reason→re-retrieve loop that re-s
 `Tenant {installationId, datasetName, creds, cfg, cog}`; `TenantRef {platform, externalId}`; `resolveTenant(ref)` via `tenant_links` (GitHub short-circuits to the numeric id, zero migration); `provisionAndLink(ref, opts)` for new adapters (creates or links a Cognee tenant). The three primitives are today's `evaluatePr`/`ingestItem` with the `(inst,cfg,creds)` triple collapsed to `Tenant` and `RepoItem` generalized to a platform-neutral `IngestItem`; `ask` is the new read-side twin.
 
 ### C3. MCP adapter — **build thin over `core`, do NOT wrap `cognee-mcp`**
-`cognee-mcp` exposes raw `remember/recall/forget` (wrong abstraction — it would bypass our grounding gate/supersession). Expose CodeGuard tools mapping 1:1 to the primitives: `ask_decision`→`ask`, `check_rejected`→`warn`, `record_decision`→`ingest` (Zod schemas; SDK peers Zod). Transports: **stdio** (local, one process/tenant, key from env) and **streamable HTTP + OAuth 2.1** (remote, `Mcp-Session-Id` map, per-tenant scope from the token, DNS-rebinding protection). Critical: the server calls Cognee with the **tenant's own key, never the client's OAuth token** (spec-mandated). SDK: `@modelcontextprotocol/sdk` (`inspiration/mcp-typescript-sdk`). **Effort M** — unlocks every IDE agent *and* the CLI.
+`cognee-mcp` exposes raw `remember/recall/forget` (wrong abstraction — it would bypass our grounding gate/supersession). Expose Orin tools mapping 1:1 to the primitives: `ask_decision`→`ask`, `check_rejected`→`warn`, `record_decision`→`ingest` (Zod schemas; SDK peers Zod). Transports: **stdio** (local, one process/tenant, key from env) and **streamable HTTP + OAuth 2.1** (remote, `Mcp-Session-Id` map, per-tenant scope from the token, DNS-rebinding protection). Critical: the server calls Cognee with the **tenant's own key, never the client's OAuth token** (spec-mandated). SDK: `@modelcontextprotocol/sdk` (`inspiration/mcp-typescript-sdk`). **Effort M** — unlocks every IDE agent *and* the CLI.
 
 ### C4. Slack adapter (Bolt-JS)
 Multi-workspace OAuth v2; `installationStore` keyed by `team.id` → `provisionAndLink({platform:"slack", externalId:team.id})` on install. Handlers: `/why` (`ack()` <3s → `respond()` async with cited Block Kit), `reaction_added :decision:` → `ingest` the thread, top-level `message` collision-`warn`. Enqueue LLM work on pg-boss so acks never block. Scopes: `commands, chat:write, reactions:read, channels:history, app_mentions:read`. **Effort L.** (`inspiration/bolt-js`)
@@ -142,7 +142,7 @@ Multi-workspace OAuth v2; `installationStore` keyed by `team.id` → `provisionA
 Install `actor=app` with `app:mentionable`/`app:assignable`; enable agent-session-events webhook. On `AgentSessionEvent(created)`: reply 200 **<5s**, emit a `thought` **<10s** via `agentActivityCreate`, then do the work and emit a `response` with citations; `prompted` for follow-ups. Also `warn`-on-issue-create → comment. SDK `@linear/sdk`. **Effort M** (`inspiration/linear-agent-demo`).
 
 ### C6. CLI (CI gate)
-Thin MCP client over the **same remote HTTP endpoint** → `check_rejected` → non-zero exit on a match. `codeguard --file <(git log -1 --format=%B)`. **Effort S.**
+Thin MCP client over the **same remote HTTP endpoint** → `check_rejected` → non-zero exit on a match. `orin --file <(git log -1 --format=%B)`. **Effort S.**
 
 ---
 

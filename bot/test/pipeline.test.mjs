@@ -1,6 +1,6 @@
 // Unit tests for the pure decision-core helpers (grounding gate, recency decay, temporal routing).
 process.env.DATABASE_URL ??= "postgres://x@127.0.0.1:5432/x";
-process.env.CODEGUARD_SECRET ??= "test-secret-please-rotate-0000000000000000";
+process.env.ORIN_SECRET ??= "test-secret-please-rotate-0000000000000000";
 process.env.GITHUB_APP_ID ??= "1";
 process.env.GITHUB_PRIVATE_KEY ??= "dummy";
 process.env.GITHUB_WEBHOOK_SECRET ??= "dummy";

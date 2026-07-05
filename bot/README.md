@@ -1,8 +1,8 @@
-# CodeGuard bot
+# Orin bot
 
 Multi-tenant GitHub App backend. Ingests a repo's closed issues/PRs into a per-installation
 Cognee knowledge graph, catches PRs/issues that re-propose already-rejected decisions, and
-answers `@codeguard` questions with citations.
+answers `@orin` questions with citations.
 
 ## Entrypoints
 
@@ -27,9 +27,9 @@ One package, several `npm run` targets (they share the decision core in `src/pip
 
 `remember` (ingest on install + on PR/issue close) → `recall` (session-scoped `GRAPH_COMPLETION_COT`
 during catch) → `improve` (hourly worker applies maintainer feedback) → `forget` (on uninstall or
-`@codeguard forget`). Feedback comes from `@codeguard good|bad` (or 👍/👎) on a flagged thread.
+`@orin forget`). Feedback comes from `@orin good|bad` (or 👍/👎) on a flagged thread.
 
-## `@codeguard` commands
+## `@orin` commands
 
 `recall <q>`, `why`, `override [REF] "reason"`, `ignore`, `re-scan`, `good`/`bad` (feedback),
 `forget` (admin), `rules` (list), `rule <text>` (seed a coding rule).
@@ -37,8 +37,8 @@ during catch) → `improve` (hourly worker applies maintainer feedback) → `for
 ## Adapters (share one decision core)
 
 - **MCP** (`npm run mcp`): tools `ask_decision`→ask, `check_rejected`→warn, `record_decision`→ingest.
-  Auth via a repo-scoped `cg_` key in `CODEGUARD_TOKEN`; the server always calls Cognee with the
-  tenant's own key, never the client's token. `bot/cli/codeguard-mcp.mjs` is a CI gate over stdio.
+  Auth via a repo-scoped `orin_` key in `ORIN_TOKEN`; the server always calls Cognee with the
+  tenant's own key, never the client's token. `bot/cli/orin-mcp.mjs` is a CI gate over stdio.
 - **Slack** (`npm run slack`): `/why`, react `:decision:` to ingest, proposal-shaped messages get a
   collision-warn. Multi-workspace OAuth; install tokens encrypted at rest.
 - **Linear** (`npm run linear`): `AgentSessionEvent` → `thought` then cited `response`; issue-create
@@ -59,7 +59,7 @@ Mint a repo-scoped key (once, out-of-band until the dashboard owns this):
 curl -X POST "$BOT_URL/v1/preflight-keys" \
   -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
   -d '{"installationId": 12345, "repo": "owner/name"}'
-# -> { "key": "cg_…", "repo": "owner/name", "installationId": 12345 }
+# -> { "key": "orin_…", "repo": "owner/name", "installationId": 12345 }
 ```
 
 Only the SHA-256 hash of the key is stored; the plaintext is shown once.
@@ -67,7 +67,7 @@ Only the SHA-256 hash of the key is stored; the plaintext is shown once.
 ### CLI
 
 ```bash
-CODEGUARD_TOKEN=cg_… CODEGUARD_URL=$BOT_URL/v1/preflight  node bot/cli/codeguard.mjs main
+ORIN_TOKEN=orin_… ORIN_URL=$BOT_URL/v1/preflight  node bot/cli/orin.mjs main
 ```
 
 Exits `1` when the change re-proposes a rejected decision and blocking is enabled, `0` otherwise.
@@ -77,7 +77,7 @@ Exits `1` when the change re-proposes a rejected decision and blocking is enable
 ```yaml
 - uses: ./bot/action
   with:
-    token: ${{ secrets.CODEGUARD_TOKEN }}
+    token: ${{ secrets.ORIN_TOKEN }}
     endpoint: https://your-bot/v1/preflight
 ```
 

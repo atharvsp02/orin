@@ -1,9 +1,9 @@
 {
-  "name": "codeguard-bot",
+  "name": "orin-bot",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "CodeGuard GitHub App — webhook listener + async workers.",
+  "description": "Orin GitHub App — webhook listener + async workers.",
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",

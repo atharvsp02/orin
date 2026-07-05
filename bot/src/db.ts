@@ -276,7 +276,7 @@ export async function getPrSession(installationId: number, repo: string, prNumbe
   return rows[0]?.session_id ?? null;
 }
 
-// The decision CodeGuard most recently flagged on a PR/issue (for `@codeguard override` with no ref).
+// The decision Orin most recently flagged on a PR/issue (for `@orin override` with no ref).
 export async function getLatestDecisionForPr(installationId: number, repo: string, number: number): Promise<string | null> {
   const { rows } = await pool.query(
     `SELECT decision_id FROM deliveries
@@ -295,7 +295,7 @@ export async function ignoreDeliveries(installationId: number, repo: string, num
   );
 }
 
-// Guard against cross-repo IDOR: an override may only target a decision CodeGuard actually
+// Guard against cross-repo IDOR: an override may only target a decision Orin actually
 // flagged on THIS repo+thread (repos in one installation share a dataset and can collide on ids).
 export async function decisionFlaggedOnThread(
   installationId: number,
@@ -353,7 +353,7 @@ export async function getDecisionRecord(
   };
 }
 
-// Repo-scoped pre-flight key: maps a hashed `cg_…` token to one installation + repo.
+// Repo-scoped pre-flight key: maps a hashed `orin_…` token to one installation + repo.
 export async function lookupPreflightKey(keyHash: string): Promise<{ installationId: number; repo: string } | null> {
   const { rows } = await pool.query(
     `SELECT installation_id, repo FROM preflight_keys WHERE key_hash = $1 AND revoked_at IS NULL`,
@@ -441,7 +441,7 @@ export async function listInstallations(): Promise<Installation[]> {
 }
 
 export interface RepoMetrics {
-  prsPrevented: number; // distinct PRs where CodeGuard flagged a re-proposed decision
+  prsPrevented: number; // distinct PRs where Orin flagged a re-proposed decision
   decisionsTracked: number;
   rejectionsActive: number; // rejected + not yet superseded (what the catch enforces)
 }

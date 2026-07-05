@@ -3,9 +3,9 @@
 import http from "node:http";
 
 const PORT = 8899;
-process.env.DATABASE_URL ??= "postgres://cg@127.0.0.1:5433/codeguard";
+process.env.DATABASE_URL ??= "postgres://cg@127.0.0.1:5433/orin";
 process.env.COGNEE_BASE_URL = `http://127.0.0.1:${PORT}`;
-process.env.CODEGUARD_SECRET ??= "integration-secret-please-rotate-000000000000";
+process.env.ORIN_SECRET ??= "integration-secret-please-rotate-000000000000";
 process.env.GITHUB_APP_ID ??= "1";
 process.env.GITHUB_PRIVATE_KEY ??= "dummy";
 process.env.GITHUB_WEBHOOK_SECRET ??= "dummy";
@@ -23,7 +23,7 @@ const server = http.createServer((req, res) => {
     if (p.startsWith("/api/v1/permissions/tenants")) return j({ tenant_id: "ten-1" });
     if (p === "/api/v1/auth/api-keys") return j({ key: "apikey-1" });
     if (p === "/api/v1/remember") return j({ items: [{ id: "data-1" }] });
-    if (p === "/api/v1/ontologies") return j({ key: "codeguard-decisions" });
+    if (p === "/api/v1/ontologies") return j({ key: "orin-decisions" });
     if (p === "/api/v1/search") {
       const b = JSON.parse(raw);
       if (b.searchType === "CHUNKS") return j([{ objects_result: [{ score: 0.2, payload: { document_name: "PR-42", document_id: "data-1", text: "redis rejected" } }] }]);
@@ -62,7 +62,7 @@ const provisioned = await cognee.provisionTenant(cog, { email: "b@x.io", passwor
 ok("provisionTenant returns apiKey+tenantId", provisioned.apiKey === "apikey-1" && provisioned.tenantId === "ten-1");
 
 // --- remember: multipart field names + ontology_key + node_set (snake) ---
-await cognee.remember(cog, creds, { datasetName: DS, filename: "PR-42.txt", content: "redis rejected", nodeSet: "coding_agent_rules", ontologyKey: "codeguard-decisions" });
+await cognee.remember(cog, creds, { datasetName: DS, filename: "PR-42.txt", content: "redis rejected", nodeSet: "coding_agent_rules", ontologyKey: "orin-decisions" });
 const rem = lastTo("/api/v1/remember");
 ok("remember sends X-Api-Key header", rem.headers["x-api-key"] === "apikey-1");
 ok("remember multipart has datasetName", rem.raw.includes('name="datasetName"'));
@@ -71,7 +71,7 @@ ok("remember multipart has ontology_key (snake)", rem.raw.includes('name="ontolo
 ok("remember multipart has run_in_background", rem.raw.includes('name="run_in_background"'));
 
 // --- uploadOntology: multipart ontology_key + ontology_file(.owl) ---
-await cognee.uploadOntology(cog, creds, { ontologyKey: "codeguard-decisions", filename: "decision.owl", content: "<rdf/>" });
+await cognee.uploadOntology(cog, creds, { ontologyKey: "orin-decisions", filename: "decision.owl", content: "<rdf/>" });
 const ont = lastTo("/api/v1/ontologies");
 ok("uploadOntology has ontology_key field", ont.raw.includes('name="ontology_key"'));
 ok("uploadOntology has ontology_file .owl", ont.raw.includes('name="ontology_file"') && ont.raw.includes("decision.owl"));

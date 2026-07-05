@@ -11,7 +11,7 @@ const cog = { baseUrl: config.cogneeBaseUrl };
 const credsFor = (inst: Installation): TenantCredentials => ({ apiKey: inst.cogneeApiKey, tenantId: "" });
 
 /**
- * Attach a maintainer 👍/👎 to the recall QA that produced CodeGuard's verdict on this thread,
+ * Attach a maintainer 👍/👎 to the recall QA that produced Orin's verdict on this thread,
  * and mark the session pending so the hourly improve worker reweights the exact graph nodes.
  * Returns false when there is no recorded catch session to score.
  */

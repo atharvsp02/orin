@@ -1,6 +1,6 @@
 {
-  "name": "codeguard-web",
+  "name": "orin-web",
   "version": "0.0.0",
   "private": true,
-  "description": "CodeGuard dashboard (Next.js, deploys to Vercel) — scaffolded at Milestone B."
+  "description": "Orin dashboard (Next.js, deploys to Vercel) — scaffolded at Milestone B."
 }

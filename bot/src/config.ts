@@ -12,11 +12,11 @@ export const config = {
   port: Number(process.env.PORT ?? 3000),
   databaseUrl: required("DATABASE_URL"),
   cogneeBaseUrl: process.env.COGNEE_BASE_URL ?? "http://127.0.0.1:8000",
-  secret: required("CODEGUARD_SECRET"), // encrypts stored per-tenant Cognee API keys
+  secret: required("ORIN_SECRET"), // encrypts stored per-tenant Cognee API keys
   adminToken: process.env.ADMIN_TOKEN, // optional: gates preflight-key issuance until the dashboard exists
   // optional: fallback tenant for non-GitHub adapters (Slack/Linear) before an OAuth link exists
-  defaultInstallationId: process.env.CODEGUARD_DEFAULT_INSTALLATION
-    ? Number(process.env.CODEGUARD_DEFAULT_INSTALLATION)
+  defaultInstallationId: process.env.ORIN_DEFAULT_INSTALLATION
+    ? Number(process.env.ORIN_DEFAULT_INSTALLATION)
     : undefined,
   github: {
     appId: required("GITHUB_APP_ID"),

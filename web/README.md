@@ -1,4 +1,4 @@
-# codeguard-web
+# orin-web
 
 Next.js dashboard (deploys to Vercel) — **Milestone B**.
 

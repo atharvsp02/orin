@@ -1,4 +1,4 @@
-# CodeGuard — Build Plan
+# Orin — Build Plan
 ### Cognee Hackathon ("The Hangover Part AI: Where's My Context?") — Open Source Track
 
 ---
@@ -20,7 +20,7 @@
 
 ---
 
-## 2. What we're building: CodeGuard
+## 2. What we're building: Orin
 
 **One-line pitch:** An institutional-memory bot for open-source maintainers — it remembers every past PR rejection and architectural decision, and catches new contributors re-proposing something the project already tried and rejected.
 
@@ -30,7 +30,7 @@
 - New contributors repeatedly re-propose ideas that were already tried and rejected
 - Maintainers waste huge amounts of time re-explaining the same reasoning in PR reviews
 
-**Flagship demo:** Point CodeGuard at **Cognee's own GitHub repo**, live, in front of the people who built it. Judges watching their own project's memory work is the single most memorable moment we can create.
+**Flagship demo:** Point Orin at **Cognee's own GitHub repo**, live, in front of the people who built it. Judges watching their own project's memory work is the single most memorable moment we can create.
 
 ---
 
@@ -118,9 +118,9 @@ Exercising all four deeply (not just remember+recall) is what the "Best Use of C
 
 ## 9. Demo script (~60–90 seconds)
 
-1. One line on what CodeGuard is; briefly show the ingested graph
+1. One line on what Orin is; briefly show the ingested graph
 2. Ask a real onboarding-style question about Cognee's own codebase → show the cited answer
-3. **Centerpiece:** trigger a pre-staged PR resembling a documented past rejection → CodeGuard's comment appears live, citing the exact prior decision
+3. **Centerpiece:** trigger a pre-staged PR resembling a documented past rejection → Orin's comment appears live, citing the exact prior decision
 4. Quick `forget()` moment — "and we can prune this on request, which almost nobody demos"
 5. Close on the differentiator: full memory lifecycle, self-hosted, reading its own judges' repository right now
 

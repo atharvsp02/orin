@@ -15,7 +15,7 @@ kept out of `npm test` (which is pure/hermetic). Run them when a live Postgres i
 ```bash
 # bring up a throwaway Postgres (any will do); then:
 npm run build
-DATABASE_URL="postgres://user@127.0.0.1:5432/codeguard" npm run test:integration
+DATABASE_URL="postgres://user@127.0.0.1:5432/orin" npm run test:integration
 ```
 
 `cognee.mjs` starts its own mock server on `127.0.0.1:8899` and sets `COGNEE_BASE_URL` itself.

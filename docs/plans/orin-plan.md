@@ -1,10 +1,10 @@
-# CodeGuard — Master Build Plan
+# Orin — Master Build Plan
 
 _Cognee "Hangover Part AI" Hackathon · **Open Source track** (self-hosted Cognee OSS → MacBook) · deadline **Jul 5, 2026** · ~3 days left · today Jul 2._
 
 **One-line pitch:** an institutional-memory GitHub App for open-source maintainers — it remembers every past PR rejection and architectural decision, answers onboarding questions with citations, and comments on new PRs that re-propose something already tried and rejected.
 
-Deep verification details live in `docs/specs/codeguard-ebac-and-precision.md`. Source + reference repos are cloned under `inspiration/` (`cognee` 1.2.2, `karpathy-wiki`).
+Deep verification details live in `docs/specs/orin-ebac-and-precision.md`. Source + reference repos are cloned under `inspiration/` (`cognee` 1.2.2, `karpathy-wiki`).
 
 ---
 
@@ -34,7 +34,7 @@ Open Source track = **self-hosted Cognee OSS, not Cogwit**. We run the `cognee/c
 ## 2. The three repositories (don't conflate)
 | Repo | Role | Whose |
 |---|---|---|
-| **Project repo** | CodeGuard's source + submission | **yours** |
+| **Project repo** | Orin's source + submission | **yours** |
 | **Demo/target repo** | what the App is installed on; where the staged PR is opened | **yours** (installing an App + opening PRs needs admin) |
 | `topoteretes/cognee` (public) | optional **read-only** ingest for the recall wow-factor | not yours |
 
@@ -42,7 +42,7 @@ The live-catch demo runs on a repo you control (seed it with realistic maintaine
 
 ## 3. Architecture
 ```
-User repo(s) ─webhook→  CodeGuard bot (TS, Octokit App) ─REST(:8000)→  cognee/cognee engine
+User repo(s) ─webhook→  Orin bot (TS, Octokit App) ─REST(:8000)→  cognee/cognee engine
   (install App)           on Azure VM · pm2/systemd                      on same Azure VM
                                │  ack 202, enqueue job                   Kuzu+LanceDB+SQLite (file-based)
                           pg-boss queue (Postgres) ← worker              EBAC=true, dataset per install

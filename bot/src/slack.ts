@@ -1,5 +1,5 @@
-// CodeGuard Slack adapter (Bolt) — thin over the decision core. Multi-workspace OAuth; the tenant
-// (which repo's memory) resolves per team via tenant_links, falling back to CODEGUARD_DEFAULT_INSTALLATION.
+// Orin Slack adapter (Bolt) — thin over the decision core. Multi-workspace OAuth; the tenant
+// (which repo's memory) resolves per team via tenant_links, falling back to ORIN_DEFAULT_INSTALLATION.
 import bolt from "@slack/bolt";
 import type { Installation, InstallationQuery } from "@slack/bolt";
 import * as db from "./db.js";
@@ -63,7 +63,7 @@ function registerHandlers(app: InstanceType<typeof App>): void {
     await ack();
     const tenant = await tenantForTeam(command.team_id);
     if (!tenant) {
-      await respond("CodeGuard isn't linked to a repo for this workspace yet.");
+      await respond("Orin isn't linked to a repo for this workspace yet.");
       return;
     }
     const answer = await prim.ask(tenant, command.text?.trim() || "Summarize the most relevant past decision and why it was made.");
@@ -108,9 +108,9 @@ async function main(): Promise<void> {
   const port = Number(process.env.SLACK_PORT ?? 3001);
   try {
     await buildApp().start(port);
-    console.log(`codeguard-slack listening on :${port}`);
+    console.log(`orin-slack listening on :${port}`);
   } catch (e) {
-    console.error(`codeguard-slack: ${(e as Error).message}`);
+    console.error(`orin-slack: ${(e as Error).message}`);
     process.exit(2);
   }
 }

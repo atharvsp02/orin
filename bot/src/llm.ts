@@ -13,15 +13,15 @@ const registry = createProviderRegistry({ google, openai, deepseek, openrouter }
 type ModelId = `google:${string}` | `openai:${string}` | `deepseek:${string}` | `openrouter:${string}`;
 
 const DEFAULT_MODEL: Record<string, ModelId> = {
-  google: `google:${process.env.CODEGUARD_GOOGLE_MODEL ?? "gemini-2.5-flash"}`,
-  openai: `openai:${process.env.CODEGUARD_OPENAI_MODEL ?? "gpt-4o-mini"}`,
-  deepseek: `deepseek:${process.env.CODEGUARD_DEEPSEEK_MODEL ?? "deepseek-chat"}`,
-  openrouter: `openrouter:${process.env.CODEGUARD_OPENROUTER_MODEL ?? "google/gemini-2.5-flash"}`,
+  google: `google:${process.env.ORIN_GOOGLE_MODEL ?? "gemini-2.5-flash"}`,
+  openai: `openai:${process.env.ORIN_OPENAI_MODEL ?? "gpt-4o-mini"}`,
+  deepseek: `deepseek:${process.env.ORIN_DEEPSEEK_MODEL ?? "deepseek-chat"}`,
+  openrouter: `openrouter:${process.env.ORIN_OPENROUTER_MODEL ?? "google/gemini-2.5-flash"}`,
 };
 
 function model(provider: string) {
   // OpenRouter: force chat-completions (its Responses-API support is partial) and pick the model directly.
-  if (provider === "openrouter") return openrouter.chat(process.env.CODEGUARD_OPENROUTER_MODEL ?? "google/gemini-2.5-flash");
+  if (provider === "openrouter") return openrouter.chat(process.env.ORIN_OPENROUTER_MODEL ?? "google/gemini-2.5-flash");
   return registry.languageModel(DEFAULT_MODEL[provider] ?? DEFAULT_MODEL.google);
 }
 

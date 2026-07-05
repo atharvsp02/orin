@@ -1,10 +1,10 @@
-# CodeGuard — Scaling Roadmap & Feature Research
+# Orin — Scaling Roadmap & Feature Research
 
 _Synthesis of four research streams (GitHub-native features, untapped Cognee capabilities, cross-platform integrations, market/positioning), Jul 2026. Sources at the bottom of each part._
 
 ## The one-line reframe (this should drive every feature choice)
 
-Every competitor — Unblocked, Glean, Cody/Sourcegraph, CodeRabbit, Greptile, Graphite — does **positive retrieval**: "how does X work / where is it / summarize this PR." **CodeGuard is the only one doing negative/decision memory + proactive enforcement**: *"we already considered this and said no — here's why."* That white space is the wedge. Its two current weaknesses are **delivery** (a single issue comment) and **timing** (only fires after a PR opens). Fix those, deepen the Cognee lifecycle, then expand off GitHub.
+Every competitor — Unblocked, Glean, Cody/Sourcegraph, CodeRabbit, Greptile, Graphite — does **positive retrieval**: "how does X work / where is it / summarize this PR." **Orin is the only one doing negative/decision memory + proactive enforcement**: *"we already considered this and said no — here's why."* That white space is the wedge. Its two current weaknesses are **delivery** (a single issue comment) and **timing** (only fires after a PR opens). Fix those, deepen the Cognee lifecycle, then expand off GitHub.
 
 ---
 
@@ -13,7 +13,7 @@ Every competitor — Unblocked, Glean, Cody/Sourcegraph, CodeRabbit, Greptile, G
 ### 1A. Table-stakes — ship these or a differentiated engine still feels like a toy (all quick)
 | Feature | Effort | Why |
 |---|---|---|
-| **Decision-conflict Check Run (status gate)** | M | Publish a `CodeGuard / decision-conflict` **check run** instead of a comment; teams make it a **required status check** so a re-proposed rejection *blocks merge*. Converts a passive comment into governance. Highest-leverage single change. |
+| **Decision-conflict Check Run (status gate)** | M | Publish a `Orin / decision-conflict` **check run** instead of a comment; teams make it a **required status check** so a re-proposed rejection *blocks merge*. Converts a passive comment into governance. Highest-leverage single change. |
 | **Inline PR review anchored to the hunk** | S–M | A formal review comment on the exact lines re-introducing the rejected decision + a permalink to the prior PR/issue + (where implied) a suggested-change block. A bare issue comment reads as low-signal by 2026 norms. |
 | **Fire on draft / `ready_for_review` / `synchronize`** | S | Run the catch on **draft** PRs so contributors see the conflict *before* asking for review. Same pipeline, just new webhook filters. Closes the "only after open" gap. |
 | **Rich presentation** (verdict + severity + collapsible evidence) | S | Show the cited prior decision, the deterministic term hits, and the semantic score. Pure rendering — the pipeline already produces all of it. Matches CodeRabbit's explainability bar. |
@@ -21,7 +21,7 @@ Every competitor — Unblocked, Glean, Cody/Sourcegraph, CodeRabbit, Greptile, G
 ### 1B. Differentiated moat — nobody else models decision *outcomes*
 | Feature | Effort | Why |
 |---|---|---|
-| **`/codeguard override "<reason>"` → supersede** | M | A maintainer consciously reversing a past "no" mints a **new accepted decision that supersedes the rejection** (outcome flips, `supersedes` edge added). The highest-value signal you can capture; the killer human-in-the-loop loop. |
+| **`/orin override "<reason>"` → supersede** | M | A maintainer consciously reversing a past "no" mints a **new accepted decision that supersedes the rejection** (outcome flips, `supersedes` edge added). The highest-value signal you can capture; the killer human-in-the-loop loop. |
 | **Catch re-proposals at the *issue* stage** | S–M | On `issues.opened`, recall against rejected decisions → "considered and rejected in #X because…" Stops a dead-end before any code is written. Generic triage bots dedupe issues; none triage against a rejected-decision graph. |
 | **Contributor pre-flight** (CLI + reusable Action + pre-commit) | M–L | Query the repo's memory with a staged diff *before* opening a PR. Flips "gotcha bot" → "save yourself the round-trip." Shift-left, and extends the moat off-platform. |
 | **Revert-aware ingest** | M | On a revert commit/PR, flip the decision's outcome to `reverted` and notify any *open* PR that relied on it. Closes a loop the research literature flags as unsolved. |
@@ -30,7 +30,7 @@ Every competitor — Unblocked, Glean, Cody/Sourcegraph, CodeRabbit, Greptile, G
 | **Feedback loop** (👎 / "not a match" reply mutates memory) | M | Down-weights false-positive recalls, up-weights confirmed ones — see improve() below. |
 
 ### 1C. "Best Use of Cognee" depth — the judging lever (verified against cognee 1.2.2 source)
-| Capability | CodeGuard feature | Effort | Verified caveat |
+| Capability | Orin feature | Effort | Verified caveat |
 |---|---|---|---|
 | **CODING_RULES + `add_rule_associations`** | Mine durable, **deduped** maintainer rules from repeated rejections (3+ rejected PRs touching `orm/prisma` → a candidate rule), each with provenance edges to the origin thread. Closest thing to the product's literal job; a worked example ships in Cognee. | M | Retrieval-only — returns raw rule strings; *we* enforce the comparison. |
 | **`improve()`/memify + feedback weighting** | Maintainer 👍/👎 on a verdict reweights the exact decision nodes/edges (EMA, `w += 0.1*(rating−w)`) → recall surfaces battle-tested decisions first. **Completes remember→recall→improve→forget** = the lifecycle judges reward. | M | **Off by default:** requires `DEFAULT_FEEDBACK_INFLUENCE > 0` AND recall run with a `session_id` (so `used_graph_element_ids` is recorded). Wire both or weights are computed-but-ignored. |
@@ -50,7 +50,7 @@ Every competitor — Unblocked, Glean, Cody/Sourcegraph, CodeRabbit, Greptile, G
 ### Priority order (impact-per-effort)
 1. **MCP server — do this first.** [S–M] Cognee already ships `cognee-mcp`; expose decision-specific tools (`ask_decision`, `check_rejected`, `record_decision`). One build reaches **every IDE agent** — Cursor, Claude Code, VS Code Copilot, Windsurf, ChatGPT — via the same spec. Puts decision memory in the editor at the moment of coding. Local stdio for design partners → remote HTTP + OAuth 2.1 for org rollout.
 2. **Slack.** [M] Where decisions are *argued*. `/why did we choose Postgres?` → cited answer (defer within Slack's 3s ack, post async via Bolt); emoji-to-capture ingest (react `:decision:` → file it); rejection-collision warnings. Do the well-trodden slash-command path first; the native Assistant/Agents surface + Marketplace is partner-gated for now.
-3. **Linear.** [M] Where decisions are *recorded* (issues ≈ decisions → clean ingest). New Agent Interaction SDK makes CodeGuard an @-mentionable actor (`actor=app`) that warns when a new issue repeats a rejection. (Agent APIs still Developer Preview — fast-follow.) **Notion** is the runner-up if the team's ADRs already live there (better canonical store, weaker live surface).
+3. **Linear.** [M] Where decisions are *recorded* (issues ≈ decisions → clean ingest). New Agent Interaction SDK makes Orin an @-mentionable actor (`actor=app`) that warns when a new issue repeats a rejection. (Agent APIs still Developer Preview — fast-follow.) **Notion** is the runner-up if the team's ADRs already live there (better canonical store, weaker live surface).
 4. **CLI.** [S] Cheap freebie over the same core; unlocks a **CI decision-gate** (fail/warn a PR whose description matches a rejection).
 5. **Email ingest.** [S–M] `decisions@` forwarding + reply-by-email via inbound-parse webhooks — good passive capture, noisy for Q&A.
 

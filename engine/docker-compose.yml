@@ -1,7 +1,7 @@
 services:
   cognee:
     image: cognee/cognee:1.2.2
-    container_name: codeguard-cognee
+    container_name: orin-cognee
     # Bind to localhost only — expose to the bot/dashboard via a Cloudflare Tunnel,
     # never directly to the internet (the /auth/register endpoint is public).
     ports:

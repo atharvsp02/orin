@@ -1,16 +1,16 @@
-// CodeGuard's decision ontology — grounds Cognee's extraction and models supersession in the graph,
+// Orin's decision ontology — grounds Cognee's extraction and models supersession in the graph,
 // reinforcing the DB-side markSuperseded. Uploaded once per tenant; referenced by ONTOLOGY_KEY at ingest.
-export const ONTOLOGY_KEY = "codeguard-decisions";
+export const ONTOLOGY_KEY = "orin-decisions";
 export const ONTOLOGY_FILENAME = "decision.owl";
 
 export const DECISION_OWL = `<?xml version="1.0"?>
-<rdf:RDF xmlns="http://codeguard.io/ontology/decision#"
-     xml:base="http://codeguard.io/ontology/decision"
+<rdf:RDF xmlns="http://orin.io/ontology/decision#"
+     xml:base="http://orin.io/ontology/decision"
      xmlns:owl="http://www.w3.org/2002/07/owl#"
      xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
      xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
      xmlns:xsd="http://www.w3.org/2001/XMLSchema#">
-  <owl:Ontology rdf:about="http://codeguard.io/ontology/decision"/>
+  <owl:Ontology rdf:about="http://orin.io/ontology/decision"/>
 
   <owl:Class rdf:about="#Decision">
     <rdfs:comment>A maintainer decision recorded from an issue/PR thread.</rdfs:comment>

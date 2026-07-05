@@ -1,9 +1,9 @@
-# CodeGuard — Verified Specs: Multi-Tenant Auth (EBAC) & PR-Judgment Precision
+# Orin — Verified Specs: Multi-Tenant Auth (EBAC) & PR-Judgment Precision
 
 _Grounded in the actual Cognee 1.2.2 source + the karpathy-wiki reference, cloned under `inspiration/`. Every claim below was read from source (file:line refs inline). Verified Jul 2, 2026._
 
 > **Corrections to earlier assumptions (important):** the doc summaries we relied on were wrong on four points, confirmed from source:
-> 1. `/search` scores: the **non-verbose** path strips `ScoredResult.score` (`chunks_retriever.py:69` returns `payload` only), BUT **live testing (Jul 2 2026) showed `CHUNKS` + `verbose:true` DOES expose the score** in `objects_result[].score` (cosine distance, lower=better; observed `0.28`/`0.39`) alongside full citation `payload` (`text`, `document_id`, `document_name`, `chunk_index`, `id`). **So CodeGuard *can* threshold on a numeric score** — use `CHUNKS`+`verbose`. (This corrects the earlier source-only reading.)
+> 1. `/search` scores: the **non-verbose** path strips `ScoredResult.score` (`chunks_retriever.py:69` returns `payload` only), BUT **live testing (Jul 2 2026) showed `CHUNKS` + `verbose:true` DOES expose the score** in `objects_result[].score` (cosine distance, lower=better; observed `0.28`/`0.39`) alongside full citation `payload` (`text`, `document_id`, `document_name`, `chunk_index`, `id`). **So Orin *can* threshold on a numeric score** — use `CHUNKS`+`verbose`. (This corrects the earlier source-only reading.)
 > 2. `CODING_RULES` search **dumps all rules in a NodeSet, unranked, ignoring the query** (`coding_rules_retriever.py:11-42`); and rules are created by `memify()`/`add_rule_associations`, **not** by the skills endpoint. Skills ≠ Rules.
 > 3. `SearchType.FEEDBACK` **does not exist** in 1.2.2 (`SearchType.py:4-21`). "Feedback" is a graph-weighting knob (`feedback_influence` via memify), not a search type.
 > 4. EBAC does **not force LanceDB**; it's the default, and unsupported DB combos raise instead of switching. File-based **Kuzu + LanceDB are both in the multi-user support lists** (`context_global_variables.py:103-104`).
@@ -23,7 +23,7 @@ A headless bot can provision and act on an isolated per-tenant memory over pure 
 
 ### Provisioning flow — per GitHub App installation (pure REST, no Python in our app)
 On `installation.created`:
-1. `POST /api/v1/auth/register` — `{email:"bot+<installation_id>@codeguard.dev", password:<random>, is_verified:true}` → bot user.
+1. `POST /api/v1/auth/register` — `{email:"bot+<installation_id>@orin.dev", password:<random>, is_verified:true}` → bot user.
 2. `POST /api/v1/auth/login` (form `username`/`password`) → JWT (1h).
 3. `POST /api/v1/permissions/tenants?tenant_name=install-<id>` (Bearer) → tenant **owned by the bot**, set active.
 4. `POST /api/v1/auth/api-keys` (Bearer, `{name}`) → **raw key returned once**; persist it (non-expiring).
@@ -44,7 +44,7 @@ If per-install provisioning eats too much time: run `ENABLE_BACKEND_ACCESS_CONTR
 
 ## Part 2 — PR-judgment precision: design (no score to lean on, so we don't)
 
-**Verified reality:** Cognee's `/search` gives you an LLM answer or chunk payloads, **never a threshold-able score**. Cognee's own flagship project (karpathy-wiki) doesn't use scores either — it enforces precision with **deterministic grounding + citation resolution + refuse-on-weak-evidence** (`lint_wiki.py`). CodeGuard mirrors that.
+**Verified reality:** Cognee's `/search` gives you an LLM answer or chunk payloads, **never a threshold-able score**. Cognee's own flagship project (karpathy-wiki) doesn't use scores either — it enforces precision with **deterministic grounding + citation resolution + refuse-on-weak-evidence** (`lint_wiki.py`). Orin mirrors that.
 
 ### The model
 **Decision Record** (immutable, stable-ID; mirrors karpathy `raw/sources/*.md` + `source_id`). On ingest, for each closed PR / resolved issue that carries reasoning, create:
@@ -69,8 +69,8 @@ Rules enter via `remember` + `memify()` (`add_rule_associations`, nodeset `codin
 
 ## Live-run status
 - ✅ **Auth flow (register→login→tenant→api-key→X-Api-Key) + two-tenant isolation** — DONE, 8/8, verified locally against `cognee==1.2.2` (no LLM key needed). `/add` confirmed multipart.
-- ✅ **Full memory lifecycle `remember → recall → improve → forget`** — DONE live with a real Gemini key (Jul 2 2026). `remember` built the graph in ~98s for one small doc; **`recall` (GRAPH_COMPLETION) returned the correct, cited answer** — "Prisma ORM proposed in PR #42, rejected due to migration lock-in…" (exactly CodeGuard's core behavior); `improve` = PipelineRunCompleted; `forget` pruned the dataset (list empty after). This proves the product's core loop works.
-- ✅ **Precision & citation battery** — DONE live (Jul 2 2026, 3 seeded decisions): (T1) recall preserves **REJECTED** outcome + cites decision ID; (T2) recall preserves **ACCEPTED-alternative** (Redis→LISTEN/NOTIFY); (T3) **false-positive guard works** — a query with no matching decision (GraphQL) returned *"the provided context does not contain any information"* instead of hallucinating; (T5) **`include_references` produced a real Evidence block** (document name + `data_id` + `chunk_id` + quoted source); (T6) **`CHUNKS`+`verbose` exposes `score` + citation payload**. The core CodeGuard judgment loop is validated: it recalls rejections with citations and refuses when evidence is absent.
+- ✅ **Full memory lifecycle `remember → recall → improve → forget`** — DONE live with a real Gemini key (Jul 2 2026). `remember` built the graph in ~98s for one small doc; **`recall` (GRAPH_COMPLETION) returned the correct, cited answer** — "Prisma ORM proposed in PR #42, rejected due to migration lock-in…" (exactly Orin's core behavior); `improve` = PipelineRunCompleted; `forget` pruned the dataset (list empty after). This proves the product's core loop works.
+- ✅ **Precision & citation battery** — DONE live (Jul 2 2026, 3 seeded decisions): (T1) recall preserves **REJECTED** outcome + cites decision ID; (T2) recall preserves **ACCEPTED-alternative** (Redis→LISTEN/NOTIFY); (T3) **false-positive guard works** — a query with no matching decision (GraphQL) returned *"the provided context does not contain any information"* instead of hallucinating; (T5) **`include_references` produced a real Evidence block** (document name + `data_id` + `chunk_id` + quoted source); (T6) **`CHUNKS`+`verbose` exposes `score` + citation payload**. The core Orin judgment loop is validated: it recalls rejections with citations and refuses when evidence is absent.
 - ⏳ **Grounding-gate threshold tuning** — set the term-overlap/score cutoffs against a larger seeded demo repo at build time.
 - ⚠️ Minor: one ingest produced a spurious `"Got it."` summary node (degenerate LLM summary); clean ingests return correct chunk text. Non-deterministic; watch for it, not a blocker.
 

@@ -1,4 +1,4 @@
-// CodeGuard MCP adapter — thin over the decision core (NOT a wrapper of cognee-mcp, whose raw
+// Orin MCP adapter — thin over the decision core (NOT a wrapper of cognee-mcp, whose raw
 // remember/recall would bypass our grounding gate + supersession). Tools map 1:1 to the primitives.
 // The server always calls Cognee with the TENANT's own key, never the client's token.
 import { createServer } from "node:http";
@@ -20,7 +20,7 @@ export interface McpContext {
   repo: string; // decision scope for record_decision (from the key), "" if unscoped
 }
 
-/** Resolve a `cg_…` preflight key to a tenant context (shared auth with the CLI/Action). */
+/** Resolve a `orin_…` preflight key to a tenant context (shared auth with the CLI/Action). */
 export async function contextFromToken(token: string): Promise<McpContext | null> {
   const map = await db.lookupPreflightKey(sha256(token));
   if (!map) return null;
@@ -36,7 +36,7 @@ export async function defaultContext(): Promise<McpContext | null> {
 }
 
 export function buildServer(ctx: McpContext): McpServer {
-  const server = new McpServer({ name: "codeguard", version: "1.0.0" });
+  const server = new McpServer({ name: "orin", version: "1.0.0" });
 
   server.registerTool(
     "ask_decision",
@@ -57,7 +57,7 @@ export function buildServer(ctx: McpContext): McpServer {
       inputSchema: { text: z.string().describe("PR title/description/diff or a proposal to check") },
     },
     async ({ text }) => {
-      // Scope enforcement to the key's repo (a repo-scoped cg_ key must not check another repo).
+      // Scope enforcement to the key's repo (a repo-scoped orin_ key must not check another repo).
       const j = await prim.warn(ctx.tenant, text, ctx.repo || undefined);
       return {
         content: [{ type: "text", text: JSON.stringify({ matches: j.matches, decisionId: j.decisionId, comment: j.comment }) }],
@@ -93,14 +93,14 @@ export function buildServer(ctx: McpContext): McpServer {
 
 // --- stdio: one process per tenant (key from env) ---
 async function mainStdio(): Promise<void> {
-  const token = process.env.CODEGUARD_TOKEN;
+  const token = process.env.ORIN_TOKEN;
   const ctx = token ? await contextFromToken(token) : await defaultContext();
   if (!ctx) {
-    console.error("codeguard-mcp: set CODEGUARD_TOKEN (cg_ key) or CODEGUARD_DEFAULT_INSTALLATION.");
+    console.error("orin-mcp: set ORIN_TOKEN (orin_ key) or ORIN_DEFAULT_INSTALLATION.");
     process.exit(2);
   }
   await buildServer(ctx).connect(new StdioServerTransport());
-  console.error("codeguard-mcp: stdio ready.");
+  console.error("orin-mcp: stdio ready.");
 }
 
 // --- streamable HTTP: remote, per-request tenant scope from the bearer key (stateless) ---
@@ -123,7 +123,7 @@ async function mainHttp(): Promise<void> {
     res.on("close", () => void transport.close());
     await buildServer(ctx).connect(transport);
     await transport.handleRequest(req, res);
-  }).listen(port, () => console.error(`codeguard-mcp: streamable HTTP on :${port}/mcp`));
+  }).listen(port, () => console.error(`orin-mcp: streamable HTTP on :${port}/mcp`));
 }
 
 const entry = process.argv[1] ?? "";

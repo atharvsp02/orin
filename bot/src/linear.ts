@@ -1,4 +1,4 @@
-// CodeGuard Linear adapter — agent sessions + issue-create collision-warn, thin over the core.
+// Orin Linear adapter — agent sessions + issue-create collision-warn, thin over the core.
 // On AgentSessionEvent(created|prompted): ack fast, emit a `thought`, then a cited `response`.
 import { createServer } from "node:http";
 import { createHmac, timingSafeEqual } from "node:crypto";
@@ -49,7 +49,7 @@ async function handleSession(client: Linear, wh: AgentSessionWebhook): Promise<v
   const respond = (body: string) => client.createAgentActivity({ agentSessionId: sessionId, content: { type: "response", body } });
 
   if (!tenant) {
-    await respond("CodeGuard isn't linked to a repo for this Linear workspace yet.");
+    await respond("Orin isn't linked to a repo for this Linear workspace yet.");
     return;
   }
   await thought("Searching past decisions in memory…").catch(() => undefined);
@@ -125,13 +125,13 @@ async function main(): Promise<void> {
         }
       })();
     });
-  }).listen(port, () => console.log(`codeguard-linear listening on :${port}`));
+  }).listen(port, () => console.log(`orin-linear listening on :${port}`));
 }
 
 const entry = process.argv[1] ?? "";
 if (entry.endsWith("linear.js") || entry.endsWith("linear.ts")) {
   main().catch((e) => {
-    console.error(`codeguard-linear: ${(e as Error).message}`);
+    console.error(`orin-linear: ${(e as Error).message}`);
     process.exit(2);
   });
 }

@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-// CodeGuard pre-flight CLI. Checks the current branch against your repo's recorded decisions.
-//   CODEGUARD_TOKEN=cg_… CODEGUARD_URL=https://…/v1/preflight  codeguard [baseBranch]
+// Orin pre-flight CLI. Checks the current branch against your repo's recorded decisions.
+//   ORIN_TOKEN=orin_… ORIN_URL=https://…/v1/preflight  orin [baseBranch]
 import { execFileSync } from "node:child_process";
 
-const endpoint = process.env.CODEGUARD_URL ?? "https://codeguard.example/v1/preflight";
-const token = process.env.CODEGUARD_TOKEN;
+const endpoint = process.env.ORIN_URL ?? "https://orin.example/v1/preflight";
+const token = process.env.ORIN_TOKEN;
 if (!token) {
-  console.error("Set CODEGUARD_TOKEN to your repo-scoped cg_ key.");
+  console.error("Set ORIN_TOKEN to your repo-scoped orin_ key.");
   process.exit(2);
 }
 const base = process.argv[2] ?? "main";
@@ -22,7 +22,7 @@ const res = await fetch(endpoint, {
   body: JSON.stringify({ title, diff }),
 });
 if (!res.ok) {
-  console.error(`CodeGuard: ${res.status} ${await res.text()}`);
+  console.error(`Orin: ${res.status} ${await res.text()}`);
   process.exit(2);
 }
 const j = await res.json();

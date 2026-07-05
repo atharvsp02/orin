@@ -48,7 +48,7 @@ export async function provisionTenant(
     await fetch(`${baseUrl}/api/v1/auth/api-keys`, {
       method: "POST",
       headers: { ...bearer, "Content-Type": "application/json" },
-      body: JSON.stringify({ name: opts.keyName ?? "codeguard" }),
+      body: JSON.stringify({ name: opts.keyName ?? "orin" }),
     }),
   );
   return { apiKey: key.key, tenantId: tenant.tenant_id };

@@ -32,7 +32,7 @@ const bearer = (req: IncomingMessage): string => {
   return auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
 };
 
-/** Resolve a repo-scoped `cg_…` bearer key to its installation + repo (or null). */
+/** Resolve a repo-scoped `orin_…` bearer key to its installation + repo (or null). */
 async function authKey(req: IncomingMessage): Promise<{ installationId: number; repo: string } | null> {
   const key = bearer(req);
   if (!key) return null;
@@ -59,7 +59,7 @@ function send(res: ServerResponse, status: number, body: unknown): void {
 }
 
 /**
- * Contributor pre-flight: POST /v1/preflight with a repo-scoped `cg_…` bearer key.
+ * Contributor pre-flight: POST /v1/preflight with a repo-scoped `orin_…` bearer key.
  * Runs the catch pipeline against the repo's decisions with NO GitHub writes.
  */
 export async function handlePreflight(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -90,7 +90,7 @@ export async function handlePreflight(req: IncomingMessage, res: ServerResponse)
 }
 
 /**
- * Mint a repo-scoped `cg_…` preflight key. Guarded by ADMIN_TOKEN until the
+ * Mint a repo-scoped `orin_…` preflight key. Guarded by ADMIN_TOKEN until the
  * dashboard owns issuance. The plaintext key is returned once; only its hash is stored.
  */
 export async function handleIssueKey(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -110,7 +110,7 @@ export async function handleIssueKey(req: IncomingMessage, res: ServerResponse):
   if (!installationId || !repo) return send(res, 400, { error: "installationId and repo required" });
   if (!(await db.getInstallation(installationId))) return send(res, 404, { error: "unknown installation" });
 
-  const key = `cg_${randomBytes(24).toString("hex")}`;
+  const key = `orin_${randomBytes(24).toString("hex")}`;
   await db.insertPreflightKey(sha256(key), installationId, repo);
   send(res, 201, { key, repo, installationId });
 }

@@ -1,14 +1,14 @@
 #!/usr/bin/env node
-// CI gate over MCP: spawns the CodeGuard MCP server (stdio) and calls check_rejected.
+// CI gate over MCP: spawns the Orin MCP server (stdio) and calls check_rejected.
 // Exits 1 when the change re-proposes a rejected decision.
-//   CODEGUARD_TOKEN=cg_…  node bot/cli/codeguard-mcp.mjs [baseBranch]
+//   ORIN_TOKEN=orin_…  node bot/cli/orin-mcp.mjs [baseBranch]
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
-if (!process.env.CODEGUARD_TOKEN) {
-  console.error("Set CODEGUARD_TOKEN to your repo-scoped cg_ key.");
+if (!process.env.ORIN_TOKEN) {
+  console.error("Set ORIN_TOKEN to your repo-scoped orin_ key.");
   process.exit(2);
 }
 const base = process.argv[2] ?? "main";
@@ -17,7 +17,7 @@ const text = `${git("log", "-1", "--format=%s").trim()}\n\n${git("diff", "--unif
 
 const serverPath = fileURLToPath(new URL("../dist/mcp.js", import.meta.url));
 const transport = new StdioClientTransport({ command: "node", args: [serverPath], env: { ...process.env } });
-const client = new Client({ name: "codeguard-cli", version: "1.0.0" });
+const client = new Client({ name: "orin-cli", version: "1.0.0" });
 
 await client.connect(transport);
 try {

@@ -28,7 +28,7 @@ export interface Delivery {
   clear(ctx: DeliveryCtx, prior: DeliveryRefs | null): Promise<DeliveryRefs>;
 }
 
-const CHECK_NAME = "CodeGuard"; // the required-status-check "context"
+const CHECK_NAME = "Orin"; // the required-status-check "context"
 
 function output(findings: Finding[], notes?: string[]) {
   const f = findings[0];
@@ -161,7 +161,7 @@ const commentDelivery: Delivery = {
   async clear(ctx, prior) {
     if (prior?.commentId) {
       await ctx.octokit.rest.issues
-        .updateComment({ owner: ctx.owner, repo: ctx.repo, comment_id: prior.commentId, body: "✅ CodeGuard: no decision conflict on the latest commit." })
+        .updateComment({ owner: ctx.owner, repo: ctx.repo, comment_id: prior.commentId, body: "✅ Orin: no decision conflict on the latest commit." })
         .catch(() => undefined);
     }
     return { mode: "comment", commentId: prior?.commentId };

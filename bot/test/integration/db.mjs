@@ -1,6 +1,6 @@
 // End-to-end DB-layer integration test against a REAL Postgres. Exercises every function the
 // session added/changed. Run with DATABASE_URL pointed at the local cluster.
-process.env.CODEGUARD_SECRET ??= "integration-secret-please-rotate-000000000000";
+process.env.ORIN_SECRET ??= "integration-secret-please-rotate-000000000000";
 process.env.GITHUB_APP_ID ??= "1";
 process.env.GITHUB_PRIVATE_KEY ??= "dummy";
 process.env.GITHUB_WEBHOOK_SECRET ??= "dummy";
