@@ -7,6 +7,8 @@ import * as cognee from "./cognee.js";
 import { startQueue } from "./worker.js";
 import { QUEUE } from "./queues.js";
 import { handlePreflight, handleIssueKey, handleMetrics, handleGraph } from "./preflight.js";
+import { handleAuthStart, handleAuthCallback, handleLogout, handleMe } from "./auth.js";
+import { handleDash } from "./dash.js";
 import { forgetTenant } from "./lifecycle.js";
 import { DECISION_OWL, ONTOLOGY_KEY, ONTOLOGY_FILENAME } from "./ontology.js";
 
@@ -105,24 +107,51 @@ async function main() {
   });
 
   createServer((req, res) => {
-    if (req.method === "POST" && req.url === "/api/github/webhooks") {
+    const pathname = (req.url ?? "/").split("?")[0];
+    if (req.method === "POST" && pathname === "/api/github/webhooks") {
       void handleWebhook(req, res);
       return;
     }
-    if (req.method === "POST" && req.url === "/v1/preflight") {
+    if (req.method === "POST" && pathname === "/v1/preflight") {
       void handlePreflight(req, res);
       return;
     }
-    if (req.method === "POST" && req.url === "/v1/preflight-keys") {
+    if (req.method === "POST" && pathname === "/v1/preflight-keys") {
       void handleIssueKey(req, res);
       return;
     }
-    if (req.method === "GET" && req.url === "/v1/metrics") {
+    if (req.method === "GET" && pathname === "/v1/metrics") {
       void handleMetrics(req, res);
       return;
     }
-    if (req.method === "GET" && req.url === "/v1/graph") {
+    if (req.method === "GET" && pathname === "/v1/graph") {
       void handleGraph(req, res);
+      return;
+    }
+    // Dashboard sign-in + API (session-cookie auth).
+    if (req.method === "GET" && pathname === "/v1/auth/github") {
+      handleAuthStart(res);
+      return;
+    }
+    if (req.method === "GET" && pathname === "/v1/auth/callback") {
+      void handleAuthCallback(req, res).catch((e) => {
+        console.error("auth callback failed:", (e as Error).message);
+        res.writeHead(500).end("sign-in failed");
+      });
+      return;
+    }
+    if (pathname === "/v1/auth/logout") {
+      handleLogout(res);
+      return;
+    }
+    if (req.method === "GET" && pathname === "/v1/me") {
+      void handleMe(req, res);
+      return;
+    }
+    if (pathname.startsWith("/v1/dash/")) {
+      void handleDash(req, res, pathname).then((handled) => {
+        if (!handled) res.writeHead(404, { "Content-Type": "application/json" }).end('{"error":"not found"}');
+      });
       return;
     }
     res.writeHead(404, { "Content-Type": "application/json" }).end('{"error":"not found"}');

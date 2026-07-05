@@ -31,4 +31,10 @@ export const config = {
     privateKey: githubPrivateKey(),
     webhookSecret: required("GITHUB_WEBHOOK_SECRET"),
   },
+  // Dashboard sign-in (GitHub OAuth). Optional: auth routes 404 until both are set.
+  oauth: {
+    clientId: process.env.GITHUB_OAUTH_CLIENT_ID,
+    clientSecret: process.env.GITHUB_OAUTH_CLIENT_SECRET,
+  },
+  webOrigin: process.env.WEB_ORIGIN ?? "https://orin-bot.duckdns.org",
 };

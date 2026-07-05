@@ -96,6 +96,7 @@ export async function initSchema(): Promise<void> {
       expires_at  TIMESTAMPTZ NOT NULL,
       used_at     TIMESTAMPTZ
     );
+    ALTER TABLE preflight_keys ADD COLUMN IF NOT EXISTS label TEXT NOT NULL DEFAULT '';
   `);
 }
 
@@ -475,12 +476,123 @@ export async function deleteLinearInstall(id: string): Promise<void> {
   await pool.query(`DELETE FROM linear_installs WHERE id = $1`, [id]);
 }
 
-export async function insertPreflightKey(keyHash: string, installationId: number, repo: string): Promise<void> {
+export async function insertPreflightKey(keyHash: string, installationId: number, repo: string, label = ""): Promise<void> {
   await pool.query(
-    `INSERT INTO preflight_keys (key_hash, installation_id, repo) VALUES ($1, $2, $3)
+    `INSERT INTO preflight_keys (key_hash, installation_id, repo, label) VALUES ($1, $2, $3, $4)
      ON CONFLICT (key_hash) DO NOTHING`,
-    [keyHash, installationId, repo],
+    [keyHash, installationId, repo, label],
   );
+}
+
+export interface KeyRow {
+  keyHash: string;
+  repo: string;
+  label: string;
+  createdAt: string;
+  revokedAt: string | null;
+}
+
+export async function listPreflightKeys(installationId: number): Promise<KeyRow[]> {
+  const { rows } = await pool.query(
+    `SELECT key_hash, repo, label, created_at, revoked_at FROM preflight_keys
+     WHERE installation_id = $1 ORDER BY created_at DESC`,
+    [installationId],
+  );
+  return rows.map((r) => ({
+    keyHash: r.key_hash,
+    repo: r.repo,
+    label: r.label ?? "",
+    createdAt: String(r.created_at),
+    revokedAt: r.revoked_at ? String(r.revoked_at) : null,
+  }));
+}
+
+// Scoped to the installation so one tenant can never revoke another tenant's key.
+export async function revokePreflightKey(installationId: number, keyHash: string): Promise<boolean> {
+  const { rowCount } = await pool.query(
+    `UPDATE preflight_keys SET revoked_at = now()
+     WHERE installation_id = $1 AND key_hash = $2 AND revoked_at IS NULL`,
+    [installationId, keyHash],
+  );
+  return (rowCount ?? 0) > 0;
+}
+
+// Installation-wide metrics (dashboard overview; the repo-scoped variant is metrics()).
+export async function metricsAll(installationId: number): Promise<RepoMetrics> {
+  const prevented = await pool.query(
+    `SELECT COUNT(DISTINCT (repo, number))::int AS n FROM deliveries
+     WHERE installation_id = $1 AND kind = 'pr' AND decision_id IS NOT NULL AND state = 'posted'`,
+    [installationId],
+  );
+  const tracked = await pool.query(
+    `SELECT COUNT(*)::int AS n FROM decision_records WHERE installation_id = $1`,
+    [installationId],
+  );
+  const rejections = await pool.query(
+    `SELECT COUNT(*)::int AS n FROM decision_records
+     WHERE installation_id = $1 AND outcome = 'rejected' AND superseded_by IS NULL`,
+    [installationId],
+  );
+  return {
+    prsPrevented: prevented.rows[0]?.n ?? 0,
+    decisionsTracked: tracked.rows[0]?.n ?? 0,
+    rejectionsActive: rejections.rows[0]?.n ?? 0,
+  };
+}
+
+export interface DeliveryFeedRow {
+  repo: string;
+  number: number;
+  kind: string;
+  decisionId: string | null;
+  state: string;
+  updatedAt: string;
+}
+
+// Recent catches feed for the dashboard overview.
+export async function recentDeliveries(installationId: number, limit = 20): Promise<DeliveryFeedRow[]> {
+  const { rows } = await pool.query(
+    `SELECT repo, number, kind, decision_id, state, updated_at FROM deliveries
+     WHERE installation_id = $1 ORDER BY updated_at DESC LIMIT $2`,
+    [installationId, limit],
+  );
+  return rows.map((r) => ({
+    repo: r.repo,
+    number: Number(r.number),
+    kind: r.kind,
+    decisionId: r.decision_id,
+    state: r.state,
+    updatedAt: String(r.updated_at),
+  }));
+}
+
+// Settings update from the dashboard (whitelisted columns only).
+export async function updateTenantConfig(
+  installationId: number,
+  patch: Partial<Pick<TenantConfig, "deliveryMode" | "blockOnRepropose" | "autoComment" | "confidenceThreshold" | "scoreCutoff" | "customInstructions" | "llmProvider" | "tone">>,
+): Promise<void> {
+  const cols: Record<string, unknown> = {};
+  if (patch.deliveryMode !== undefined) cols.delivery_mode = patch.deliveryMode;
+  if (patch.blockOnRepropose !== undefined) cols.block_on_repropose = patch.blockOnRepropose;
+  if (patch.autoComment !== undefined) cols.auto_comment = patch.autoComment;
+  if (patch.confidenceThreshold !== undefined) cols.confidence_threshold = patch.confidenceThreshold;
+  if (patch.scoreCutoff !== undefined) cols.score_cutoff = patch.scoreCutoff;
+  if (patch.customInstructions !== undefined) cols.custom_instructions = patch.customInstructions;
+  if (patch.llmProvider !== undefined) cols.llm_provider = patch.llmProvider;
+  if (patch.tone !== undefined) cols.tone = patch.tone;
+  const keys = Object.keys(cols);
+  if (keys.length === 0) return;
+  const sets = keys.map((k, i) => `${k} = $${i + 2}`).join(", ");
+  await pool.query(`UPDATE tenant_config SET ${sets} WHERE installation_id = $1`, [installationId, ...keys.map((k) => cols[k])]);
+}
+
+// Which external workspaces (slack/linear) point at this installation's memory.
+export async function linksFor(installationId: number): Promise<Array<{ platform: string; externalId: string }>> {
+  const { rows } = await pool.query(
+    `SELECT platform, external_id FROM tenant_links WHERE installation_id = $1`,
+    [installationId],
+  );
+  return rows.map((r) => ({ platform: r.platform, externalId: r.external_id }));
 }
 
 // --- feedback lifecycle: sessions that got a 👍/👎 and are due for /improve ---
