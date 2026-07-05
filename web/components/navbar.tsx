@@ -24,8 +24,8 @@ export function Navbar() {
             <a href="/dashboard" className="text-sm text-zinc-400 hover:text-white transition-colors">
               Dashboard
             </a>
-            <a href="https://github.com/apps/orinbot" target="_blank" rel="noreferrer" className="text-sm text-zinc-400 hover:text-white transition-colors">
-              GitHub
+            <a href="/#agents" className="text-sm text-zinc-400 hover:text-white transition-colors">
+              Agents
             </a>
           </div>
           <div className="flex items-center gap-4">
@@ -33,10 +33,10 @@ export function Navbar() {
               Log in
             </a>
             <a
-              href="https://github.com/apps/orinbot"
+              href="/dashboard"
               className="text-sm text-white bg-zinc-800 hover:bg-zinc-700 px-3.5 py-1.5 rounded-md border border-zinc-700 transition-colors"
             >
-              Install Orin
+              Get started
             </a>
           </div>
         </div>

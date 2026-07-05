@@ -6,7 +6,7 @@ import { ChevronLeft, ChevronRight, Plus, ArrowRight, MessageSquare, GitBranch, 
 const carouselCards = [
   {
     id: 1,
-    href: "https://orin-bot.duckdns.org/slack/install",
+    href: "/dashboard",
     category: "Slack app",
     title: "Ask /why in the channel where the debate started",
     icon: ArrowRight,
@@ -14,7 +14,7 @@ const carouselCards = [
   },
   {
     id: 2,
-    href: "https://github.com/apps/orinbot",
+    href: "/dashboard",
     category: "GitHub App",
     title: "A required check that cites the decision it protects",
     icon: Plus,
@@ -22,7 +22,7 @@ const carouselCards = [
   },
   {
     id: 3,
-    href: "https://orin-bot.duckdns.org/linear/install",
+    href: "/dashboard",
     category: "Linear agent",
     title: "An agent teammate inside your issues",
     icon: ArrowRight,
@@ -38,7 +38,7 @@ const carouselCards = [
   },
   {
     id: 5,
-    href: "https://github.com/apps/orinbot",
+    href: "/dashboard",
     category: "Self-serve installs",
     title: "Every workspace gets its own isolated memory",
     icon: ArrowRight,
@@ -54,7 +54,7 @@ const carouselCards = [
   },
   {
     id: 7,
-    href: "https://github.com/apps/orinbot",
+    href: "/dashboard",
     category: "Built for developers",
     title: "Build your own surface on the Orin API",
     icon: ArrowRight,

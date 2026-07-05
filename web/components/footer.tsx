@@ -10,9 +10,9 @@ export function Footer() {
       { label: "MCP", href: "/#agents" },
     ],
     Integrations: [
-      { label: "GitHub App", href: "https://github.com/apps/orinbot" },
-      { label: "Slack app", href: "https://orin-bot.duckdns.org/slack/install" },
-      { label: "Linear agent", href: "https://orin-bot.duckdns.org/linear/install" },
+      { label: "GitHub App", href: "/dashboard" },
+      { label: "Slack app", href: "/dashboard" },
+      { label: "Linear agent", href: "/dashboard" },
       { label: "MCP server", href: "/#agents" },
       { label: "CLI", href: "/#integrations" },
       { label: "GitHub Action", href: "/#integrations" },
@@ -21,14 +21,14 @@ export function Footer() {
     Company: [
       { label: "About", href: "/#product" },
       { label: "Built on Cognee", href: "https://www.cognee.ai" },
-      { label: "Roadmap", href: "https://github.com/apps/orinbot" },
-      { label: "README", href: "https://github.com/apps/orinbot" },
+      { label: "Roadmap", href: "/dashboard" },
+      { label: "README", href: "/#product" },
     ],
     Resources: [
       { label: "How it works", href: "/#how-it-works" },
       { label: "Agents", href: "/#agents" },
       { label: "Report vulnerability", href: "mailto:contact@hooman.digital" },
-      { label: "Status", href: "https://orin-bot.duckdns.org/v1/me" },
+      { label: "Status", href: "/dashboard" },
     ],
     Connect: [
       { label: "Contact us", href: "mailto:contact@hooman.digital" },
