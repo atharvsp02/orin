@@ -102,6 +102,10 @@ export function DashboardShell({ me }: { me: Me }) {
                   Install on another account…
                 </a>
               </DropdownMenuItem>
+              <DropdownMenuItem asChild className="text-xs">
+                {/* sessions snapshot the installation list; a silent OAuth round-trip refreshes it */}
+                <a href="/v1/auth/github">Refresh installations</a>
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
