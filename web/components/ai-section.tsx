@@ -16,7 +16,7 @@ const agents = [
 
 export function AISection() {
   return (
-    <div className="relative z-20 py-40" style={{ backgroundColor: "#09090B" }}>
+    <div id="agents" className="relative z-20 py-40" style={{ backgroundColor: "#09090B" }}>
       <div
         className="absolute top-0 left-0 right-0 pointer-events-none"
         style={{
@@ -69,16 +69,17 @@ export function AISection() {
           </motion.p>
 
           {/* Learn more button */}
-          <motion.button
+          <motion.a
+            href="/dashboard"
             initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
             transition={{ duration: 0.6, delay: 0.3 }}
-            className="px-5 py-2.5 bg-zinc-800 text-zinc-300 rounded-lg border border-zinc-700 hover:bg-zinc-700 transition-colors text-sm flex items-center gap-2 mb-16"
+            className="w-fit px-5 py-2.5 bg-zinc-800 text-zinc-300 rounded-lg border border-zinc-700 hover:bg-zinc-700 transition-colors text-sm flex items-center gap-2 mb-16"
           >
-            Learn more
+            Open the dashboard
             <ChevronRight className="w-4 h-4" />
-          </motion.button>
+          </motion.a>
 
           {/* Agent dropdown mockup */}
           <motion.div

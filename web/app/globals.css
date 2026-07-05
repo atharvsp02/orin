@@ -156,3 +156,11 @@
     color: white;
   }
 }
+
+/* anchor navigation: smooth scroll, keep headings clear of the fixed navbar */
+html {
+  scroll-behavior: smooth;
+}
+[id] {
+  scroll-margin-top: 88px;
+}

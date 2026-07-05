@@ -29,12 +29,13 @@ export function LogoCloud() {
             GitHub, Slack, Linear, and any MCP-capable agent.
           </motion.p>
 
-          <motion.div
+          <motion.a
+            href="/#integrations"
             initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
             transition={{ duration: 0.6, delay: 0.2 }}
-            className="relative group cursor-pointer"
+            className="relative group cursor-pointer block"
           >
             {/* Logo grid */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-x-16 gap-y-10 items-center justify-items-center transition-all duration-300 group-hover:blur-[2.5px] group-hover:opacity-50">
@@ -62,7 +63,7 @@ export function LogoCloud() {
                 <span aria-hidden="true">›</span>
               </div>
             </div>
-          </motion.div>
+          </motion.a>
         </div>
       </div>
     </div>

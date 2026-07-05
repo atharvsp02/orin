@@ -82,7 +82,7 @@ const featureCards = [
 
 export function FeatureCardsSection() {
   return (
-    <div className="relative z-20 py-40" style={{ backgroundColor: "#09090B" }}>
+    <div id="product" className="relative z-20 py-40" style={{ backgroundColor: "#09090B" }}>
       <div
         className="absolute top-0 left-0 right-0 pointer-events-none"
         style={{
@@ -119,7 +119,7 @@ export function FeatureCardsSection() {
               <p className="text-zinc-400 leading-relaxed">
                 Orin is shaped by one observation about long-lived codebases: every rejected idea eventually returns.
                 Context leaves, reviewers change, and the same debates repeat. Orin keeps the receipts.{" "}
-                <a href="#" className="text-white inline-flex items-center gap-1 hover:underline">
+                <a href="/#how-it-works" className="text-white inline-flex items-center gap-1 hover:underline">
                   See how it works <ChevronRight className="w-4 h-4" />
                 </a>
               </p>
@@ -129,7 +129,8 @@ export function FeatureCardsSection() {
           {/* Feature cards */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {featureCards.map((card, index) => (
-              <motion.div
+              <motion.a
+                href="/#how-it-works"
                 key={card.title}
                 initial={{ opacity: 0, y: 20 }}
                 whileInView={{ opacity: 1, y: 0 }}
@@ -161,7 +162,7 @@ export function FeatureCardsSection() {
                     <Plus className="w-4 h-4" />
                   </div>
                 </div>
-              </motion.div>
+              </motion.a>
             ))}
           </div>
         </div>

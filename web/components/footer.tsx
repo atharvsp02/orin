@@ -1,10 +1,40 @@
 export function Footer() {
-  const footerLinks = {
-    Product: ["Catches", "Decisions", "Knowledge graph", "Feedback loop", "Pre-flight", "Security", "MCP"],
-    Integrations: ["GitHub App", "Slack app", "Linear agent", "MCP server", "CLI", "GitHub Action", "Dashboard"],
-    Company: ["About", "Built on Cognee", "Roadmap", "README", "Quality", "Brand"],
-    Resources: ["Docs", "Status", "Self-hosting", "Report vulnerability", "Privacy", "Terms"],
-    Connect: ["Contact us", "Community", "X (Twitter)", "GitHub", "YouTube"],
+  const footerLinks: Record<string, Array<{ label: string; href: string }>> = {
+    Product: [
+      { label: "Catches", href: "/dashboard" },
+      { label: "Decisions", href: "/dashboard" },
+      { label: "Knowledge graph", href: "/dashboard" },
+      { label: "Feedback loop", href: "/#how-it-works" },
+      { label: "Pre-flight", href: "/#integrations" },
+      { label: "Precision", href: "/#product" },
+      { label: "MCP", href: "/#agents" },
+    ],
+    Integrations: [
+      { label: "GitHub App", href: "https://github.com/apps/orinbot" },
+      { label: "Slack app", href: "https://orin-bot.duckdns.org/slack/install" },
+      { label: "Linear agent", href: "https://orin-bot.duckdns.org/linear/install" },
+      { label: "MCP server", href: "/#agents" },
+      { label: "CLI", href: "/#integrations" },
+      { label: "GitHub Action", href: "/#integrations" },
+      { label: "Dashboard", href: "/dashboard" },
+    ],
+    Company: [
+      { label: "About", href: "/#product" },
+      { label: "Built on Cognee", href: "https://www.cognee.ai" },
+      { label: "Roadmap", href: "https://github.com/apps/orinbot" },
+      { label: "README", href: "https://github.com/apps/orinbot" },
+    ],
+    Resources: [
+      { label: "How it works", href: "/#how-it-works" },
+      { label: "Agents", href: "/#agents" },
+      { label: "Report vulnerability", href: "mailto:contact@hooman.digital" },
+      { label: "Status", href: "https://orin-bot.duckdns.org/v1/me" },
+    ],
+    Connect: [
+      { label: "Contact us", href: "mailto:contact@hooman.digital" },
+      { label: "GitHub", href: "https://github.com/apps/orinbot" },
+      { label: "Dashboard", href: "/dashboard" },
+    ],
   }
 
   return (
@@ -31,9 +61,9 @@ export function Footer() {
               <h3 className="text-white font-medium text-sm mb-4">{category}</h3>
               <ul className="space-y-3">
                 {links.map((link) => (
-                  <li key={link}>
-                    <a href="#" className="text-zinc-500 hover:text-zinc-300 transition-colors text-sm">
-                      {link}
+                  <li key={link.label}>
+                    <a href={link.href} className="text-zinc-500 hover:text-zinc-300 transition-colors text-sm">
+                      {link.label}
                     </a>
                   </li>
                 ))}

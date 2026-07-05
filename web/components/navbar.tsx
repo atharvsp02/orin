@@ -12,19 +12,19 @@ export function Navbar() {
             <span className="text-white font-semibold">Orin</span>
           </div>
           <div className="hidden md:flex items-center gap-8">
-            <a href="#" className="text-sm text-zinc-400 hover:text-white transition-colors">
+            <a href="/#product" className="text-sm text-zinc-400 hover:text-white transition-colors">
               Product
             </a>
-            <a href="#" className="text-sm text-zinc-400 hover:text-white transition-colors">
+            <a href="/#how-it-works" className="text-sm text-zinc-400 hover:text-white transition-colors">
               How it works
             </a>
-            <a href="#" className="text-sm text-zinc-400 hover:text-white transition-colors">
+            <a href="/#integrations" className="text-sm text-zinc-400 hover:text-white transition-colors">
               Integrations
             </a>
-            <a href="#" className="text-sm text-zinc-400 hover:text-white transition-colors">
-              Docs
+            <a href="/dashboard" className="text-sm text-zinc-400 hover:text-white transition-colors">
+              Dashboard
             </a>
-            <a href="#" className="text-sm text-zinc-400 hover:text-white transition-colors">
+            <a href="https://github.com/apps/orinbot" target="_blank" rel="noreferrer" className="text-sm text-zinc-400 hover:text-white transition-colors">
               GitHub
             </a>
           </div>

@@ -6,6 +6,7 @@ import { ChevronLeft, ChevronRight, Plus, ArrowRight, MessageSquare, GitBranch, 
 const carouselCards = [
   {
     id: 1,
+    href: "https://orin-bot.duckdns.org/slack/install",
     category: "Slack app",
     title: "Ask /why in the channel where the debate started",
     icon: ArrowRight,
@@ -13,6 +14,7 @@ const carouselCards = [
   },
   {
     id: 2,
+    href: "https://github.com/apps/orinbot",
     category: "GitHub App",
     title: "A required check that cites the decision it protects",
     icon: Plus,
@@ -20,6 +22,7 @@ const carouselCards = [
   },
   {
     id: 3,
+    href: "https://orin-bot.duckdns.org/linear/install",
     category: "Linear agent",
     title: "An agent teammate inside your issues",
     icon: ArrowRight,
@@ -27,6 +30,7 @@ const carouselCards = [
   },
   {
     id: 4,
+    href: "/dashboard",
     category: "MCP + CLI",
     title: "Gate CI and IDE agents on past decisions",
     icon: ArrowRight,
@@ -34,6 +38,7 @@ const carouselCards = [
   },
   {
     id: 5,
+    href: "https://github.com/apps/orinbot",
     category: "Self-serve installs",
     title: "Every workspace gets its own isolated memory",
     icon: ArrowRight,
@@ -41,6 +46,7 @@ const carouselCards = [
   },
   {
     id: 6,
+    href: "/#how-it-works",
     category: "Feedback loop",
     title: "Good and bad ratings reweight the knowledge graph",
     icon: ArrowRight,
@@ -48,6 +54,7 @@ const carouselCards = [
   },
   {
     id: 7,
+    href: "https://github.com/apps/orinbot",
     category: "Built for developers",
     title: "Build your own surface on the Orin API",
     icon: ArrowRight,
@@ -229,7 +236,7 @@ export function WorkflowsSection() {
   }
 
   return (
-    <section className="relative py-24" style={{ backgroundColor: "#09090B" }}>
+    <section id="integrations" className="relative py-24" style={{ backgroundColor: "#09090B" }}>
       {/* Top gradient */}
       <div
         className="absolute top-0 left-0 right-0 pointer-events-none"
@@ -295,9 +302,12 @@ export function WorkflowsSection() {
                         <p className="text-sm text-zinc-200 leading-snug">{card.title}</p>
                       </div>
                       {/* Icon button - fixed size, vertically centered */}
-                      <button className="flex-shrink-0 w-8 h-8 rounded-full border border-zinc-700 flex items-center justify-center text-zinc-500 hover:text-zinc-300 hover:border-zinc-600 transition-colors">
+                      <a
+                        href={card.href}
+                        className="flex-shrink-0 w-8 h-8 rounded-full border border-zinc-700 flex items-center justify-center text-zinc-500 hover:text-zinc-300 hover:border-zinc-600 transition-colors"
+                      >
                         <card.icon className="w-4 h-4" />
-                      </button>
+                      </a>
                     </div>
                   </div>
                 </div>
