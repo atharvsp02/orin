@@ -1,75 +1,67 @@
+import { CirclePower } from "lucide-react"
+
 export function Footer() {
-  const footerLinks: Record<string, Array<{ label: string; href: string }>> = {
+  const columns: Record<string, Array<{ label: string; href: string; external?: boolean }>> = {
     Product: [
-      { label: "Catches", href: "/dashboard" },
-      { label: "Decisions", href: "/dashboard" },
-      { label: "Knowledge graph", href: "/dashboard" },
-      { label: "Feedback loop", href: "/#how-it-works" },
-      { label: "Pre-flight", href: "/#integrations" },
-      { label: "Precision", href: "/#product" },
-      { label: "MCP", href: "/#agents" },
-    ],
-    Integrations: [
-      { label: "GitHub App", href: "/dashboard" },
-      { label: "Slack app", href: "/dashboard" },
-      { label: "Linear agent", href: "/dashboard" },
-      { label: "MCP server", href: "/#agents" },
-      { label: "CLI", href: "/#integrations" },
-      { label: "GitHub Action", href: "/#integrations" },
-      { label: "Dashboard", href: "/dashboard" },
-    ],
-    Company: [
-      { label: "About", href: "/#product" },
-      { label: "Built on Cognee", href: "https://www.cognee.ai" },
-      { label: "Roadmap", href: "/dashboard" },
-      { label: "README", href: "/#product" },
-    ],
-    Resources: [
+      { label: "Product", href: "/#product" },
       { label: "How it works", href: "/#how-it-works" },
+      { label: "Integrations", href: "/#integrations" },
       { label: "Agents", href: "/#agents" },
-      { label: "Report vulnerability", href: "mailto:contact@hooman.digital" },
-      { label: "Status", href: "/dashboard" },
     ],
-    Connect: [
-      { label: "Contact us", href: "mailto:contact@hooman.digital" },
-      { label: "GitHub", href: "https://github.com/apps/orinbot" },
+    "Get started": [
       { label: "Dashboard", href: "/dashboard" },
+      { label: "GitHub App", href: "https://github.com/apps/orinbot", external: true },
     ],
   }
 
   return (
-    <footer className="border-t border-zinc-800 py-16 px-6" style={{ backgroundColor: "#09090B" }}>
+    <footer className="border-t border-zinc-800 py-14 px-6" style={{ backgroundColor: "#09090B" }}>
       <div className="max-w-6xl mx-auto">
-        <div className="grid grid-cols-2 md:grid-cols-6 gap-8">
-          {/* Logo */}
-          <div className="col-span-2 md:col-span-1">
-            <svg width="20" height="20" viewBox="0 0 100 100" fill="none" className="text-white">
-              <path
-                d="M20 30 L50 10 L80 30 L80 70 L50 90 L20 70 Z"
-                fill="currentColor"
-                stroke="currentColor"
-                strokeWidth="2"
-              />
-              <path d="M50 10 L50 50 L20 30" fill="#09090B" />
-              <path d="M50 50 L80 70 L50 90" fill="#09090B" />
-            </svg>
+        <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-10">
+          {/* Brand */}
+          <div className="max-w-xs">
+            <div className="flex items-center gap-2">
+              <CirclePower className="w-5 h-5 text-white" />
+              <span className="text-white font-semibold">Orin</span>
+            </div>
+            <p className="text-zinc-500 text-sm mt-3 leading-relaxed">
+              Institutional memory for engineering teams. Remember every decision, catch the ones you are about to repeat.
+            </p>
           </div>
 
           {/* Links */}
-          {Object.entries(footerLinks).map(([category, links]) => (
-            <div key={category}>
-              <h3 className="text-white font-medium text-sm mb-4">{category}</h3>
-              <ul className="space-y-3">
-                {links.map((link) => (
-                  <li key={link.label}>
-                    <a href={link.href} className="text-zinc-500 hover:text-zinc-300 transition-colors text-sm">
-                      {link.label}
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
+          <div className="flex gap-16">
+            {Object.entries(columns).map(([category, links]) => (
+              <div key={category}>
+                <h3 className="text-white font-medium text-sm mb-4">{category}</h3>
+                <ul className="space-y-3">
+                  {links.map((link) => (
+                    <li key={link.label}>
+                      <a
+                        href={link.href}
+                        {...(link.external ? { target: "_blank", rel: "noreferrer" } : {})}
+                        className="text-zinc-500 hover:text-zinc-300 transition-colors text-sm"
+                      >
+                        {link.label}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="border-t border-zinc-800/60 mt-12 pt-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <p className="text-zinc-600 text-xs">© 2026 Orin</p>
+          <a
+            href="https://www.cognee.ai"
+            target="_blank"
+            rel="noreferrer"
+            className="text-zinc-600 hover:text-zinc-400 transition-colors text-xs"
+          >
+            Built on self-hosted Cognee
+          </a>
         </div>
       </div>
     </footer>

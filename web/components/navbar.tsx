@@ -21,17 +21,11 @@ export function Navbar() {
             <a href="/#integrations" className="text-sm text-zinc-400 hover:text-white transition-colors">
               Integrations
             </a>
-            <a href="/dashboard" className="text-sm text-zinc-400 hover:text-white transition-colors">
-              Dashboard
-            </a>
             <a href="/#agents" className="text-sm text-zinc-400 hover:text-white transition-colors">
               Agents
             </a>
           </div>
           <div className="flex items-center gap-4">
-            <a href="/dashboard" className="text-sm text-zinc-400 hover:text-white transition-colors">
-              Log in
-            </a>
             <a
               href="/dashboard"
               className="text-sm text-white bg-zinc-800 hover:bg-zinc-700 px-3.5 py-1.5 rounded-md border border-zinc-700 transition-colors"
