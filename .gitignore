@@ -42,3 +42,6 @@ coverage/
 
 # VM secret backups — never commit
 *.rey3
+
+# local-only docs (plans, specs, demo scripts, App private key): kept out of the repo
+docs/
