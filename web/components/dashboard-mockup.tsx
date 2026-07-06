@@ -150,7 +150,6 @@ export function DashboardMockup() {
             title="Re-proposes ISSUE-42: Redis cache"
             subtitle="check failed with citation"
             time="2m"
-            avatar="https://i.pravatar.cc/32?img=1"
             status="in-progress"
             active
           />
@@ -159,7 +158,6 @@ export function DashboardMockup() {
             title="Add Redis as caching layer"
             subtitle="recorded as rejected"
             time="1d"
-            avatar="https://i.pravatar.cc/32?img=2"
             status="todo"
             isProject
           />
@@ -168,7 +166,6 @@ export function DashboardMockup() {
             title="Switch API to microservices"
             subtitle="advisory: cites ISSUE-17"
             time="2d"
-            avatar="https://i.pravatar.cc/32?img=3"
             status="bug"
           />
           <InboxItem
@@ -176,7 +173,6 @@ export function DashboardMockup() {
             title="Rule: no new runtime deps"
             subtitle="seeded via @orinbot rule"
             time="4h"
-            avatar="https://i.pravatar.cc/32?img=4"
             status="todo"
           />
           <InboxItem
@@ -184,13 +180,11 @@ export function DashboardMockup() {
             title="Adopt Redis for rate limiting"
             subtitle="supersedes ISSUE-42 (scoped)"
             time="1w"
-            avatar="https://i.pravatar.cc/32?img=5"
             status="bug"
           />
           <InboxItem
             title="Slack: /why redis rejected?"
             subtitle="answered with evidence"
-            avatar="https://i.pravatar.cc/32?img=6"
             status="done"
             isProject
           />
@@ -199,13 +193,11 @@ export function DashboardMockup() {
             title="Add GraphQL gateway"
             subtitle="maya rated: good catch"
             time="1w"
-            avatar="https://i.pravatar.cc/32?img=7"
             status="done"
           />
           <InboxItem
             title="Linear: ORB-33 flagged"
             subtitle="agent replied in session"
-            avatar="https://i.pravatar.cc/32?img=8"
             status="todo"
             isProject
           />
@@ -355,7 +347,6 @@ function InboxItem({
   title,
   subtitle,
   time,
-  avatar,
   status,
   isProject,
   active,
@@ -364,7 +355,6 @@ function InboxItem({
   title: string
   subtitle?: string
   time?: string
-  avatar: string
   status: string
   isProject?: boolean
   active?: boolean
@@ -383,7 +373,6 @@ function InboxItem({
       }`}
     >
       <div className="flex items-start gap-3">
-        <img src={avatar || "/placeholder.svg"} alt="" className="w-8 h-8 rounded-full shrink-0 mt-0.5" />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-0.5">
             {id && <span className="text-zinc-500 text-[10px]">{id}</span>}
