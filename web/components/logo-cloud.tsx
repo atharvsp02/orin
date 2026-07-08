@@ -3,7 +3,7 @@
 import Image from "next/image"
 import { motion } from "framer-motion"
 import { Slack } from "lucide-react"
-import { SiGithub, SiLinear, SiVscodium } from "@icons-pack/react-simple-icons"
+import { SiGithub, SiLinear } from "@icons-pack/react-simple-icons"
 import { Claude, Cursor, DeepSeek, OpenAI } from "@lobehub/icons"
 
 export function LogoCloud() {
@@ -62,12 +62,16 @@ export function LogoCloud() {
                 { name: "Linear", Icon: SiLinear },
                 { name: "Cursor", Icon: Cursor },
                 { name: "Claude Code", Icon: Claude },
-                { name: "VS Code", Icon: SiVscodium },
+                { name: "VS Code", src: "/vscode-alt.svg" },
                 { name: "DeepSeek", Icon: DeepSeek },
                 { name: "Codex", Icon: OpenAI },
-              ].map(({ name, Icon }) => (
+              ].map(({ name, Icon, src }) => (
                 <div key={name} className="text-white font-semibold text-xl flex items-center gap-2">
-                  <Icon className="w-5 h-5" />
+                  {src ? (
+                    <Image src={src} alt={name} width={20} height={20} className="w-5 h-5" />
+                  ) : (
+                    Icon && <Icon className="w-5 h-5" />
+                  )}
                   {name}
                 </div>
               ))}
