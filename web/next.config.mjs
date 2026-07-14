@@ -1,5 +1,5 @@
 /** @type {import('next').NextConfig} */
-const API_ORIGIN = process.env.ORIN_API_ORIGIN ?? "https://orin-bot.duckdns.org";
+const API_ORIGIN = process.env.ORIN_API_ORIGIN ?? "https://bot-production-b076.up.railway.app";
 
 const nextConfig = {
   typescript: {
