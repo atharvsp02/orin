@@ -80,11 +80,13 @@ const checkState = (req: IncomingMessage, state: string): boolean => {
   return cn.length === n.length && cn.length > 0 && timingSafeEqual(cn, n);
 };
 
-// Origin that served the request: Vercel/Caddy set x-forwarded-host/proto. Falls back to WEB_ORIGIN.
+// Origin that served the request, used to build the OAuth redirect_uri and callback.
 export function requestOrigin(req: IncomingMessage): string {
+  // A configured WEB_ORIGIN is authoritative. Vercel rewrites do NOT forward x-forwarded-host and
+  // rewrite Host to our own backend domain, so the request headers here point at the bot, not the
+  // user-facing origin. Only fall back to headers in local dev, where WEB_ORIGIN is unset.
+  if (process.env.WEB_ORIGIN) return process.env.WEB_ORIGIN.replace(/\/+$/, "");
   const first = (v: unknown): string => String(v ?? "").split(",")[0].trim();
-  // Prefer the ORIGINAL host as forwarded by the front proxy (Next dev / Vercel rewrite), which
-  // Caddy is configured to pass through; fall back to the direct Host header, then WEB_ORIGIN.
   const host = first(req.headers["x-forwarded-host"]) || first(req.headers.host);
   if (!host) return config.webOrigin;
   const proto = first(req.headers["x-forwarded-proto"]) || (host.startsWith("localhost") || host.startsWith("127.") ? "http" : "https");
