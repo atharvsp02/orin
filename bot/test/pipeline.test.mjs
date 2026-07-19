@@ -5,7 +5,7 @@ process.env.GITHUB_APP_ID ??= "1";
 process.env.GITHUB_PRIVATE_KEY ??= "dummy";
 process.env.GITHUB_WEBHOOK_SECRET ??= "dummy";
 
-const { grounded, recencyWeight, isTemporalQuery } = await import("../dist/pipeline.js");
+const { CATCH_SEARCH_TYPE, grounded, recencyWeight, isTemporalQuery } = await import("../dist/pipeline.js");
 
 let pass = 0,
   fail = 0;
@@ -33,6 +33,8 @@ ok("recency: bad date → 1", recencyWeight("not-a-date", now) === 1);
 ok("temporal: quarter", isTemporalQuery("what did we reject in Q1?"));
 ok("temporal: year", isTemporalQuery("decisions from 2025"));
 ok("temporal: plain question is not temporal", !isTemporalQuery("why did we drop redis"));
+
+ok("catch recall avoids slow chain-of-thought search", CATCH_SEARCH_TYPE === "GRAPH_COMPLETION");
 
 console.log(`\n=== pipeline.ts: ${pass} passed, ${fail} failed ===`);
 process.exit(fail ? 1 : 0);

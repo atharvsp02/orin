@@ -13,6 +13,7 @@ const cog = { baseUrl: config.cogneeBaseUrl };
 
 // Stable question stem recorded on every catch recall — the feedback path matches QAs by it.
 export const CATCH_QUESTION = "Does this pull request re-propose a past decision?";
+export const CATCH_SEARCH_TYPE: cognee.SearchType = "GRAPH_COMPLETION";
 
 /** Extract a decision from one issue/PR thread and remember() it into the dataset. */
 export async function ingestItem(
@@ -92,7 +93,7 @@ export async function evaluatePr(
 
   if (candidates.size === 0) return { matches: false, decisionId: null, comment: "" };
 
-  // Cited recall (chain-of-thought) from the knowledge graph as context for the judgment.
+  // Cited recall from the knowledge graph as context for the judgment.
   // With a sessionId it goes through /recall, recording a QA entry so maintainer feedback can reweight it.
   const query = `${CATCH_QUESTION}\n${prText}`;
   const recall = sessionId
@@ -100,13 +101,13 @@ export async function evaluatePr(
         datasetName: inst.datasetName,
         query,
         sessionId,
-        searchType: "GRAPH_COMPLETION_COT",
+        searchType: CATCH_SEARCH_TYPE,
         includeReferences: true,
       })
     : await cognee.search(cog, creds, {
         datasetName: inst.datasetName,
         query,
-        searchType: "GRAPH_COMPLETION_COT",
+        searchType: CATCH_SEARCH_TYPE,
         includeReferences: true,
       });
 
