@@ -55,6 +55,7 @@ export async function initSchema(): Promise<void> {
       decision_id     TEXT,
       session_id      TEXT,
       state           TEXT   NOT NULL DEFAULT 'posted',
+      error_text      TEXT,
       updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
       PRIMARY KEY (installation_id, repo, number, head_sha)
     );
@@ -105,6 +106,7 @@ export async function initSchema(): Promise<void> {
       PRIMARY KEY (installation_id, filename)
     );
     ALTER TABLE preflight_keys ADD COLUMN IF NOT EXISTS label TEXT NOT NULL DEFAULT '';
+    ALTER TABLE deliveries ADD COLUMN IF NOT EXISTS error_text TEXT;
   `);
 }
 
@@ -228,6 +230,7 @@ export interface DeliveryRow {
   decisionId: string | null;
   sessionId: string | null;
   state: string;
+  errorText: string | null;
 }
 
 // Prior delivery for a specific PR commit (idempotency across synchronize re-runs).
@@ -238,7 +241,7 @@ export async function getDelivery(
   headSha: string,
 ): Promise<DeliveryRow | null> {
   const { rows } = await pool.query(
-    `SELECT mode, check_run_id, review_id, comment_id, decision_id, session_id, state
+    `SELECT mode, check_run_id, review_id, comment_id, decision_id, session_id, state, error_text
      FROM deliveries WHERE installation_id = $1 AND repo = $2 AND number = $3 AND head_sha = $4`,
     [installationId, repo, prNumber, headSha],
   );
@@ -254,6 +257,7 @@ export async function getDelivery(
     decisionId: r.decision_id,
     sessionId: r.session_id,
     state: r.state,
+    errorText: r.error_text,
   };
 }
 
@@ -270,20 +274,30 @@ export async function upsertDelivery(d: {
   decisionId?: string | null;
   sessionId?: string | null;
   state?: string;
+  errorText?: string | null;
 }): Promise<void> {
   await pool.query(
     `INSERT INTO deliveries
-       (installation_id, repo, number, kind, head_sha, mode, check_run_id, review_id, comment_id, decision_id, session_id, state, updated_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, now())
+       (installation_id, repo, number, kind, head_sha, mode, check_run_id, review_id, comment_id, decision_id, session_id, state, error_text, updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13, now())
      ON CONFLICT (installation_id, repo, number, head_sha) DO UPDATE SET
        mode=EXCLUDED.mode, check_run_id=EXCLUDED.check_run_id, review_id=EXCLUDED.review_id,
        comment_id=EXCLUDED.comment_id, decision_id=EXCLUDED.decision_id, session_id=EXCLUDED.session_id,
-       state=EXCLUDED.state, updated_at=now()`,
+       state=EXCLUDED.state, error_text=EXCLUDED.error_text, updated_at=now()`,
     [
       d.installationId, d.repo, d.prNumber, d.kind ?? "pr", d.headSha, d.mode ?? null,
       d.checkRunId ?? null, d.reviewId ?? null, d.commentId ?? null, d.decisionId ?? null,
-      d.sessionId ?? null, d.state ?? "posted",
+      d.sessionId ?? null, d.state ?? "posted", d.errorText ?? null,
     ],
+  );
+}
+
+export async function clearTransientCatchFailure(installationId: number, repo: string, number: number): Promise<void> {
+  await pool.query(
+    `DELETE FROM deliveries
+     WHERE installation_id = $1 AND repo = $2 AND number = $3 AND head_sha = ''
+       AND kind = 'pr' AND state IN ('retrying', 'failed')`,
+    [installationId, repo, number],
   );
 }
 
@@ -554,13 +568,14 @@ export interface DeliveryFeedRow {
   kind: string;
   decisionId: string | null;
   state: string;
+  errorText: string | null;
   updatedAt: string;
 }
 
 // Recent catches feed for the dashboard overview.
 export async function recentDeliveries(installationId: number, limit = 20): Promise<DeliveryFeedRow[]> {
   const { rows } = await pool.query(
-    `SELECT repo, number, kind, decision_id, state, updated_at FROM deliveries
+    `SELECT repo, number, kind, decision_id, state, error_text, updated_at FROM deliveries
      WHERE installation_id = $1 ORDER BY updated_at DESC LIMIT $2`,
     [installationId, limit],
   );
@@ -570,6 +585,7 @@ export async function recentDeliveries(installationId: number, limit = 20): Prom
     kind: r.kind,
     decisionId: r.decision_id,
     state: r.state,
+    errorText: r.error_text,
     updatedAt: String(r.updated_at),
   }));
 }

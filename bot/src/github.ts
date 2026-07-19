@@ -135,8 +135,9 @@ export async function postComment(
   repoFullName: string,
   prNumber: number,
   body: string,
-): Promise<void> {
+): Promise<number> {
   const octokit = await app.getInstallationOctokit(installationId);
   const [owner, repo] = repoFullName.split("/");
-  await octokit.rest.issues.createComment({ owner, repo, issue_number: prNumber, body });
+  const { data } = await octokit.rest.issues.createComment({ owner, repo, issue_number: prNumber, body });
+  return data.id;
 }

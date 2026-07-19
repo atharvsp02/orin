@@ -70,6 +70,12 @@ eq("getPrSession returns stored session", await db.getPrSession(INST, "acme/a", 
 eq("getLatestDecisionForPr", await db.getLatestDecisionForPr(INST, "acme/a", 10), "PR-42");
 ok("decisionFlaggedOnThread true for flagged", await db.decisionFlaggedOnThread(INST, "acme/a", 10, "PR-42") === true);
 ok("decisionFlaggedOnThread false cross-repo", await db.decisionFlaggedOnThread(INST, "acme/b", 10, "PR-42") === false);
+await db.upsertDelivery({ installationId: INST, repo: "acme/a", prNumber: 11, kind: "issue", headSha: "", mode: "comment", state: "failed", errorText: "fetch failed" });
+const failedDelivery = await db.getDelivery(INST, "acme/a", 11, "");
+ok("failed catch stores a dashboard-safe error", failedDelivery?.state === "failed" && failedDelivery?.errorText === "fetch failed");
+await db.upsertDelivery({ installationId: INST, repo: "acme/a", prNumber: 11, kind: "issue", headSha: "", mode: "comment", state: "clear" });
+const recoveredDelivery = await db.getDelivery(INST, "acme/a", 11, "");
+ok("successful retry clears the old error", recoveredDelivery?.state === "clear" && recoveredDelivery?.errorText === null);
 await db.ignoreDeliveries(INST, "acme/a", 10);
 const delIgnored = await db.getDelivery(INST, "acme/a", 10, "sha1");
 ok("ignoreDeliveries flips state", delIgnored?.state === "ignored");
