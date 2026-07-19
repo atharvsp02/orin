@@ -19,6 +19,7 @@ export interface Catch {
   kind: string;
   decisionId: string | null;
   state: string;
+  errorText: string | null;
   updatedAt: string;
 }
 

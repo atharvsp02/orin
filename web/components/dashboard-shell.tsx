@@ -294,6 +294,9 @@ function ListItem({
     posted: "bg-red-500",
     clear: "bg-emerald-500",
     ignored: "bg-zinc-600",
+    processing: "bg-blue-400",
+    retrying: "bg-yellow-500",
+    failed: "bg-red-500",
     rejected: "bg-red-500",
     accepted: "bg-emerald-500",
     reverted: "bg-yellow-500",
@@ -732,6 +735,12 @@ function CatchesView({
   )
   const current = items[selected]
   const decision = current?.decisionId ? decisions?.find((d) => d.decisionId === current.decisionId && d.repo === current.repo) : null
+  const progressPanel =
+    current?.state === "failed"
+      ? "bg-red-950/30 border-red-900/40 text-red-200"
+      : current?.state === "retrying"
+        ? "bg-yellow-950/30 border-yellow-900/40 text-yellow-200"
+        : "bg-blue-950/30 border-blue-900/40 text-blue-200"
 
   return (
     <>
@@ -746,7 +755,17 @@ function CatchesView({
             <ListItem
               key={`${r.repo}#${r.number}@${r.updatedAt}`}
               id={`${r.kind.toUpperCase()}-${r.number}`}
-              title={r.decisionId ? `Re-proposes ${r.decisionId}` : "Checked: no conflict"}
+              title={
+                r.state === "processing"
+                  ? "Catch is processing"
+                  : r.state === "retrying"
+                  ? "Catch is retrying"
+                  : r.state === "failed"
+                    ? "Catch failed to process"
+                    : r.decisionId
+                      ? `Re-proposes ${r.decisionId}`
+                      : "Checked: no conflict"
+              }
               subtitle={r.repo}
               time={timeAgo(r.updatedAt)}
               status={r.state}
@@ -794,8 +813,28 @@ function CatchesView({
                   </span>
                 </div>
                 <h2 className="text-white text-xl font-semibold mb-5">
-                  {current.decisionId ? `Re-proposes ${current.decisionId}` : "No decision conflict"}
+                  {current.state === "processing"
+                    ? "Catch is processing"
+                    : current.state === "retrying"
+                    ? "Catch is retrying"
+                    : current.state === "failed"
+                      ? "Catch failed to process"
+                      : current.decisionId
+                        ? `Re-proposes ${current.decisionId}`
+                        : "No decision conflict"}
                 </h2>
+                {(current.state === "processing" || current.state === "retrying" || current.state === "failed") && (
+                  <div className={`${progressPanel} rounded-xl p-5 text-xs mb-5 border space-y-2`}>
+                    <p>
+                      {current.state === "processing"
+                        ? "Orin is checking this proposal against recorded decisions."
+                        : current.state === "retrying"
+                        ? "Orin hit a temporary dependency error and will retry automatically."
+                        : "Orin could not finish this catch after its automatic retries."}
+                    </p>
+                    {current.errorText && <p className="opacity-70 font-mono">{current.errorText}</p>}
+                  </div>
+                )}
                 {decision && (
                   <div className="bg-zinc-900/80 rounded-xl p-5 text-[0.75rem] font-mono mb-5 border border-zinc-800/50 space-y-2">
                     <div>
