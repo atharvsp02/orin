@@ -17,6 +17,7 @@ export async function startQueue(): Promise<PgBoss> {
   await boss.start();
   await boss.createQueue(QUEUE.ingest);
   await boss.createQueue(QUEUE.catch, { name: QUEUE.catch, ...CATCH_RETRY_OPTIONS });
+  await boss.updateQueue(QUEUE.catch, { name: QUEUE.catch, ...CATCH_RETRY_OPTIONS });
   await boss.createQueue(QUEUE.command);
   await boss.createQueue(QUEUE.lifecycle);
   await boss.work<IngestJob>(QUEUE.ingest, ingestWorker);
