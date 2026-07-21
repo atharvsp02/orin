@@ -152,7 +152,7 @@ export async function getTenantConfig(installationId: number): Promise<TenantCon
     scoreCutoff: r.score_cutoff ?? 0.6,
     autoComment: r.auto_comment ?? true,
     customInstructions: r.custom_instructions ?? "",
-    llmProvider: r.llm_provider ?? "google",
+    llmProvider: r.llm_provider ?? "deepseek",
     deliveryMode: r.delivery_mode ?? "check",
     blockOnRepropose: r.block_on_repropose ?? true,
   };

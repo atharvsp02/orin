@@ -27,7 +27,7 @@ eq("cognee key decrypts back to plaintext (crypto roundtrip)", inst?.cogneeApiKe
 
 // --- tenant_config defaults ---
 const cfg = await db.getTenantConfig(INST);
-ok("config defaults: llmProvider google", cfg.llmProvider === "google");
+ok("config defaults: llmProvider deepseek", cfg.llmProvider === "deepseek");
 ok("config defaults: blockOnRepropose true", cfg.blockOnRepropose === true);
 ok("config defaults: deliveryMode check", cfg.deliveryMode === "check");
 
