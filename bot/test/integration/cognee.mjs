@@ -131,6 +131,37 @@ ok("pipeline.ask returns cited answer", (await pipeline.ask(inst, creds, "why di
 // primitives.ask via resolved tenant
 const tenant = await tenantMod.resolveTenant({ platform: "github", externalId: String(INST) });
 ok("resolveTenant(github) resolves", tenant?.installationId === INST && tenant?.datasetName === DS);
+ok(
+  "unlinked Slack workspace cannot resolve",
+  (await tenantMod.resolveTenant({ platform: "slack", externalId: "T-unlinked" })) === null,
+);
+await db.linkTenant("slack", "T-linked", INST);
+const linkedSlack = await tenantMod.resolveTenant({ platform: "slack", externalId: "T-linked" });
+ok(
+  "linked Slack workspace resolves the same isolated memory",
+  linkedSlack?.installationId === INST && linkedSlack?.datasetName === DS,
+);
+await db.linkTenant("linear", "L-linked", INST);
+const linkedLinear = await tenantMod.resolveTenant({ platform: "linear", externalId: "L-linked" });
+ok(
+  "linked Linear workspace resolves the same isolated memory",
+  linkedLinear?.installationId === INST && linkedLinear?.datasetName === DS,
+);
+const standaloneRef = { platform: "slack", externalId: "T-standalone" };
+const registrationsBefore = seen.filter((request) => request.path === "/api/v1/auth/register").length;
+const standalone = await tenantMod.provisionAndLink(standaloneRef, "slack:Standalone");
+ok(
+  "standalone Slack workspace provisions isolated memory",
+  standalone.installationId !== INST && standalone.inst.githubAccount === "slack:Standalone",
+);
+const standaloneAgain = await tenantMod.provisionAndLink(standaloneRef, "slack:Standalone");
+const registrationsAfter = seen.filter((request) => request.path === "/api/v1/auth/register").length;
+ok("standalone provisioning is idempotent", standaloneAgain.installationId === standalone.installationId);
+ok("idempotent provisioning creates one Cognee tenant", registrationsAfter === registrationsBefore + 1);
+await tenantMod.linkTenant(standaloneRef, INST);
+const relinkedSlack = await tenantMod.resolveTenant(standaloneRef);
+ok("Slack workspace can be relinked to existing memory", relinkedSlack?.installationId === INST);
+await db.deleteInstallation(standalone.installationId);
 ok("primitives.ask over tenant", (await prim.ask(tenant, "why redis")) === "Because redis added ops burden.");
 // matchRules (listRules via CODING_RULES + grounding gate)
 // needs >=2 shared >=3-char terms with a rule; "add new deps" overlaps "Do not add new deps"
