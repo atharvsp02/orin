@@ -33,6 +33,12 @@ export type DashboardTarget =
   | { kind: "installation"; installationId: number; resource: string; sub?: string }
   | { kind: "workspace"; workspaceId: string; resource: string; sub?: string };
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function isDashboardEntityId(value: string): boolean {
+  return UUID_PATTERN.test(value);
+}
+
 export function parseDashboardPath(pathname: string): DashboardTarget | null {
   const legacy = pathname.match(/^\/v1\/dash\/(\d+)\/([a-z]+)(?:\/([A-Za-z0-9._-]+))?$/);
   if (legacy) {
@@ -87,9 +93,40 @@ export async function handleDash(req: IncomingMessage, res: ServerResponse, path
 
   const resource = target.resource;
   const sub = target.sub;
+  const currentWorkspace = workspace ?? await db.getWorkspaceByInstallation(inst);
+
+  if ((resource === "connectors" || resource === "resources") && req.method === "PUT" && sub) {
+    if (!isDashboardEntityId(sub)) {
+      send(res, 400, { error: `invalid ${resource.slice(0, -1)} id` });
+      return true;
+    }
+    let body: { enabled?: unknown };
+    try {
+      body = JSON.parse(await readBody(req)) as { enabled?: unknown };
+    } catch {
+      send(res, 400, { error: "invalid json" });
+      return true;
+    }
+    if (typeof body.enabled !== "boolean") {
+      send(res, 400, { error: "enabled must be a boolean" });
+      return true;
+    }
+    if (!currentWorkspace) {
+      send(res, 404, { error: "unknown workspace" });
+      return true;
+    }
+    const updated = resource === "connectors"
+      ? await db.setConnectorEnabled(currentWorkspace.workspaceId, sub, body.enabled)
+      : await db.setConnectorResourceEnabled(currentWorkspace.workspaceId, sub, body.enabled);
+    if (!updated) {
+      send(res, 404, { error: `${resource.slice(0, -1)} not found` });
+      return true;
+    }
+    send(res, 200, updated);
+    return true;
+  }
 
   if (resource === "overview" && req.method === "GET") {
-    const currentWorkspace = workspace ?? await db.getWorkspaceByInstallation(inst);
     const [metrics, recent, repos, links, connectors] = await Promise.all([
       db.metricsAll(inst),
       db.recentDeliveries(inst, 20),
@@ -97,7 +134,7 @@ export async function handleDash(req: IncomingMessage, res: ServerResponse, path
       db.linksFor(inst),
       currentWorkspace ? db.listConnectors(currentWorkspace.workspaceId) : [],
     ]);
-    const resources = (await Promise.all(connectors.map((connector) => db.listConnectorResources(connector.connectorId)))).flat();
+    let resources = (await Promise.all(connectors.map((connector) => db.listConnectorResources(connector.connectorId)))).flat();
     // Repos the App is INSTALLED on, straight from GitHub (always current, covers adds/removes).
     let installedRepos: string[] = [];
     try {
@@ -106,6 +143,24 @@ export async function handleDash(req: IncomingMessage, res: ServerResponse, path
       installedRepos = rows.map((r) => r.full_name);
     } catch (e) {
       console.warn("overview: listing installed repos failed:", (e as Error).message);
+    }
+    const githubConnector = connectors.find((connector) => connector.provider === "github");
+    if (githubConnector) {
+      const knownResources = new Set(
+        resources
+          .filter((item) => item.connectorId === githubConnector.connectorId && item.kind === "repository")
+          .map((item) => item.externalId),
+      );
+      const missingRepos = installedRepos.filter((repo) => !knownResources.has(repo));
+      if (missingRepos.length > 0) {
+        await Promise.all(missingRepos.map((repo) => db.upsertConnectorResource({
+          connectorId: githubConnector.connectorId,
+          externalId: repo,
+          kind: "repository",
+          displayName: repo,
+        })));
+        resources = (await Promise.all(connectors.map((connector) => db.listConnectorResources(connector.connectorId)))).flat();
+      }
     }
     send(res, 200, {
       account: installation.githubAccount,

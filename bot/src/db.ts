@@ -337,6 +337,21 @@ export async function listConnectors(workspaceId: string): Promise<ConnectorAcco
   return rows.map(connectorFromRow);
 }
 
+export async function setConnectorEnabled(
+  workspaceId: string,
+  connectorId: string,
+  enabled: boolean,
+): Promise<ConnectorAccount | null> {
+  const { rows } = await pool.query(
+    `UPDATE connectors
+     SET status = $3, updated_at = now()
+     WHERE workspace_id = $1 AND connector_id = $2
+     RETURNING *`,
+    [workspaceId, connectorId, enabled ? "active" : "disabled"],
+  );
+  return rows[0] ? connectorFromRow(rows[0]) : null;
+}
+
 export async function deleteConnector(provider: string, externalId: string): Promise<void> {
   const ref = normalizeConnectorRef({ provider, externalId });
   await pool.query(`DELETE FROM connectors WHERE provider = $1 AND external_id = $2`, [ref.provider, ref.externalId]);
@@ -374,6 +389,48 @@ export async function listConnectorResources(connectorId: string): Promise<Conne
     [connectorId],
   );
   return rows.map(resourceFromRow);
+}
+
+export async function setConnectorResourceEnabled(
+  workspaceId: string,
+  resourceId: string,
+  enabled: boolean,
+): Promise<ConnectorResource | null> {
+  const { rows } = await pool.query(
+    `UPDATE connector_resources AS resource
+     SET enabled = $3, updated_at = now()
+     FROM connectors AS connector
+     WHERE resource.resource_id = $2
+       AND resource.connector_id = connector.connector_id
+       AND connector.workspace_id = $1
+     RETURNING resource.*`,
+    [workspaceId, resourceId, enabled],
+  );
+  return rows[0] ? resourceFromRow(rows[0]) : null;
+}
+
+export async function connectorAllowsResource(
+  provider: string,
+  externalId: string,
+  kind: string,
+  resourceExternalId: string,
+): Promise<boolean> {
+  const ref = normalizeConnectorRef({ provider, externalId });
+  const normalizedKind = kind.trim().toLowerCase();
+  const normalizedResourceId = resourceExternalId.trim();
+  if (!normalizedKind || !normalizedResourceId) return false;
+  const { rows } = await pool.query(
+    `SELECT connector.status, resource.enabled
+     FROM connectors AS connector
+     LEFT JOIN connector_resources AS resource
+       ON resource.connector_id = connector.connector_id
+      AND resource.kind = $3
+      AND resource.external_id = $4
+     WHERE connector.provider = $1 AND connector.external_id = $2`,
+    [ref.provider, ref.externalId, normalizedKind, normalizedResourceId],
+  );
+  if (!rows[0] || rows[0].status !== "active") return false;
+  return rows[0].enabled === null || rows[0].enabled === undefined || rows[0].enabled === true;
 }
 
 async function syncInstallationWorkspace(i: {

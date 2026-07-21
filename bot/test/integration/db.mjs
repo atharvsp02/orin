@@ -160,6 +160,20 @@ const disabledResource = await db.upsertConnectorResource({
 });
 ok("connector resource update is idempotent", disabledResource.resourceId === independentResource.resourceId && disabledResource.enabled === false);
 eq("connector resources remain scoped", (await db.listConnectorResources(independentConnector.connectorId)).map((resource) => resource.displayName), ["Engineering Team"]);
+ok("disabled resource blocks connector activity", await db.connectorAllowsResource("slack", "T-independent", "channel", "C-engineering") === false);
+ok("missing connector blocks activity", await db.connectorAllowsResource("slack", "T-missing", "channel", "C-engineering") === false);
+ok("empty resource identity blocks activity", await db.connectorAllowsResource("slack", "T-independent", "channel", "") === false);
+const disabledConnector = await db.setConnectorEnabled(independentWorkspace.workspaceId, independentConnector.connectorId, false);
+ok("connector can be disabled within its workspace", disabledConnector?.status === "disabled");
+ok("disabled connector blocks unregistered resources", await db.connectorAllowsResource("slack", "T-independent", "channel", "C-other") === false);
+ok("connector cannot be changed from another workspace", await db.setConnectorEnabled(workspace.workspaceId, independentConnector.connectorId, true) === null);
+const enabledConnector = await db.setConnectorEnabled(independentWorkspace.workspaceId, independentConnector.connectorId, true);
+ok("connector can be enabled again", enabledConnector?.status === "active");
+const enabledResource = await db.setConnectorResourceEnabled(independentWorkspace.workspaceId, independentResource.resourceId, true);
+ok("connector resource can be enabled within its workspace", enabledResource?.enabled === true);
+ok("enabled resource allows connector activity", await db.connectorAllowsResource("slack", "T-independent", "channel", "C-engineering") === true);
+ok("unregistered resource inherits active connector status", await db.connectorAllowsResource("slack", "T-independent", "channel", "C-other") === true);
+ok("connector resource cannot be changed from another workspace", await db.setConnectorResourceEnabled(workspace.workspaceId, independentResource.resourceId, false) === null);
 await db.deleteWorkspace(independentWorkspace.workspaceId);
 ok("workspace deletion cascades connectors", (await db.getConnector("slack", "T-independent")) === null);
 

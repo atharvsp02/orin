@@ -32,6 +32,7 @@ export async function startQueue(): Promise<PgBoss> {
 // Backfill (whole repo) or live single-item ingest -> extract decision -> remember().
 async function ingestWorker(jobs: PgBoss.Job<IngestJob>[]): Promise<void> {
   for (const { data } of jobs) {
+    if (!(await db.connectorAllowsResource("github", String(data.installationId), "repository", data.repo))) continue;
     const inst = await db.getInstallation(data.installationId);
     if (!inst) {
       console.warn("ingest: unknown installation", data.installationId);
@@ -71,6 +72,7 @@ async function catchWorker(jobs: PgBoss.JobWithMetadata<CatchJob>[]): Promise<vo
 }
 
 async function runCatch(data: CatchJob): Promise<void> {
+  if (!(await db.connectorAllowsResource("github", String(data.installationId), "repository", data.repo))) return;
   const inst = await db.getInstallation(data.installationId);
   if (!inst) return;
   const creds: TenantCredentials = { apiKey: inst.cogneeApiKey, tenantId: "" };
@@ -165,5 +167,8 @@ async function runCatch(data: CatchJob): Promise<void> {
 }
 
 async function commandWorker(jobs: PgBoss.Job<CommandJob>[], boss: PgBoss): Promise<void> {
-  for (const { data } of jobs) await handleCommand(data, boss);
+  for (const { data } of jobs) {
+    if (!(await db.connectorAllowsResource("github", String(data.installationId), "repository", data.repo))) continue;
+    await handleCommand(data, boss);
+  }
 }

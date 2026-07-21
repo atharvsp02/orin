@@ -6,7 +6,7 @@ process.env.GITHUB_APP_ID ??= "1";
 process.env.GITHUB_PRIVATE_KEY ??= "dummy";
 process.env.GITHUB_WEBHOOK_SECRET ??= "dummy";
 
-const { parseDashboardPath } = await import("../dist/dash.js");
+const { isDashboardEntityId, parseDashboardPath } = await import("../dist/dash.js");
 
 let passed = 0;
 const test = (name, fn) => {
@@ -61,6 +61,12 @@ test("rejects missing resources", () => {
 test("rejects invalid installation boundaries", () => {
   assert.equal(parseDashboardPath("/v1/dash/0/overview"), null);
   assert.equal(parseDashboardPath("/v1/dash/9007199254740992/overview"), null);
+});
+
+test("validates dashboard entity ids", () => {
+  assert.equal(isDashboardEntityId("123e4567-e89b-12d3-a456-426614174000"), true);
+  assert.equal(isDashboardEntityId(""), false);
+  assert.equal(isDashboardEntityId("not-a-uuid"), false);
 });
 
 console.log(`${passed} dashboard route checks passed`);

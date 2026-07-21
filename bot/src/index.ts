@@ -12,6 +12,24 @@ import { handleDash } from "./dash.js";
 import { forgetTenant } from "./lifecycle.js";
 import { DECISION_OWL, ONTOLOGY_KEY, ONTOLOGY_FILENAME } from "./ontology.js";
 
+async function syncGithubResources(
+  installationId: number,
+  repositories: Array<{ full_name: string }>,
+  enabled: boolean,
+): Promise<void> {
+  const connector = await db.getConnector("github", String(installationId));
+  if (!connector) return;
+  for (const repository of repositories) {
+    await db.upsertConnectorResource({
+      connectorId: connector.connectorId,
+      externalId: repository.full_name,
+      kind: "repository",
+      displayName: repository.full_name,
+      enabled,
+    });
+  }
+}
+
 async function main() {
   await db.initSchema();
   const boss = await startQueue();
@@ -30,6 +48,7 @@ async function main() {
       tenantName: `install-${installationId}`,
     });
     await db.upsertInstallation({ installationId, githubAccount: account, datasetName, cogneeApiKey: creds.apiKey });
+    await syncGithubResources(installationId, payload.repositories ?? [], true);
 
     // Ground extraction with the decision ontology (idempotent-ish: duplicate key 400s, which we ignore).
     await cognee
@@ -39,6 +58,14 @@ async function main() {
     for (const r of payload.repositories ?? []) {
       await boss.send(QUEUE.ingest, { installationId, repo: r.full_name });
     }
+  });
+
+  app.webhooks.on("installation_repositories.added", async ({ payload }) => {
+    await syncGithubResources(payload.installation.id, payload.repositories_added, true);
+  });
+
+  app.webhooks.on("installation_repositories.removed", async ({ payload }) => {
+    await syncGithubResources(payload.installation.id, payload.repositories_removed, false);
   });
 
   // Uninstall -> forget() the tenant's whole graph, then tear down local rows (the live forget verb).
