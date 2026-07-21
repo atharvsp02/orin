@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import Link from "next/link"
 import { CirclePower, ExternalLink, RefreshCw, LogOut } from "lucide-react"
 import { SiGithub, SiLinear } from "@icons-pack/react-simple-icons"
 import { Slack } from "lucide-react"
@@ -67,9 +68,9 @@ export default function DashboardPage() {
           <SiGithub className="w-4 h-4" />
           Continue with GitHub
         </a>
-        <a href="/" className="mt-6 text-zinc-500 hover:text-zinc-300 text-xs transition-colors">
+        <Link href="/" className="mt-6 text-zinc-500 hover:text-zinc-300 text-xs transition-colors">
           Back to home
-        </a>
+        </Link>
       </Centered>
     )
   }

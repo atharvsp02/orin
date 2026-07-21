@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { motion } from "framer-motion"
+import { motion, type Variants } from "framer-motion"
 import {
   Inbox,
   CircleUser,
@@ -25,7 +25,7 @@ import {
 } from "lucide-react"
 
 export function DashboardMockup() {
-  const containerVariants = {
+  const containerVariants: Variants = {
     hidden: {},
     visible: {
       transition: {
@@ -35,7 +35,7 @@ export function DashboardMockup() {
     },
   }
 
-  const panelVariants = {
+  const panelVariants: Variants = {
     hidden: {
       opacity: 0,
       x: 100,

@@ -1225,9 +1225,9 @@ function ForceGraph({ data }: { data: GraphData }) {
         for (let j = i + 1; j < ns.length; j++) {
           const a = ns[i]
           const b = ns[j]
-          let dx = a.x - b.x
-          let dy = a.y - b.y
-          let d2 = dx * dx + dy * dy || 0.01
+          const dx = a.x - b.x
+          const dy = a.y - b.y
+          const d2 = dx * dx + dy * dy || 0.01
           const d = Math.sqrt(d2)
           const f = (2600 / d2) * alpha
           const ux = dx / d
@@ -1243,8 +1243,8 @@ function ForceGraph({ data }: { data: GraphData }) {
         const b = byId.get(e.target)
         if (!a || !b) continue
         const L = e.kind === "has-term" ? 74 : e.kind === "in-repo" ? 104 : 130
-        let dx = b.x - a.x
-        let dy = b.y - a.y
+        const dx = b.x - a.x
+        const dy = b.y - a.y
         const d = Math.sqrt(dx * dx + dy * dy) || 0.01
         const f = (d - L) * 0.03 * alpha
         const ux = dx / d

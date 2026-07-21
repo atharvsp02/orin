@@ -2,9 +2,6 @@
 const API_ORIGIN = process.env.ORIN_API_ORIGIN ?? "https://bot-production-b076.up.railway.app";
 
 const nextConfig = {
-  typescript: {
-    ignoreBuildErrors: true,
-  },
   images: {
     unoptimized: true,
   },

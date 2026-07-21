@@ -295,7 +295,7 @@ export function AISection() {
 
                 {/* MCP Code Snippet */}
                 <div className="bg-zinc-900/30 border border-zinc-800/60 rounded-xl p-5 font-mono text-sm">
-                  <p className="text-zinc-700 mb-3">//orin-bot.duckdns.org/mcp</p>
+                  <p className="text-zinc-700 mb-3">{"//orin-bot.duckdns.org/mcp"}</p>
                   <div className="space-y-1 mb-6">
                     <p>
                       <span className="text-orange-400/70">"mcpServers"</span>

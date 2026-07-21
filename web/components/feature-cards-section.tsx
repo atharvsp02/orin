@@ -2,6 +2,7 @@
 
 import { motion } from "framer-motion"
 import { ChevronRight, Plus } from "lucide-react"
+import Link from "next/link"
 
 const featureCards = [
   {
@@ -119,9 +120,9 @@ export function FeatureCardsSection() {
               <p className="text-zinc-400 leading-relaxed">
                 Orin is shaped by one observation about long-lived codebases: every rejected idea eventually returns.
                 Context leaves, reviewers change, and the same debates repeat. Orin keeps the receipts.{" "}
-                <a href="/#how-it-works" className="text-white inline-flex items-center gap-1 hover:underline">
+                <Link href="/#how-it-works" className="text-white inline-flex items-center gap-1 hover:underline">
                   See how it works <ChevronRight className="w-4 h-4" />
-                </a>
+                </Link>
               </p>
             </motion.div>
           </div>
