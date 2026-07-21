@@ -8,6 +8,7 @@ process.env.GITHUB_WEBHOOK_SECRET ??= "dummy";
 const BOT = new URL("../../dist/", import.meta.url).href;
 const db = await import(`${BOT}db.js`);
 const enterprise = await import(`${BOT}enterprise-db.js`);
+const contentDb = await import(`${BOT}content-db.js`);
 const { Pool } = await import("pg");
 const sql = new Pool({ connectionString: process.env.DATABASE_URL });
 
@@ -149,6 +150,225 @@ await enterprise.updateWorkspaceMember({
   status: "active",
 });
 eq("user workspace list is membership based", (await enterprise.listUserWorkspaces(viewerMembership.userId)).map((item) => item.workspaceId), [workspace.workspaceId]);
+
+// --- permission-aware content, connector policy, sync, search, and chat ---
+const driveConnector = await db.upsertConnector({
+  workspaceId: workspace.workspaceId,
+  provider: "gdrive",
+  externalId: "drive-content",
+  displayName: "Acme Drive",
+  capabilities: ["ingest", "query"],
+});
+const driveResource = await db.upsertConnectorResource({
+  connectorId: driveConnector.connectorId,
+  externalId: "shared-drive-1",
+  kind: "shared_drive",
+  displayName: "Engineering Drive",
+});
+const hiddenResource = await db.upsertConnectorResource({
+  connectorId: driveConnector.connectorId,
+  externalId: "shared-drive-hidden",
+  kind: "shared_drive",
+  displayName: "Disabled Drive",
+  enabled: false,
+});
+await contentDb.storeConnectorCredentials({
+  connectorId: driveConnector.connectorId,
+  data: { refreshToken: "drive-refresh-secret", tokenType: "Bearer" },
+  scopes: ["drive.readonly", "drive.metadata.readonly", "drive.readonly"],
+  expiresAt: "2026-08-01T00:00:00Z",
+});
+const driveCredentials = await contentDb.getConnectorCredentials(driveConnector.connectorId);
+ok("connector credentials decrypt correctly", driveCredentials?.data.refreshToken === "drive-refresh-secret");
+eq("connector credential scopes are deduplicated", driveCredentials?.scopes, ["drive.readonly", "drive.metadata.readonly"]);
+const rawCredential = await sql.query(`SELECT encrypted_data FROM connector_credentials WHERE connector_id = $1`, [driveConnector.connectorId]);
+ok("connector refresh token is not stored as plaintext", !String(rawCredential.rows[0].encrypted_data).includes("drive-refresh-secret"));
+
+const workspaceContent = await contentDb.upsertContentItem({
+  workspaceId: workspace.workspaceId,
+  connectorId: driveConnector.connectorId,
+  resourceId: driveResource.resourceId,
+  externalId: "workspace-roadmap",
+  sourceType: "document",
+  title: "Platform roadmap",
+  body: "The roadmap moves permission-aware search into production.",
+  visibility: "workspace",
+  aclStatus: "failed",
+  sourceUpdatedAt: "2026-07-20T00:00:00Z",
+});
+const ownerContent = await contentDb.upsertContentItem({
+  workspaceId: workspace.workspaceId,
+  connectorId: driveConnector.connectorId,
+  resourceId: driveResource.resourceId,
+  externalId: "owner-roadmap",
+  sourceType: "document",
+  title: "Owner compensation roadmap",
+  body: "Private roadmap details for the owner only.",
+  visibility: "restricted",
+  aclStatus: "current",
+  acls: [{ principalType: "email", principalKey: "owner@example.com" }],
+});
+const groupContent = await contentDb.upsertContentItem({
+  workspaceId: workspace.workspaceId,
+  connectorId: driveConnector.connectorId,
+  resourceId: driveResource.resourceId,
+  externalId: "group-roadmap",
+  sourceType: "document",
+  title: "AI rollout roadmap",
+  body: "The group roadmap covers the permission-aware assistant rollout.",
+  visibility: "restricted",
+  aclStatus: "current",
+  acls: [{ principalType: "external_group", principalKey: "drive-group:ai-rollout@example.com" }],
+});
+await contentDb.upsertContentItem({
+  workspaceId: workspace.workspaceId,
+  connectorId: driveConnector.connectorId,
+  resourceId: driveResource.resourceId,
+  externalId: "stale-roadmap",
+  sourceType: "document",
+  title: "Stale private roadmap",
+  body: "This stale roadmap must fail closed.",
+  visibility: "restricted",
+  aclStatus: "stale",
+  acls: [{ principalType: "email", principalKey: "viewer@example.com" }],
+});
+await contentDb.upsertContentItem({
+  workspaceId: workspace.workspaceId,
+  connectorId: driveConnector.connectorId,
+  resourceId: driveResource.resourceId,
+  externalId: "empty-acl-roadmap",
+  sourceType: "document",
+  title: "Empty ACL roadmap",
+  body: "This restricted item has no principals and must fail closed.",
+  visibility: "restricted",
+  aclStatus: "current",
+  acls: [],
+});
+await contentDb.upsertContentItem({
+  workspaceId: workspace.workspaceId,
+  connectorId: driveConnector.connectorId,
+  resourceId: hiddenResource.resourceId,
+  externalId: "hidden-resource-roadmap",
+  sourceType: "document",
+  title: "Disabled resource roadmap",
+  body: "This content belongs to a disabled resource.",
+  visibility: "workspace",
+  aclStatus: "current",
+});
+const ownerSearch = await contentDb.authorizedSearch({
+  workspaceId: workspace.workspaceId,
+  userId: ownerUser.userId,
+  query: "roadmap",
+  provider: "gdrive",
+});
+ok("owner search sees workspace and direct ACL content", ownerSearch.some((item) => item.itemId === workspaceContent.itemId) && ownerSearch.some((item) => item.itemId === ownerContent.itemId));
+ok("owner search does not bypass group ACL", !ownerSearch.some((item) => item.itemId === groupContent.itemId));
+const viewerSearch = await contentDb.authorizedSearch({
+  workspaceId: workspace.workspaceId,
+  userId: viewerMembership.userId,
+  query: "roadmap",
+});
+ok("viewer search sees workspace and matching group ACL", viewerSearch.some((item) => item.itemId === workspaceContent.itemId) && viewerSearch.some((item) => item.itemId === groupContent.itemId));
+ok("viewer search cannot see direct owner ACL", !viewerSearch.some((item) => item.itemId === ownerContent.itemId));
+ok("stale, empty ACL, and disabled resources fail closed", viewerSearch.length === 2, JSON.stringify(viewerSearch));
+eq("empty search query rejects", await contentDb.authorizedSearch({ workspaceId: workspace.workspaceId, userId: ownerUser.userId, query: " " }).then(() => "accepted", error => error.message), "query is required");
+eq("oversized content rejects", await contentDb.upsertContentItem({
+  workspaceId: workspace.workspaceId,
+  connectorId: driveConnector.connectorId,
+  externalId: "too-large",
+  sourceType: "document",
+  title: "Too large",
+  body: "x".repeat(2_000_001),
+}).then(() => "accepted", error => error.message), "content exceeds 2 MB limit");
+
+const includePolicy = await contentDb.upsertConnectorPolicy({
+  workspaceId: workspace.workspaceId,
+  connectorId: driveConnector.connectorId,
+  effect: "include",
+  field: "resourceId",
+  operator: "equals",
+  values: ["shared-drive-1"],
+});
+const excludePolicy = await contentDb.upsertConnectorPolicy({
+  workspaceId: workspace.workspaceId,
+  connectorId: driveConnector.connectorId,
+  effect: "exclude",
+  field: "path",
+  operator: "starts_with",
+  values: ["/engineering/private"],
+});
+ok("connector policy includes an allowed drive", await contentDb.connectorContentAllowed(workspace.workspaceId, driveConnector.connectorId, {
+  provider: "gdrive", resourceId: "shared-drive-1", owner: "", mimeType: "text/plain", path: "/engineering/public", sourceType: "document",
+}));
+ok("connector exclusion overrides inclusion", !(await contentDb.connectorContentAllowed(workspace.workspaceId, driveConnector.connectorId, {
+  provider: "gdrive", resourceId: "shared-drive-1", owner: "", mimeType: "text/plain", path: "/engineering/private/payroll", sourceType: "document",
+})));
+ok("connector policies list by workspace", (await contentDb.listConnectorPolicies(workspace.workspaceId)).length === 2);
+ok("connector policy can be deleted", await contentDb.deleteConnectorPolicy(workspace.workspaceId, excludePolicy.policyId));
+ok("other connector policy remains", (await contentDb.listConnectorPolicies(workspace.workspaceId)).some((policy) => policy.policyId === includePolicy.policyId));
+
+const syncRun = await contentDb.startConnectorSync(workspace.workspaceId, driveConnector.connectorId);
+const finishedSync = await contentDb.finishConnectorSync({
+  workspaceId: workspace.workspaceId,
+  runId: syncRun.runId,
+  status: "succeeded",
+  cursorValue: "cursor-2",
+  itemsSeen: 8,
+  itemsWritten: 6,
+  itemsDeleted: 1,
+});
+ok("connector sync records completion and counts", finishedSync?.status === "succeeded" && finishedSync.itemsWritten === 6);
+ok("finished sync cannot be finished twice", await contentDb.finishConnectorSync({ workspaceId: workspace.workspaceId, runId: syncRun.runId, status: "failed" }) === null);
+eq("latest sync is available per connector", (await contentDb.latestConnectorSyncs(workspace.workspaceId)).map((run) => run.runId), [syncRun.runId]);
+
+const exchange = await contentDb.createChatExchange({
+  workspaceId: workspace.workspaceId,
+  userId: viewerMembership.userId,
+  question: "What is the rollout roadmap?",
+  answer: "The rollout adds a permission-aware assistant [1].",
+  citationItemIds: [groupContent.itemId],
+});
+ok("chat exchange creates a user-owned thread", (await contentDb.listChatThreads(workspace.workspaceId, viewerMembership.userId))[0].threadId === exchange.threadId);
+ok("authorized chat citation renders", (await contentDb.listAuthorizedChatMessages(workspace.workspaceId, viewerMembership.userId, exchange.threadId))[1].citations.length === 1);
+await enterprise.replaceGroupMembers(workspace.workspaceId, rolloutGroup.groupId, []);
+ok("historical chat citation disappears after ACL revocation", (await contentDb.listAuthorizedChatMessages(workspace.workspaceId, viewerMembership.userId, exchange.threadId))[1].citations.length === 0);
+ok("another user cannot read the chat thread", (await contentDb.listAuthorizedChatMessages(workspace.workspaceId, ownerUser.userId, exchange.threadId)).length === 0);
+ok("deleted content disappears from search", await contentDb.markContentDeleted(workspace.workspaceId, driveConnector.connectorId, "workspace-roadmap"));
+ok("deleted content is no longer returned", !(await contentDb.authorizedSearch({ workspaceId: workspace.workspaceId, userId: ownerUser.userId, query: "permission-aware" })).some((item) => item.itemId === workspaceContent.itemId));
+const rateOne = await enterprise.consumeRateLimit({ workspaceId: workspace.workspaceId, userId: ownerUser.userId, action: "search-test", limit: 2 });
+const rateTwo = await enterprise.consumeRateLimit({ workspaceId: workspace.workspaceId, userId: ownerUser.userId, action: "search-test", limit: 2 });
+const rateThree = await enterprise.consumeRateLimit({ workspaceId: workspace.workspaceId, userId: ownerUser.userId, action: "search-test", limit: 2 });
+ok("rate limit permits requests through the boundary", rateOne.allowed && rateTwo.allowed);
+ok("rate limit rejects overflow", !rateThree.allowed && rateThree.remaining === 0 && rateThree.retryAfterSeconds > 0);
+const foreignWorkspace = await db.createWorkspace({
+  displayName: "Foreign workspace",
+  datasetName: "foreign-dataset",
+  cogneeApiKey: "foreign-key",
+});
+await enterprise.bootstrapWorkspaceMembership(viewerMembership.userId, foreignWorkspace.workspaceId);
+const foreignConnector = await db.upsertConnector({
+  workspaceId: foreignWorkspace.workspaceId,
+  provider: "gdrive",
+  externalId: "foreign-drive",
+  displayName: "Foreign Drive",
+  capabilities: ["ingest", "query"],
+});
+const foreignContent = await contentDb.upsertContentItem({
+  workspaceId: foreignWorkspace.workspaceId,
+  connectorId: foreignConnector.connectorId,
+  externalId: "foreign-roadmap",
+  sourceType: "document",
+  title: "Foreign roadmap",
+  body: "This permission-aware roadmap belongs to another workspace.",
+  visibility: "workspace",
+  aclStatus: "current",
+});
+ok("content id from another workspace is rejected", (await contentDb.getAuthorizedItemsByIds({
+  workspaceId: workspace.workspaceId,
+  userId: viewerMembership.userId,
+  itemIds: [foreignContent.itemId],
+})).length === 0);
+await db.deleteWorkspace(foreignWorkspace.workspaceId);
 
 // --- tenant_config defaults ---
 const cfg = await db.getTenantConfig(INST);

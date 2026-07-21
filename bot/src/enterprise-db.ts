@@ -612,3 +612,30 @@ export async function listAuditEvents(workspaceId: string, limit = 100): Promise
   );
   return rows.map(auditFromRow);
 }
+
+export async function consumeRateLimit(input: {
+  workspaceId: string;
+  userId: string;
+  action: string;
+  limit: number;
+  windowSeconds?: number;
+}): Promise<{ allowed: boolean; remaining: number; retryAfterSeconds: number }> {
+  const windowSeconds = Math.max(10, Math.min(Math.floor(input.windowSeconds ?? 60), 3600));
+  const limit = Math.max(1, Math.min(Math.floor(input.limit), 10_000));
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const bucket = Math.floor(nowSeconds / windowSeconds);
+  const { rows } = await pool.query(
+    `INSERT INTO request_rate_limits (workspace_id, user_id, action, bucket, request_count)
+     VALUES ($1, $2, $3, $4, 1)
+     ON CONFLICT (workspace_id, user_id, action, bucket) DO UPDATE SET
+       request_count = request_rate_limits.request_count + 1
+     RETURNING request_count`,
+    [input.workspaceId, input.userId, input.action.trim().slice(0, 80), bucket],
+  );
+  const count = Number(rows[0].request_count);
+  return {
+    allowed: count <= limit,
+    remaining: Math.max(0, limit - count),
+    retryAfterSeconds: windowSeconds - nowSeconds % windowSeconds,
+  };
+}

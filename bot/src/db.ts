@@ -235,6 +235,117 @@ export async function initSchema(): Promise<void> {
     );
     CREATE INDEX IF NOT EXISTS audit_events_workspace_time_idx
       ON audit_events (workspace_id, created_at DESC);
+    CREATE TABLE IF NOT EXISTS connector_credentials (
+      connector_id  UUID PRIMARY KEY REFERENCES connectors(connector_id) ON DELETE CASCADE,
+      encrypted_data TEXT NOT NULL,
+      scopes         TEXT[] NOT NULL DEFAULT '{}',
+      expires_at     TIMESTAMPTZ,
+      updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE TABLE IF NOT EXISTS connector_policies (
+      policy_id     UUID PRIMARY KEY,
+      workspace_id  UUID NOT NULL REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
+      connector_id  UUID NOT NULL REFERENCES connectors(connector_id) ON DELETE CASCADE,
+      effect         TEXT NOT NULL CHECK (effect IN ('include', 'exclude')),
+      field          TEXT NOT NULL,
+      operator       TEXT NOT NULL CHECK (operator IN ('equals', 'contains', 'starts_with', 'one_of')),
+      values         TEXT[] NOT NULL,
+      enabled        BOOLEAN NOT NULL DEFAULT true,
+      created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS connector_policies_connector_idx
+      ON connector_policies (workspace_id, connector_id, enabled);
+    CREATE TABLE IF NOT EXISTS connector_sync_runs (
+      run_id         UUID PRIMARY KEY,
+      workspace_id   UUID NOT NULL REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
+      connector_id   UUID NOT NULL REFERENCES connectors(connector_id) ON DELETE CASCADE,
+      status         TEXT NOT NULL CHECK (status IN ('running', 'succeeded', 'failed', 'partial')),
+      cursor_value   TEXT NOT NULL DEFAULT '',
+      items_seen     INT NOT NULL DEFAULT 0,
+      items_written  INT NOT NULL DEFAULT 0,
+      items_deleted  INT NOT NULL DEFAULT 0,
+      error_text     TEXT NOT NULL DEFAULT '',
+      started_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+      finished_at    TIMESTAMPTZ
+    );
+    CREATE INDEX IF NOT EXISTS connector_sync_runs_connector_time_idx
+      ON connector_sync_runs (connector_id, started_at DESC);
+    CREATE TABLE IF NOT EXISTS content_items (
+      item_id          UUID PRIMARY KEY,
+      workspace_id     UUID NOT NULL REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
+      connector_id     UUID NOT NULL REFERENCES connectors(connector_id) ON DELETE CASCADE,
+      resource_id      UUID REFERENCES connector_resources(resource_id) ON DELETE SET NULL,
+      external_id      TEXT NOT NULL,
+      source_type      TEXT NOT NULL,
+      title            TEXT NOT NULL,
+      body             TEXT NOT NULL,
+      url              TEXT NOT NULL DEFAULT '',
+      mime_type        TEXT NOT NULL DEFAULT 'text/plain',
+      owner_key        TEXT NOT NULL DEFAULT '',
+      source_path      TEXT NOT NULL DEFAULT '',
+      visibility       TEXT NOT NULL DEFAULT 'restricted' CHECK (visibility IN ('workspace', 'restricted')),
+      acl_status       TEXT NOT NULL DEFAULT 'stale' CHECK (acl_status IN ('current', 'stale', 'failed')),
+      content_hash     TEXT NOT NULL,
+      metadata         JSONB NOT NULL DEFAULT '{}'::jsonb,
+      source_created_at TIMESTAMPTZ,
+      source_updated_at TIMESTAMPTZ,
+      indexed_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+      last_synced_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+      deleted_at       TIMESTAMPTZ,
+      search_vector    TSVECTOR GENERATED ALWAYS AS (
+        setweight(to_tsvector('simple', coalesce(title, '')), 'A') ||
+        setweight(to_tsvector('simple', coalesce(body, '')), 'B')
+      ) STORED,
+      UNIQUE (connector_id, external_id)
+    );
+    CREATE INDEX IF NOT EXISTS content_items_workspace_idx
+      ON content_items (workspace_id, connector_id, resource_id) WHERE deleted_at IS NULL;
+    CREATE INDEX IF NOT EXISTS content_items_search_idx ON content_items USING GIN (search_vector);
+    CREATE TABLE IF NOT EXISTS content_acl_entries (
+      item_id         UUID NOT NULL REFERENCES content_items(item_id) ON DELETE CASCADE,
+      principal_type  TEXT NOT NULL,
+      principal_key   TEXT NOT NULL,
+      principal       TEXT NOT NULL,
+      created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (item_id, principal)
+    );
+    CREATE INDEX IF NOT EXISTS content_acl_entries_principal_idx
+      ON content_acl_entries (principal, item_id);
+    CREATE TABLE IF NOT EXISTS chat_threads (
+      thread_id      UUID PRIMARY KEY,
+      workspace_id   UUID NOT NULL REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
+      user_id        UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+      title          TEXT NOT NULL,
+      created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS chat_threads_user_time_idx
+      ON chat_threads (workspace_id, user_id, updated_at DESC);
+    CREATE TABLE IF NOT EXISTS chat_messages (
+      message_id     UUID PRIMARY KEY,
+      thread_id      UUID NOT NULL REFERENCES chat_threads(thread_id) ON DELETE CASCADE,
+      role           TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+      content        TEXT NOT NULL,
+      created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS chat_messages_thread_time_idx
+      ON chat_messages (thread_id, created_at, message_id);
+    CREATE TABLE IF NOT EXISTS chat_citations (
+      message_id     UUID NOT NULL REFERENCES chat_messages(message_id) ON DELETE CASCADE,
+      item_id        UUID NOT NULL REFERENCES content_items(item_id) ON DELETE CASCADE,
+      ordinal        INT NOT NULL CHECK (ordinal > 0),
+      PRIMARY KEY (message_id, ordinal),
+      UNIQUE (message_id, item_id)
+    );
+    CREATE TABLE IF NOT EXISTS request_rate_limits (
+      workspace_id UUID NOT NULL REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
+      user_id      UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+      action       TEXT NOT NULL,
+      bucket       BIGINT NOT NULL,
+      request_count INT NOT NULL DEFAULT 1,
+      PRIMARY KEY (workspace_id, user_id, action, bucket)
+    );
     ALTER TABLE preflight_keys ADD COLUMN IF NOT EXISTS label TEXT NOT NULL DEFAULT '';
     ALTER TABLE deliveries ADD COLUMN IF NOT EXISTS error_text TEXT;
     INSERT INTO workspaces
