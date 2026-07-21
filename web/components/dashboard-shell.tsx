@@ -29,8 +29,12 @@ import {
   BookOpen,
   Upload,
   Plus,
+  MessageCircle,
+  ScrollText,
+  ShieldCheck,
+  Trash2,
+  UserCog,
 } from "lucide-react"
-import { SiGithub, SiLinear } from "@icons-pack/react-simple-icons"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -42,11 +46,44 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { api, timeAgo, type Me, type Overview, type Decision, type KeyRow, type Settings, type GraphData } from "@/lib/orin-api"
+import { api, timeAgo, type ConnectorPolicy, type Me, type Overview, type Decision, type KeyRow, type Settings, type GraphData, type WorkspacePermission, type WorkspaceSummary } from "@/lib/orin-api"
+import {
+  AccessView,
+  AskView,
+  AuditView,
+  ConnectorLogo,
+  GroupsView,
+  PeopleView,
+  SearchView,
+} from "@/components/enterprise-views"
 
-type View = "catches" | "decisions" | "repos" | "rules" | "docs" | "graph" | "connectors" | "keys" | "settings"
+type View =
+  | "search"
+  | "chat"
+  | "catches"
+  | "decisions"
+  | "repos"
+  | "rules"
+  | "docs"
+  | "graph"
+  | "connectors"
+  | "people"
+  | "groups"
+  | "access"
+  | "audit"
+  | "keys"
+  | "settings"
 
 const GITHUB_APP_URL = "https://github.com/apps/orinbot"
+
+function workspaceDefaultView(workspace: WorkspaceSummary): View {
+  if (workspace.permissions.includes("search.use")) return "search"
+  if (workspace.permissions.includes("chat.use")) return "chat"
+  if (workspace.permissions.includes("connectors.read")) return "connectors"
+  if (workspace.permissions.includes("people.manage")) return "people"
+  if (workspace.permissions.includes("audit.read")) return "audit"
+  return "repos"
+}
 
 export function DashboardShell({ me }: { me: Me }) {
   const [workspaceId, setWorkspaceId] = useState<string>(() => {
@@ -56,7 +93,7 @@ export function DashboardShell({ me }: { me: Me }) {
     }
     return me.workspaces[0].workspaceId
   })
-  const [view, setView] = useState<View>("catches")
+  const [view, setView] = useState<View>(() => workspaceDefaultView(me.workspaces.find((workspace) => workspace.workspaceId === workspaceId) ?? me.workspaces[0]))
   const [query, setQuery] = useState("")
   const [overview, setOverview] = useState<Overview | null>(null)
   const [decisions, setDecisions] = useState<Decision[] | null>(null)
@@ -64,7 +101,10 @@ export function DashboardShell({ me }: { me: Me }) {
   const [selectedDecision, setSelectedDecision] = useState<string | null>(null)
   const [selectedResource, setSelectedResource] = useState<string | null>(null)
 
-  const workspaceName = me.workspaces.find((workspace) => workspace.workspaceId === workspaceId)?.displayName ?? ""
+  const workspace = me.workspaces.find((item) => item.workspaceId === workspaceId) ?? me.workspaces[0]
+  const workspaceName = workspace?.displayName ?? ""
+  const allowed = (permission: WorkspacePermission) => workspace?.permissions.includes(permission) ?? false
+  const hasAdmin = allowed("people.manage") || allowed("policies.manage") || allowed("audit.read")
 
   const load = useCallback(async () => {
     setOverview(null)
@@ -96,7 +136,14 @@ export function DashboardShell({ me }: { me: Me }) {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="bg-zinc-900 border-zinc-800 text-zinc-200">
               {me.workspaces.map((workspace) => (
-                <DropdownMenuItem key={workspace.workspaceId} onClick={() => setWorkspaceId(workspace.workspaceId)} className="text-xs">
+                <DropdownMenuItem key={workspace.workspaceId} onClick={() => {
+                  setWorkspaceId(workspace.workspaceId)
+                  setView(workspaceDefaultView(workspace))
+                  setQuery("")
+                  setSelectedCatch(0)
+                  setSelectedDecision(null)
+                  setSelectedResource(null)
+                }} className="text-xs">
                   {workspace.displayName}
                   <span className="ml-auto text-zinc-500">{workspace.decisions}</span>
                 </DropdownMenuItem>
@@ -126,22 +173,36 @@ export function DashboardShell({ me }: { me: Me }) {
         </div>
 
         <div className="px-3 space-y-0.5">
-          <NavItem icon={Inbox} label="Catches" badge={catchBadge || undefined} active={view === "catches"} onClick={() => setView("catches")} />
-          <NavItem icon={CircleUser} label="Decisions" active={view === "decisions"} onClick={() => setView("decisions")} />
+          {allowed("search.use") && <NavItem icon={Search} label="Search" active={view === "search"} onClick={() => setView("search")} />}
+          {allowed("chat.use") && <NavItem icon={MessageCircle} label="Ask Orin" active={view === "chat"} onClick={() => setView("chat")} />}
+          {workspace?.hasGitHubCompatibility && <NavItem icon={Inbox} label="Catches" badge={catchBadge || undefined} active={view === "catches"} onClick={() => setView("catches")} />}
+          {workspace?.hasGitHubCompatibility && <NavItem icon={CircleUser} label="Decisions" active={view === "decisions"} onClick={() => setView("decisions")} />}
         </div>
 
         <div className="mt-5 px-3">
           <div className="px-2 py-1 text-[0.625rem] text-zinc-500 font-medium uppercase tracking-wider">Workspace</div>
           <div className="space-y-0.5 mt-1">
             <NavItem icon={Layers} label="Resources" active={view === "repos"} onClick={() => setView("repos")} />
-            <NavItem icon={BookOpen} label="Rules" active={view === "rules"} onClick={() => setView("rules")} />
-            <NavItem icon={Upload} label="Docs" active={view === "docs"} onClick={() => setView("docs")} />
-            <NavItem icon={LayoutGrid} label="Knowledge graph" active={view === "graph"} onClick={() => setView("graph")} />
-            <NavItem icon={Users} label="Connectors" active={view === "connectors"} onClick={() => setView("connectors")} />
-            <NavItem icon={KeyRound} label="Keys" active={view === "keys"} onClick={() => setView("keys")} />
-            <NavItem icon={SettingsIcon} label="Settings" active={view === "settings"} onClick={() => setView("settings")} />
+            {workspace?.hasGitHubCompatibility && allowed("content.manage") && <NavItem icon={BookOpen} label="Rules" active={view === "rules"} onClick={() => setView("rules")} />}
+            {workspace?.hasGitHubCompatibility && allowed("content.manage") && <NavItem icon={Upload} label="Docs" active={view === "docs"} onClick={() => setView("docs")} />}
+            {workspace?.hasGitHubCompatibility && allowed("search.use") && <NavItem icon={LayoutGrid} label="Knowledge graph" active={view === "graph"} onClick={() => setView("graph")} />}
+            {allowed("connectors.read") && <NavItem icon={Users} label="Connectors" active={view === "connectors"} onClick={() => setView("connectors")} />}
+            {workspace?.hasGitHubCompatibility && allowed("settings.manage") && <NavItem icon={KeyRound} label="Keys" active={view === "keys"} onClick={() => setView("keys")} />}
+            {workspace?.hasGitHubCompatibility && allowed("settings.manage") && <NavItem icon={SettingsIcon} label="Settings" active={view === "settings"} onClick={() => setView("settings")} />}
           </div>
         </div>
+
+        {hasAdmin && (
+          <div className="mt-5 px-3">
+            <div className="px-2 py-1 text-[0.625rem] text-zinc-500 font-medium uppercase tracking-wider">Administration</div>
+            <div className="space-y-0.5 mt-1">
+              {allowed("people.manage") && <NavItem icon={UserCog} label="People" active={view === "people"} onClick={() => setView("people")} />}
+              {allowed("people.manage") && <NavItem icon={Users} label="Groups" active={view === "groups"} onClick={() => setView("groups")} />}
+              {allowed("policies.manage") && <NavItem icon={ShieldCheck} label="Feature access" active={view === "access"} onClick={() => setView("access")} />}
+              {allowed("audit.read") && <NavItem icon={ScrollText} label="Audit log" active={view === "audit"} onClick={() => setView("audit")} />}
+            </div>
+          </div>
+        )}
 
         {overview && overview.installedRepos.length > 0 && (
           <div className="mt-5 px-3">
@@ -207,6 +268,8 @@ export function DashboardShell({ me }: { me: Me }) {
       </div>
 
       {/* ── Views ─────────────────────────────────────────────────────── */}
+      {view === "search" && <SearchView key={workspaceId} workspaceId={workspaceId} />}
+      {view === "chat" && <AskView key={workspaceId} workspaceId={workspaceId} />}
       {view === "catches" && (
         <CatchesView overview={overview} decisions={decisions} query={query} selected={selectedCatch} onSelect={setSelectedCatch} />
       )}
@@ -219,7 +282,11 @@ export function DashboardShell({ me }: { me: Me }) {
       {view === "rules" && <RulesView workspaceId={workspaceId} overview={overview} />}
       {view === "docs" && <DocsView workspaceId={workspaceId} overview={overview} />}
       {view === "graph" && <GraphView workspaceId={workspaceId} workspaceName={workspaceName} />}
-      {view === "connectors" && <ConnectorsView workspaceId={workspaceId} overview={overview} onChange={load} />}
+      {view === "connectors" && <ConnectorsView workspaceId={workspaceId} overview={overview} onChange={load} canManage={allowed("connectors.manage")} canManagePolicies={allowed("policies.manage")} />}
+      {view === "people" && <PeopleView key={workspaceId} workspaceId={workspaceId} currentUserId={me.userId} />}
+      {view === "groups" && <GroupsView key={workspaceId} workspaceId={workspaceId} />}
+      {view === "access" && <AccessView key={workspaceId} workspaceId={workspaceId} />}
+      {view === "audit" && <AuditView key={workspaceId} workspaceId={workspaceId} />}
       {view === "keys" && <KeysView workspaceId={workspaceId} overview={overview} />}
       {view === "settings" && <SettingsView workspaceId={workspaceId} />}
     </div>
@@ -1407,65 +1474,74 @@ function ConnectorsView({
   workspaceId,
   overview,
   onChange,
+  canManage,
+  canManagePolicies,
 }: {
   workspaceId: string
   overview: Overview | null
   onChange: () => Promise<void>
+  canManage: boolean
+  canManagePolicies: boolean
 }) {
   const [busy, setBusy] = useState<string | null>(null)
+  const [error, setError] = useState("")
   if (!overview) return <Loading />
   const connectorFor = (provider: string) => overview.connectors.find((connector) => connector.provider === provider)
-  const github = connectorFor("github")
-  const slack = connectorFor("slack")
-  const linear = connectorFor("linear")
-  const rows = [
+  const catalog = [
     {
-      Icon: SiGithub,
+      provider: "github",
       name: "GitHub",
-      desc: github
-        ? `${github.displayName}. Reads decisions and checks changes across ${overview.installedRepos.length} repo${overview.installedRepos.length === 1 ? "" : "s"}.`
-        : "Capture decisions from pull requests and issues, then check new changes against them.",
-      connector: github,
+      desc: "Pull requests, issues, decisions, rules, and change checks.",
       href: GITHUB_APP_URL,
-      action: github ? "Manage" : "Connect GitHub",
+      action: "Connect GitHub",
+      available: true,
     },
     {
-      Icon: SlackIcon,
+      provider: "slack",
       name: "Slack",
-      desc: slack
-        ? `${slack.displayName}. Answers questions in channels and records decisions from reactions.`
-        : "Ask questions in channels and record decisions from the conversations where they happen.",
-      connector: slack,
+      desc: "Channel conversations, questions, reactions, and recorded decisions.",
       href: "https://orin-bot.duckdns.org/slack/install",
-      action: slack ? "Connected" : "Connect Slack",
+      action: "Connect Slack",
+      available: true,
     },
     {
-      Icon: SiLinear,
+      provider: "linear",
       name: "Linear",
-      desc: linear
-        ? `${linear.displayName}. Answers in issues and warns when planned work conflicts with memory.`
-        : "Bring decision context into issues and warn when planned work repeats a rejected idea.",
-      connector: linear,
+      desc: "Issues, project context, planning questions, and decision warnings.",
       href: "https://orin-bot.duckdns.org/linear/install",
-      action: linear ? "Connected" : "Connect Linear",
+      action: "Connect Linear",
+      available: true,
     },
+    { provider: "gdrive", name: "Google Drive", desc: "Docs, Sheets, Slides, text files, shared drives, and source ACLs.", href: api.googleDriveConnectUrl(workspaceId), action: "Connect Google Drive", available: true },
+    { provider: "onedrive", name: "OneDrive", desc: "Microsoft 365 files with inherited and direct permissions.", href: "", action: "Planned", available: false },
+    { provider: "sharepoint", name: "SharePoint", desc: "Sites, document libraries, pages, and Microsoft groups.", href: "", action: "Planned", available: false },
+    { provider: "confluence", name: "Confluence", desc: "Spaces, pages, attachments, comments, and page restrictions.", href: "", action: "Planned", available: false },
+    { provider: "notion", name: "Notion", desc: "Pages, databases, teamspaces, and shared workspace knowledge.", href: "", action: "Planned", available: false },
+    { provider: "jira", name: "Jira", desc: "Projects, issues, comments, and permission-aware delivery context.", href: "", action: "Planned", available: false },
+    { provider: "dropbox", name: "Dropbox", desc: "Team folders, files, shared links, and group permissions.", href: "", action: "Planned", available: false },
+    { provider: "box", name: "Box", desc: "Enterprise files, folders, collaborations, and access controls.", href: "", action: "Planned", available: false },
   ]
-  for (const connector of overview.connectors.filter((item) => !["github", "slack", "linear"].includes(item.provider))) {
+  const rows = catalog.map((item) => ({ ...item, connector: connectorFor(item.provider) }))
+  for (const connector of overview.connectors.filter((item) => !catalog.some((entry) => entry.provider === item.provider))) {
     rows.push({
-      Icon: Network,
+      provider: connector.provider,
       name: connector.provider.charAt(0).toUpperCase() + connector.provider.slice(1),
       desc: `${connector.displayName}. This connector shares the selected workspace memory.`,
       connector,
       href: "",
       action: "Connected",
+      available: true,
     })
   }
 
   const setConnectorEnabled = async (connectorId: string, enabled: boolean) => {
     setBusy(connectorId)
+    setError("")
     try {
       await api.setConnectorEnabled(workspaceId, connectorId, enabled)
       await onChange()
+    } catch (cause) {
+      setError((cause as Error).message)
     } finally {
       setBusy(null)
     }
@@ -1473,9 +1549,39 @@ function ConnectorsView({
 
   const setResourceEnabled = async (resourceId: string, enabled: boolean) => {
     setBusy(resourceId)
+    setError("")
     try {
       await api.setResourceEnabled(workspaceId, resourceId, enabled)
       await onChange()
+    } catch (cause) {
+      setError((cause as Error).message)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const syncConnector = async (connectorId: string) => {
+    setBusy(`sync:${connectorId}`)
+    setError("")
+    try {
+      await api.syncConnector(workspaceId, connectorId)
+      setTimeout(() => void onChange(), 1500)
+    } catch (cause) {
+      setError((cause as Error).message)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const disconnectDrive = async (connectorId: string) => {
+    if (!window.confirm("Disconnect Google Drive and revoke its stored credentials? Indexed content will become unavailable.")) return
+    setBusy(`disconnect:${connectorId}`)
+    setError("")
+    try {
+      await api.disconnectGoogleDrive(workspaceId, connectorId)
+      await onChange()
+    } catch (cause) {
+      setError((cause as Error).message)
     } finally {
       setBusy(null)
     }
@@ -1486,46 +1592,47 @@ function ConnectorsView({
   return (
     <FullPanel title="Connectors" subtitle="One workspace memory with switchable sources. Connect only the tools your team uses." rail={<ConnectorsRail />}>
       <div className="space-y-3">
+        {error && <div className="rounded-lg border border-red-900/50 bg-red-950/20 px-4 py-3 text-red-300 text-xs">{error}</div>}
         {rows.map((r) => {
           const connector = r.connector
+          const latestSync = connector ? overview.syncs.find((sync) => sync.connectorId === connector.connectorId) : undefined
           return <div key={r.name} className={`${card} p-5 flex items-center justify-between gap-6`}>
             <div className="flex items-start gap-3.5 min-w-0">
               <div className="w-9 h-9 rounded-lg bg-zinc-800/80 border border-zinc-700/50 flex items-center justify-center shrink-0">
-                <r.Icon className="w-[1.125rem] h-[1.125rem] text-white" />
+                <ConnectorLogo provider={r.provider} className="w-[1.125rem] h-[1.125rem] text-white" />
               </div>
               <div className="min-w-0">
-                <div className="text-white text-sm font-medium flex items-center gap-2">
+                <h3 className="text-white text-sm font-medium flex items-center gap-2">
                   {r.name}
                   {connector && (
-                    <span className={`flex items-center gap-1 text-[0.625rem] font-normal ${connector.status === "active" ? "text-emerald-400" : "text-amber-400"}`}>
-                      <span className={`w-1.5 h-1.5 rounded-full ${connector.status === "active" ? "bg-emerald-500" : "bg-amber-500"}`} /> {connector.status}
+                    <span className={`flex items-center gap-1 text-[0.625rem] font-normal ${connector.status === "active" ? "text-emerald-400" : connector.status === "error" ? "text-red-400" : "text-amber-400"}`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${connector.status === "active" ? "bg-emerald-500" : connector.status === "error" ? "bg-red-500" : "bg-amber-500"}`} /> {connector.status}
                     </span>
                   )}
-                </div>
+                </h3>
                 <div className="text-zinc-500 text-xs mt-1 leading-relaxed">{r.desc}</div>
                 {connector && connector.capabilities.length > 0 && (
                   <div className="text-zinc-600 text-[0.625rem] mt-1.5">{connector.capabilities.join(" · ")}</div>
                 )}
+                {latestSync && <div className={`text-[0.625rem] mt-1.5 ${latestSync.status === "failed" ? "text-red-400" : "text-zinc-600"}`}>Last sync {latestSync.status} · {latestSync.itemsWritten} written · {timeAgo(latestSync.finishedAt || latestSync.startedAt)}</div>}
               </div>
             </div>
-            {connector ? (
-              <button
-                onClick={() => setConnectorEnabled(connector.connectorId, connector.status !== "active")}
-                disabled={busy === connector.connectorId}
-                className="shrink-0 text-xs px-3.5 py-2 rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800 transition-colors disabled:opacity-40"
-              >
-                {busy === connector.connectorId ? "Saving" : connector.status === "active" ? "Disable" : "Enable"}
-              </button>
-            ) : r.href ? (
+            {connector && canManage ? (
+              <div className="flex items-center gap-2">
+                {connector.provider === "gdrive" && <button onClick={() => syncConnector(connector.connectorId)} disabled={busy !== null} className="text-xs px-3 py-2 rounded-lg border border-zinc-700 text-zinc-300 disabled:opacity-40">{busy === `sync:${connector.connectorId}` ? "Queued" : "Sync now"}</button>}
+                <button onClick={() => setConnectorEnabled(connector.connectorId, connector.status !== "active")} disabled={busy !== null} className="text-xs px-3 py-2 rounded-lg border border-zinc-700 text-zinc-300 disabled:opacity-40">{busy === connector.connectorId ? "Saving" : connector.status === "active" ? "Disable" : "Enable"}</button>
+                {connector.provider === "gdrive" && <button onClick={() => disconnectDrive(connector.connectorId)} disabled={busy !== null} className="text-xs px-3 py-2 rounded-lg border border-red-950 text-red-400 disabled:opacity-40">Disconnect</button>}
+              </div>
+            ) : !connector && r.href && canManage ? (
               <a
                 href={r.href}
-                target="_blank"
-                rel="noreferrer"
+                target={r.provider === "gdrive" ? undefined : "_blank"}
+                rel={r.provider === "gdrive" ? undefined : "noreferrer"}
                 className="shrink-0 text-xs px-3.5 py-2 rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800 transition-colors"
               >
                 {r.action}
               </a>
-            ) : null}
+            ) : !connector && !r.available ? <span className="text-[0.625rem] uppercase tracking-wide text-zinc-600">Planned</span> : null}
           </div>
         })}
 
@@ -1544,18 +1651,16 @@ function ConnectorsView({
                       <div className="text-zinc-200 text-xs truncate">{resource.displayName}</div>
                       <div className="text-zinc-600 text-[0.625rem] mt-1">{connector?.provider ?? "connector"} · {resource.kind}</div>
                     </div>
-                    <button
-                      onClick={() => setResourceEnabled(resource.resourceId, !resource.enabled)}
-                      disabled={busy === resource.resourceId}
-                      className="text-xs px-3 py-1.5 rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800 transition-colors disabled:opacity-40"
-                    >
-                      {busy === resource.resourceId ? "Saving" : resource.enabled ? "Disable" : "Enable"}
-                    </button>
+                    {canManage ? <button onClick={() => setResourceEnabled(resource.resourceId, !resource.enabled)} disabled={busy === resource.resourceId} className="text-xs px-3 py-1.5 rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800 transition-colors disabled:opacity-40">{busy === resource.resourceId ? "Saving" : resource.enabled ? "Disable" : "Enable"}</button> : <span className={`text-[0.625rem] ${resource.enabled ? "text-emerald-400" : "text-zinc-600"}`}>{resource.enabled ? "included" : "excluded"}</span>}
                   </div>
                 )
               })}
             </div>
           </div>
+        )}
+
+        {canManagePolicies && overview.connectors.some((connector) => connector.provider === "gdrive") && (
+          <DrivePolicyEditor workspaceId={workspaceId} connectorId={overview.connectors.find((connector) => connector.provider === "gdrive")!.connectorId} />
         )}
 
         {/* MCP: syntax-colored config, same treatment as the landing page */}
@@ -1624,6 +1729,97 @@ function ConnectorsView({
         </div>
       </div>
     </FullPanel>
+  )
+}
+
+const policyFields: ConnectorPolicy["field"][] = ["resourceId", "owner", "mimeType", "path", "sourceType"]
+const policyOperators: ConnectorPolicy["operator"][] = ["equals", "contains", "starts_with", "one_of"]
+
+function DrivePolicyEditor({ workspaceId, connectorId }: { workspaceId: string; connectorId: string }) {
+  const [policies, setPolicies] = useState<ConnectorPolicy[] | null>(null)
+  const [effect, setEffect] = useState<ConnectorPolicy["effect"]>("exclude")
+  const [field, setField] = useState<ConnectorPolicy["field"]>("path")
+  const [operator, setOperator] = useState<ConnectorPolicy["operator"]>("contains")
+  const [values, setValues] = useState("")
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState("")
+
+  const load = useCallback(async () => {
+    try {
+      setPolicies((await api.connectorPolicies(workspaceId, connectorId)).policies)
+      setError("")
+    } catch (cause) {
+      setError((cause as Error).message)
+    }
+  }, [connectorId, workspaceId])
+
+  useEffect(() => { void load() }, [load])
+
+  const create = async () => {
+    const parsedValues = values.split(/[\n,]/).map((value) => value.trim()).filter(Boolean)
+    if (parsedValues.length === 0) return
+    setBusy(true)
+    setError("")
+    try {
+      await api.createConnectorPolicy(workspaceId, { connectorId, effect, field, operator, values: parsedValues })
+      setValues("")
+      await load()
+    } catch (cause) {
+      setError((cause as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const remove = async (policyId: string) => {
+    setBusy(true)
+    setError("")
+    try {
+      await api.deleteConnectorPolicy(workspaceId, policyId)
+      await load()
+    } catch (cause) {
+      setError((cause as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className={`${card} overflow-hidden`}>
+      <div className="px-5 py-4 border-b border-zinc-800/50">
+        <div className="text-white text-sm font-medium">Google Drive content policy</div>
+        <div className="text-zinc-500 text-xs mt-1 leading-relaxed">Limit what the connector indexes. Exclude rules always win. Adding an include rule changes the default from all content to matching content only.</div>
+      </div>
+      <div className="p-5 border-b border-zinc-800/50 space-y-3">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+          <select value={effect} onChange={(event) => setEffect(event.target.value as ConnectorPolicy["effect"])} className="h-9 rounded-lg border border-zinc-700 bg-zinc-950 px-3 text-zinc-300 text-xs">
+            <option value="exclude">Exclude</option>
+            <option value="include">Include only</option>
+          </select>
+          <select value={field} onChange={(event) => setField(event.target.value as ConnectorPolicy["field"])} className="h-9 rounded-lg border border-zinc-700 bg-zinc-950 px-3 text-zinc-300 text-xs">
+            {policyFields.map((value) => <option key={value} value={value}>{value}</option>)}
+          </select>
+          <select value={operator} onChange={(event) => setOperator(event.target.value as ConnectorPolicy["operator"])} className="h-9 rounded-lg border border-zinc-700 bg-zinc-950 px-3 text-zinc-300 text-xs">
+            {policyOperators.map((value) => <option key={value} value={value}>{value.replace("_", " ")}</option>)}
+          </select>
+          <button onClick={create} disabled={busy || !values.trim()} className="h-9 rounded-lg bg-white px-4 text-zinc-950 text-xs font-medium disabled:opacity-40">{busy ? "Saving" : "Add policy"}</button>
+        </div>
+        <textarea value={values} onChange={(event) => setValues(event.target.value)} placeholder="One value per line or comma separated, for example /Finance/ or application/pdf" className="min-h-20 w-full resize-y rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-zinc-200 text-xs outline-none placeholder:text-zinc-600" />
+        {error && <div className="rounded-lg border border-red-900/50 bg-red-950/20 px-4 py-3 text-red-300 text-xs">{error}</div>}
+      </div>
+      <div className="divide-y divide-zinc-800/50">
+        {policies?.map((policy) => (
+          <div key={policy.policyId} className="px-5 py-3.5 flex items-center gap-3 text-xs">
+            <span className={`rounded px-2 py-1 ${policy.effect === "exclude" ? "bg-red-950/40 text-red-300" : "bg-emerald-950/40 text-emerald-300"}`}>{policy.effect}</span>
+            <span className="text-zinc-300">{policy.field} {policy.operator.replace("_", " ")}</span>
+            <span className="min-w-0 flex-1 truncate text-zinc-500">{policy.values.join(", ")}</span>
+            <button onClick={() => remove(policy.policyId)} disabled={busy} aria-label="Delete connector policy" className="text-zinc-600 hover:text-red-400 disabled:opacity-40"><Trash2 className="w-4 h-4" /></button>
+          </div>
+        ))}
+        {policies?.length === 0 && <div className="px-5 py-6 text-center text-zinc-600 text-xs">No content policies. All source-authorized Drive content can be indexed.</div>}
+        {policies === null && <div className="px-5 py-6 text-center text-zinc-600 text-xs">Loading policies</div>}
+      </div>
+    </div>
   )
 }
 

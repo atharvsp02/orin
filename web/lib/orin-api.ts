@@ -2,7 +2,10 @@
 // cookie rides along automatically. Every function returns real server data; no mocks.
 
 export interface Me {
+  userId: string;
   login: string;
+  displayName: string;
+  email: string;
   avatar: string;
   workspaces: WorkspaceSummary[];
   installations: Array<{ installationId: number; account: string; decisions: number }>;
@@ -22,8 +25,24 @@ export interface WorkspaceSummary {
   workspaceId: string;
   displayName: string;
   decisions: number;
+  role: WorkspaceRole;
+  permissions: WorkspacePermission[];
+  hasGitHubCompatibility: boolean;
   connectors: ConnectorSummary[];
 }
+
+export type WorkspaceRole = "owner" | "admin" | "member" | "viewer";
+export type WorkspacePermission =
+  | "workspace.read"
+  | "search.use"
+  | "chat.use"
+  | "connectors.read"
+  | "connectors.manage"
+  | "content.manage"
+  | "people.manage"
+  | "policies.manage"
+  | "settings.manage"
+  | "audit.read";
 
 export interface Metrics {
   prsPrevented: number;
@@ -74,6 +93,105 @@ export interface Overview {
   repos: string[]; // repos that already have recorded decisions
   installedRepos: string[]; // repos the App is installed on (live from GitHub)
   links: Array<{ platform: string; externalId: string }>;
+  syncs: ConnectorSync[];
+}
+
+export interface ConnectorSync {
+  runId: string;
+  workspaceId: string;
+  connectorId: string;
+  status: "running" | "succeeded" | "failed" | "partial";
+  cursorValue: string;
+  itemsSeen: number;
+  itemsWritten: number;
+  itemsDeleted: number;
+  errorText: string;
+  startedAt: string;
+  finishedAt?: string;
+}
+
+export interface SearchResult {
+  itemId: string;
+  connectorId: string;
+  resourceId?: string;
+  provider: string;
+  sourceType: string;
+  title: string;
+  snippet: string;
+  url: string;
+  mimeType: string;
+  score: number;
+  sourceUpdatedAt?: string;
+}
+
+export interface WorkspaceMember {
+  workspaceId: string;
+  userId: string;
+  role: WorkspaceRole;
+  status: "active" | "suspended";
+  displayName?: string;
+  primaryEmail?: string;
+  avatarUrl?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WorkspaceGroup {
+  groupId: string;
+  workspaceId: string;
+  displayName: string;
+  externalId?: string;
+  memberCount: number;
+  memberIds: string[];
+  createdAt: string;
+}
+
+export interface PermissionGrant {
+  grantId: string;
+  workspaceId: string;
+  principalType: "role" | "user" | "group";
+  principalId: string;
+  permission: WorkspacePermission;
+  effect: "allow" | "deny";
+  conditions: Record<string, string | string[]>;
+}
+
+export interface ConnectorPolicy {
+  policyId: string;
+  workspaceId: string;
+  connectorId: string;
+  effect: "include" | "exclude";
+  field: "provider" | "resourceId" | "owner" | "mimeType" | "path" | "sourceType";
+  operator: "equals" | "contains" | "starts_with" | "one_of";
+  values: string[];
+  enabled: boolean;
+}
+
+export interface AuditEvent {
+  eventId: string;
+  workspaceId: string;
+  actorUserId?: string;
+  action: string;
+  targetType: string;
+  targetId: string;
+  outcome: "success" | "denied" | "failure";
+  details: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface ChatThread {
+  threadId: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ChatMessage {
+  messageId: string;
+  role: "user" | "assistant";
+  content: string;
+  createdAt: string;
+  citations: SearchResult[];
 }
 
 export interface Decision {
@@ -163,6 +281,62 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ enabled }),
     }),
+  search: (workspaceId: string, query: string, provider?: string) =>
+    req<{ results: SearchResult[] }>(workspacePath(workspaceId, "search"), {
+      method: "POST",
+      body: JSON.stringify({ query, provider }),
+    }),
+  ask: (workspaceId: string, question: string, threadId?: string) =>
+    req<{ threadId: string; answer: string; citations: SearchResult[] }>(workspacePath(workspaceId, "chat"), {
+      method: "POST",
+      body: JSON.stringify({ question, threadId }),
+    }),
+  chatThreads: (workspaceId: string) =>
+    req<{ threads: ChatThread[] }>(workspacePath(workspaceId, "chat")),
+  chatMessages: (workspaceId: string, threadId: string) =>
+    req<{ threadId: string; messages: ChatMessage[] }>(`${workspacePath(workspaceId, "chat")}/${threadId}`),
+  people: (workspaceId: string) => req<{ people: WorkspaceMember[] }>(workspacePath(workspaceId, "people")),
+  invitePerson: (workspaceId: string, email: string, displayName: string, role: WorkspaceRole) =>
+    req<WorkspaceMember>(workspacePath(workspaceId, "people"), {
+      method: "POST",
+      body: JSON.stringify({ email, displayName, role }),
+    }),
+  updatePerson: (workspaceId: string, userId: string, patch: { role?: WorkspaceRole; status?: "active" | "suspended" }) =>
+    req<WorkspaceMember>(`${workspacePath(workspaceId, "people")}/${userId}`, {
+      method: "PUT",
+      body: JSON.stringify(patch),
+    }),
+  groups: (workspaceId: string) => req<{ groups: WorkspaceGroup[] }>(workspacePath(workspaceId, "groups")),
+  createGroup: (workspaceId: string, displayName: string, externalId?: string) =>
+    req<WorkspaceGroup>(workspacePath(workspaceId, "groups"), {
+      method: "POST",
+      body: JSON.stringify({ displayName, externalId }),
+    }),
+  setGroupMembers: (workspaceId: string, groupId: string, userIds: string[]) =>
+    req<{ groupId: string; memberIds: string[] }>(`${workspacePath(workspaceId, "groups")}/${groupId}`, {
+      method: "PUT",
+      body: JSON.stringify({ userIds }),
+    }),
+  deleteGroup: (workspaceId: string, groupId: string) =>
+    req<{ deleted: boolean }>(`${workspacePath(workspaceId, "groups")}/${groupId}`, { method: "DELETE" }),
+  permissionGrants: (workspaceId: string) => req<{ grants: PermissionGrant[] }>(workspacePath(workspaceId, "policies")),
+  createPermissionGrant: (workspaceId: string, input: Omit<PermissionGrant, "grantId" | "workspaceId">) =>
+    req<PermissionGrant>(workspacePath(workspaceId, "policies"), { method: "POST", body: JSON.stringify(input) }),
+  deletePermissionGrant: (workspaceId: string, grantId: string) =>
+    req<{ deleted: boolean }>(`${workspacePath(workspaceId, "policies")}/${grantId}`, { method: "DELETE" }),
+  auditEvents: (workspaceId: string) => req<{ events: AuditEvent[] }>(workspacePath(workspaceId, "audit")),
+  syncs: (workspaceId: string) => req<{ syncs: ConnectorSync[] }>(workspacePath(workspaceId, "syncs")),
+  syncConnector: (workspaceId: string, connectorId: string) =>
+    req<{ accepted: boolean; jobId: string | null }>(`${workspacePath(workspaceId, "syncs")}/${connectorId}`, { method: "POST" }),
+  connectorPolicies: (workspaceId: string, connectorId?: string) =>
+    req<{ policies: ConnectorPolicy[] }>(`${workspacePath(workspaceId, "connectorpolicies")}${connectorId ? `?connectorId=${encodeURIComponent(connectorId)}` : ""}`),
+  createConnectorPolicy: (workspaceId: string, input: Omit<ConnectorPolicy, "policyId" | "workspaceId" | "enabled">) =>
+    req<ConnectorPolicy>(workspacePath(workspaceId, "connectorpolicies"), { method: "POST", body: JSON.stringify(input) }),
+  deleteConnectorPolicy: (workspaceId: string, policyId: string) =>
+    req<{ deleted: boolean }>(`${workspacePath(workspaceId, "connectorpolicies")}/${policyId}`, { method: "DELETE" }),
+  disconnectGoogleDrive: (workspaceId: string, connectorId: string) =>
+    req<{ disconnected: boolean }>(`${workspacePath(workspaceId, "disconnects")}/${connectorId}`, { method: "DELETE" }),
+  googleDriveConnectUrl: (workspaceId: string) => `/v1/connectors/google-drive/start?workspaceId=${encodeURIComponent(workspaceId)}`,
   signInUrl: "/v1/auth/github",
   logoutUrl: "/v1/auth/logout",
 };
