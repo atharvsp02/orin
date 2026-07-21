@@ -1,5 +1,4 @@
-// Dashboard API: session-cookie auth, every route checks the requested installation is one the
-// signed-in user administers (per GitHub, captured at login). Routes: /v1/dash/:inst/<resource>.
+// Dashboard API: session-cookie auth with legacy installation and workspace routes.
 import { createHash, randomBytes } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { config } from "./config.js";
@@ -30,21 +29,54 @@ function readBody(req: IncomingMessage, limit = 100_000): Promise<string> {
   });
 }
 
-/** Router for /v1/dash/*. Returns true when the request was handled. */
+export type DashboardTarget =
+  | { kind: "installation"; installationId: number; resource: string; sub?: string }
+  | { kind: "workspace"; workspaceId: string; resource: string; sub?: string };
+
+export function parseDashboardPath(pathname: string): DashboardTarget | null {
+  const legacy = pathname.match(/^\/v1\/dash\/(\d+)\/([a-z]+)(?:\/([A-Za-z0-9._-]+))?$/);
+  if (legacy) {
+    const installationId = Number(legacy[1]);
+    if (!Number.isSafeInteger(installationId) || installationId <= 0) return null;
+    return {
+      kind: "installation",
+      installationId,
+      resource: legacy[2],
+      sub: legacy[3],
+    };
+  }
+  const workspace = pathname.match(
+    /^\/v1\/workspaces\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/([a-z]+)(?:\/([A-Za-z0-9._-]+))?$/i,
+  );
+  if (!workspace) return null;
+  return {
+    kind: "workspace",
+    workspaceId: workspace[1].toLowerCase(),
+    resource: workspace[2],
+    sub: workspace[3],
+  };
+}
+
+/** Router for dashboard API routes. Returns true when the request was handled. */
 export async function handleDash(req: IncomingMessage, res: ServerResponse, pathname: string): Promise<boolean> {
-  const m = pathname.match(/^\/v1\/dash\/(\d+)\/([a-z]+)(?:\/([A-Za-z0-9._-]+))?$/);
-  if (!m) return false;
-  const inst = Number(m[1]);
-  const resource = m[2];
-  const sub = m[3];
+  const target = parseDashboardPath(pathname);
+  if (!target) return false;
 
   const session = sessionFrom(req);
   if (!session) {
     send(res, 401, { error: "not signed in" });
     return true;
   }
-  if (!session.ids.includes(inst)) {
-    send(res, 403, { error: "no access to this installation" });
+  const workspace = target.kind === "workspace"
+    ? await db.getWorkspace(target.workspaceId)
+    : await db.getWorkspaceByInstallation(target.installationId);
+  if (target.kind === "workspace" && !workspace) {
+    send(res, 404, { error: "unknown workspace" });
+    return true;
+  }
+  const inst = target.kind === "installation" ? target.installationId : workspace?.legacyInstallationId;
+  if (inst === undefined || !session.ids.includes(inst)) {
+    send(res, 403, { error: `no access to this ${target.kind}` });
     return true;
   }
   const installation = await db.getInstallation(inst);
@@ -53,13 +85,19 @@ export async function handleDash(req: IncomingMessage, res: ServerResponse, path
     return true;
   }
 
+  const resource = target.resource;
+  const sub = target.sub;
+
   if (resource === "overview" && req.method === "GET") {
-    const [metrics, recent, repos, links] = await Promise.all([
+    const currentWorkspace = workspace ?? await db.getWorkspaceByInstallation(inst);
+    const [metrics, recent, repos, links, connectors] = await Promise.all([
       db.metricsAll(inst),
       db.recentDeliveries(inst, 20),
       db.distinctRepos(inst),
       db.linksFor(inst),
+      currentWorkspace ? db.listConnectors(currentWorkspace.workspaceId) : [],
     ]);
+    const resources = (await Promise.all(connectors.map((connector) => db.listConnectorResources(connector.connectorId)))).flat();
     // Repos the App is INSTALLED on, straight from GitHub (always current, covers adds/removes).
     let installedRepos: string[] = [];
     try {
@@ -69,7 +107,33 @@ export async function handleDash(req: IncomingMessage, res: ServerResponse, path
     } catch (e) {
       console.warn("overview: listing installed repos failed:", (e as Error).message);
     }
-    send(res, 200, { account: installation.githubAccount, metrics, recent, repos, links, installedRepos });
+    send(res, 200, {
+      account: installation.githubAccount,
+      workspace: currentWorkspace ? {
+        workspaceId: currentWorkspace.workspaceId,
+        displayName: currentWorkspace.displayName,
+      } : null,
+      connectors: connectors.map(({ connectorId, provider, displayName, status, capabilities }) => ({
+        connectorId,
+        provider,
+        displayName,
+        status,
+        capabilities,
+      })),
+      resources: resources.map(({ resourceId, connectorId, externalId, kind, displayName, enabled }) => ({
+        resourceId,
+        connectorId,
+        externalId,
+        kind,
+        displayName,
+        enabled,
+      })),
+      metrics,
+      recent,
+      repos,
+      links,
+      installedRepos,
+    });
     return true;
   }
 

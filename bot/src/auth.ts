@@ -162,15 +162,32 @@ export async function handleMe(req: IncomingMessage, res: ServerResponse): Promi
   const s = sessionFrom(req);
   if (!s) return send(res, 401, { error: "not signed in" });
   const installations = [];
+  const workspaces = [];
   for (const id of s.ids) {
     const inst = await db.getInstallation(id);
     if (inst) {
+      const decisions = await db.countDecisions(id);
       installations.push({
         installationId: id,
         account: inst.githubAccount,
-        decisions: await db.countDecisions(id),
+        decisions,
       });
+      const workspace = await db.getWorkspaceByInstallation(id);
+      if (workspace) {
+        const connectors = await db.listConnectors(workspace.workspaceId);
+        workspaces.push({
+          workspaceId: workspace.workspaceId,
+          displayName: workspace.displayName,
+          decisions,
+          connectors: connectors.map(({ provider, displayName, status, capabilities }) => ({
+            provider,
+            displayName,
+            status,
+            capabilities,
+          })),
+        });
+      }
     }
   }
-  send(res, 200, { login: s.login, avatar: s.avatar, installations });
+  send(res, 200, { login: s.login, avatar: s.avatar, workspaces, installations });
 }

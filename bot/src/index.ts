@@ -148,7 +148,7 @@ async function main() {
       void handleMe(req, res);
       return;
     }
-    if (pathname.startsWith("/v1/dash/")) {
+    if (pathname.startsWith("/v1/dash/") || pathname.startsWith("/v1/workspaces/")) {
       void handleDash(req, res, pathname).then((handled) => {
         if (!handled) res.writeHead(404, { "Content-Type": "application/json" }).end('{"error":"not found"}');
       });
