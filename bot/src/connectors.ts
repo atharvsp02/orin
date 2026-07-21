@@ -6,6 +6,7 @@ export type ConnectorEventType = "decision" | "proposal" | "question" | "feedbac
 
 export interface Workspace {
   workspaceId: string;
+  legacyInstallationId?: number;
   displayName: string;
   datasetName: string;
   cogneeApiKey: string;

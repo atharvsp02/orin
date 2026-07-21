@@ -1,9 +1,20 @@
+import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { config } from "./config.js";
+import {
+  CONNECTOR_CAPABILITIES,
+  normalizeCapabilities,
+  normalizeConnectorRef,
+  type ConnectorAccount,
+  type ConnectorResource,
+  type ConnectorStatus,
+  type Workspace,
+} from "./connectors.js";
 import { decrypt, encrypt } from "./crypto.js";
 import type { DecisionRecord, Installation, TenantConfig } from "./types.js";
 
 const pool = new Pool({ connectionString: config.databaseUrl });
+const SYNTHETIC_INSTALLATION_FLOOR = 1_000_000_000_000;
 
 export async function initSchema(): Promise<void> {
   await pool.query(`
@@ -105,9 +116,293 @@ export async function initSchema(): Promise<void> {
       created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
       PRIMARY KEY (installation_id, filename)
     );
+    CREATE TABLE IF NOT EXISTS workspaces (
+      workspace_id          UUID PRIMARY KEY,
+      legacy_installation_id BIGINT UNIQUE,
+      display_name          TEXT NOT NULL,
+      dataset_name          TEXT NOT NULL,
+      cognee_api_key        TEXT NOT NULL,
+      created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at            TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE TABLE IF NOT EXISTS connectors (
+      connector_id UUID PRIMARY KEY,
+      workspace_id UUID NOT NULL REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
+      provider     TEXT NOT NULL,
+      external_id  TEXT NOT NULL,
+      display_name TEXT NOT NULL,
+      status        TEXT NOT NULL DEFAULT 'active',
+      capabilities  TEXT[] NOT NULL DEFAULT '{}',
+      created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE (provider, external_id)
+    );
+    CREATE TABLE IF NOT EXISTS connector_resources (
+      resource_id UUID PRIMARY KEY,
+      connector_id UUID NOT NULL REFERENCES connectors(connector_id) ON DELETE CASCADE,
+      external_id TEXT NOT NULL,
+      kind         TEXT NOT NULL,
+      display_name TEXT NOT NULL,
+      enabled      BOOLEAN NOT NULL DEFAULT true,
+      created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE (connector_id, kind, external_id)
+    );
     ALTER TABLE preflight_keys ADD COLUMN IF NOT EXISTS label TEXT NOT NULL DEFAULT '';
     ALTER TABLE deliveries ADD COLUMN IF NOT EXISTS error_text TEXT;
+    INSERT INTO workspaces
+      (workspace_id, legacy_installation_id, display_name, dataset_name, cognee_api_key, created_at, updated_at)
+    SELECT
+      md5('orin-workspace:' || installation_id::text)::uuid,
+      installation_id,
+      github_account,
+      dataset_name,
+      cognee_api_key,
+      created_at,
+      now()
+    FROM installations
+    ON CONFLICT (legacy_installation_id) DO UPDATE SET
+      display_name = EXCLUDED.display_name,
+      dataset_name = EXCLUDED.dataset_name,
+      cognee_api_key = EXCLUDED.cognee_api_key,
+      updated_at = now();
+    INSERT INTO connectors
+      (connector_id, workspace_id, provider, external_id, display_name, status, capabilities)
+    SELECT
+      md5('orin-connector:github:' || i.installation_id::text)::uuid,
+      w.workspace_id,
+      'github',
+      i.installation_id::text,
+      i.github_account,
+      'active',
+      ARRAY['ingest', 'query', 'record', 'warn', 'deliver']::TEXT[]
+    FROM installations i
+    JOIN workspaces w ON w.legacy_installation_id = i.installation_id
+    WHERE i.installation_id < ${SYNTHETIC_INSTALLATION_FLOOR}
+    ON CONFLICT (provider, external_id) DO UPDATE SET
+      workspace_id = EXCLUDED.workspace_id,
+      display_name = EXCLUDED.display_name,
+      status = EXCLUDED.status,
+      capabilities = EXCLUDED.capabilities,
+      updated_at = now();
+    INSERT INTO connectors
+      (connector_id, workspace_id, provider, external_id, display_name, status, capabilities)
+    SELECT
+      md5('orin-connector:' || l.platform || ':' || l.external_id)::uuid,
+      w.workspace_id,
+      l.platform,
+      l.external_id,
+      l.platform || ':' || l.external_id,
+      'active',
+      ARRAY['ingest', 'query', 'record', 'warn', 'deliver']::TEXT[]
+    FROM tenant_links l
+    JOIN workspaces w ON w.legacy_installation_id = l.installation_id
+    ON CONFLICT (provider, external_id) DO UPDATE SET
+      workspace_id = EXCLUDED.workspace_id,
+      status = EXCLUDED.status,
+      updated_at = now();
+    INSERT INTO connector_resources
+      (resource_id, connector_id, external_id, kind, display_name, enabled)
+    SELECT DISTINCT
+      md5('orin-resource:' || c.connector_id::text || ':repository:' || d.repo)::uuid,
+      c.connector_id,
+      d.repo,
+      'repository',
+      d.repo,
+      true
+    FROM decision_records d
+    JOIN workspaces w ON w.legacy_installation_id = d.installation_id
+    JOIN connectors c ON c.workspace_id = w.workspace_id AND c.provider = 'github'
+    WHERE d.repo <> ''
+    ON CONFLICT (connector_id, kind, external_id) DO UPDATE SET
+      display_name = EXCLUDED.display_name,
+      updated_at = now();
   `);
+}
+
+function workspaceFromRow(row: Record<string, unknown>): Workspace {
+  return {
+    workspaceId: String(row.workspace_id),
+    legacyInstallationId: row.legacy_installation_id == null ? undefined : Number(row.legacy_installation_id),
+    displayName: String(row.display_name),
+    datasetName: String(row.dataset_name),
+    cogneeApiKey: decrypt(String(row.cognee_api_key)),
+    createdAt: String(row.created_at),
+  };
+}
+
+function connectorFromRow(row: Record<string, unknown>): ConnectorAccount {
+  return {
+    connectorId: String(row.connector_id),
+    workspaceId: String(row.workspace_id),
+    provider: String(row.provider),
+    externalId: String(row.external_id),
+    displayName: String(row.display_name),
+    status: String(row.status) as ConnectorStatus,
+    capabilities: normalizeCapabilities(Array.isArray(row.capabilities) ? row.capabilities.map(String) : []),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+function resourceFromRow(row: Record<string, unknown>): ConnectorResource {
+  return {
+    resourceId: String(row.resource_id),
+    connectorId: String(row.connector_id),
+    externalId: String(row.external_id),
+    kind: String(row.kind),
+    displayName: String(row.display_name),
+    enabled: Boolean(row.enabled),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+export async function createWorkspace(input: {
+  workspaceId?: string;
+  displayName: string;
+  datasetName: string;
+  cogneeApiKey: string;
+}): Promise<Workspace> {
+  const workspaceId = input.workspaceId ?? randomUUID();
+  const { rows } = await pool.query(
+    `INSERT INTO workspaces (workspace_id, display_name, dataset_name, cognee_api_key)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (workspace_id) DO UPDATE SET
+       display_name = EXCLUDED.display_name,
+       dataset_name = EXCLUDED.dataset_name,
+       cognee_api_key = EXCLUDED.cognee_api_key,
+       updated_at = now()
+     RETURNING *`,
+    [workspaceId, input.displayName, input.datasetName, encrypt(input.cogneeApiKey)],
+  );
+  return workspaceFromRow(rows[0]);
+}
+
+export async function getWorkspace(workspaceId: string): Promise<Workspace | null> {
+  const { rows } = await pool.query(`SELECT * FROM workspaces WHERE workspace_id = $1`, [workspaceId]);
+  return rows[0] ? workspaceFromRow(rows[0]) : null;
+}
+
+export async function getWorkspaceByInstallation(installationId: number): Promise<Workspace | null> {
+  const { rows } = await pool.query(`SELECT * FROM workspaces WHERE legacy_installation_id = $1`, [installationId]);
+  return rows[0] ? workspaceFromRow(rows[0]) : null;
+}
+
+export async function deleteWorkspace(workspaceId: string): Promise<void> {
+  await pool.query(`DELETE FROM workspaces WHERE workspace_id = $1`, [workspaceId]);
+}
+
+export async function upsertConnector(input: {
+  connectorId?: string;
+  workspaceId: string;
+  provider: string;
+  externalId: string;
+  displayName: string;
+  status?: ConnectorStatus;
+  capabilities: readonly string[];
+}): Promise<ConnectorAccount> {
+  const ref = normalizeConnectorRef(input);
+  const capabilities = normalizeCapabilities(input.capabilities);
+  const { rows } = await pool.query(
+    `INSERT INTO connectors
+       (connector_id, workspace_id, provider, external_id, display_name, status, capabilities)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     ON CONFLICT (provider, external_id) DO UPDATE SET
+       workspace_id = EXCLUDED.workspace_id,
+       display_name = EXCLUDED.display_name,
+       status = EXCLUDED.status,
+       capabilities = EXCLUDED.capabilities,
+       updated_at = now()
+     RETURNING *`,
+    [input.connectorId ?? randomUUID(), input.workspaceId, ref.provider, ref.externalId, input.displayName, input.status ?? "active", capabilities],
+  );
+  return connectorFromRow(rows[0]);
+}
+
+export async function getConnector(provider: string, externalId: string): Promise<ConnectorAccount | null> {
+  const ref = normalizeConnectorRef({ provider, externalId });
+  const { rows } = await pool.query(
+    `SELECT * FROM connectors WHERE provider = $1 AND external_id = $2`,
+    [ref.provider, ref.externalId],
+  );
+  return rows[0] ? connectorFromRow(rows[0]) : null;
+}
+
+export async function listConnectors(workspaceId: string): Promise<ConnectorAccount[]> {
+  const { rows } = await pool.query(
+    `SELECT * FROM connectors WHERE workspace_id = $1 ORDER BY provider, display_name`,
+    [workspaceId],
+  );
+  return rows.map(connectorFromRow);
+}
+
+export async function deleteConnector(provider: string, externalId: string): Promise<void> {
+  const ref = normalizeConnectorRef({ provider, externalId });
+  await pool.query(`DELETE FROM connectors WHERE provider = $1 AND external_id = $2`, [ref.provider, ref.externalId]);
+}
+
+export async function upsertConnectorResource(input: {
+  resourceId?: string;
+  connectorId: string;
+  externalId: string;
+  kind: string;
+  displayName: string;
+  enabled?: boolean;
+}): Promise<ConnectorResource> {
+  const externalId = input.externalId.trim();
+  const kind = input.kind.trim().toLowerCase();
+  if (!externalId) throw new Error("connector resource external id is required");
+  if (!kind) throw new Error("connector resource kind is required");
+  const { rows } = await pool.query(
+    `INSERT INTO connector_resources
+       (resource_id, connector_id, external_id, kind, display_name, enabled)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     ON CONFLICT (connector_id, kind, external_id) DO UPDATE SET
+       display_name = EXCLUDED.display_name,
+       enabled = EXCLUDED.enabled,
+       updated_at = now()
+     RETURNING *`,
+    [input.resourceId ?? randomUUID(), input.connectorId, externalId, kind, input.displayName, input.enabled ?? true],
+  );
+  return resourceFromRow(rows[0]);
+}
+
+export async function listConnectorResources(connectorId: string): Promise<ConnectorResource[]> {
+  const { rows } = await pool.query(
+    `SELECT * FROM connector_resources WHERE connector_id = $1 ORDER BY kind, display_name`,
+    [connectorId],
+  );
+  return rows.map(resourceFromRow);
+}
+
+async function syncInstallationWorkspace(i: {
+  installationId: number;
+  githubAccount: string;
+  datasetName: string;
+  cogneeApiKey: string;
+}): Promise<void> {
+  const { rows } = await pool.query(
+    `INSERT INTO workspaces
+       (workspace_id, legacy_installation_id, display_name, dataset_name, cognee_api_key)
+     VALUES (md5('orin-workspace:' || $1::bigint::text)::uuid, $1::bigint, $2, $3, $4)
+     ON CONFLICT (legacy_installation_id) DO UPDATE SET
+       display_name = EXCLUDED.display_name,
+       dataset_name = EXCLUDED.dataset_name,
+       cognee_api_key = EXCLUDED.cognee_api_key,
+       updated_at = now()
+     RETURNING workspace_id`,
+    [i.installationId, i.githubAccount, i.datasetName, encrypt(i.cogneeApiKey)],
+  );
+  if (i.installationId < SYNTHETIC_INSTALLATION_FLOOR) {
+    await upsertConnector({
+      workspaceId: String(rows[0].workspace_id),
+      provider: "github",
+      externalId: String(i.installationId),
+      displayName: i.githubAccount,
+      capabilities: CONNECTOR_CAPABILITIES,
+    });
+  }
 }
 
 export async function upsertInstallation(i: {
@@ -126,6 +421,7 @@ export async function upsertInstallation(i: {
     [i.installationId, i.githubAccount, i.datasetName, encrypt(i.cogneeApiKey)],
   );
   await pool.query(`INSERT INTO tenant_config (installation_id) VALUES ($1) ON CONFLICT DO NOTHING`, [i.installationId]);
+  await syncInstallationWorkspace(i);
 }
 
 export async function getInstallation(installationId: number): Promise<Installation | null> {
@@ -408,6 +704,15 @@ export async function linkTenant(platform: string, externalId: string, installat
      ON CONFLICT (platform, external_id) DO UPDATE SET installation_id = EXCLUDED.installation_id`,
     [platform, externalId, installationId],
   );
+  const workspace = await getWorkspaceByInstallation(installationId);
+  if (!workspace) throw new Error(`workspace missing for installation: ${installationId}`);
+  await upsertConnector({
+    workspaceId: workspace.workspaceId,
+    provider: platform,
+    externalId,
+    displayName: `${platform}:${externalId}`,
+    capabilities: CONNECTOR_CAPABILITIES,
+  });
 }
 
 export async function resolveLink(platform: string, externalId: string): Promise<number | null> {
@@ -420,6 +725,7 @@ export async function resolveLink(platform: string, externalId: string): Promise
 
 export async function unlinkTenant(platform: string, externalId: string): Promise<void> {
   await pool.query(`DELETE FROM tenant_links WHERE platform = $1 AND external_id = $2`, [platform, externalId]);
+  await deleteConnector(platform, externalId);
 }
 
 // One-time cross-platform link codes: minted in Slack (ephemeral — only the requester sees it,
@@ -704,7 +1010,9 @@ export async function metrics(installationId: number, repo: string): Promise<Rep
 // Full teardown on uninstall. installations delete cascades tenant_config/decision_records/preflight_keys;
 // deliveries + feedback_pending carry no FK, so clear them explicitly.
 export async function deleteInstallation(installationId: number): Promise<void> {
+  const workspace = await getWorkspaceByInstallation(installationId);
   await pool.query(`DELETE FROM deliveries WHERE installation_id = $1`, [installationId]);
   await pool.query(`DELETE FROM feedback_pending WHERE installation_id = $1`, [installationId]);
   await pool.query(`DELETE FROM installations WHERE installation_id = $1`, [installationId]);
+  if (workspace) await deleteWorkspace(workspace.workspaceId);
 }

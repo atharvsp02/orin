@@ -7,6 +7,8 @@ process.env.GITHUB_WEBHOOK_SECRET ??= "dummy";
 
 const BOT = new URL("../../dist/", import.meta.url).href;
 const db = await import(`${BOT}db.js`);
+const { Pool } = await import("pg");
+const sql = new Pool({ connectionString: process.env.DATABASE_URL });
 
 let pass = 0, fail = 0;
 const ok = (name, cond, extra = "") => {
@@ -24,6 +26,21 @@ await db.upsertInstallation({ installationId: INST, githubAccount: "acme", datas
 const inst = await db.getInstallation(INST);
 ok("installation stored", inst?.installationId === INST);
 eq("cognee key decrypts back to plaintext (crypto roundtrip)", inst?.cogneeApiKey, "SECRET-API-KEY-xyz");
+let workspace = await db.getWorkspaceByInstallation(INST);
+ok("installation creates a workspace", Boolean(workspace?.workspaceId));
+ok("workspace retains its compatibility installation", workspace?.legacyInstallationId === INST);
+eq("workspace decrypts the shared Cognee key", workspace?.cogneeApiKey, "SECRET-API-KEY-xyz");
+const originalWorkspaceId = workspace?.workspaceId;
+await sql.query(`DELETE FROM workspaces WHERE legacy_installation_id = $1`, [INST]);
+ok("legacy workspace can be absent before migration", (await db.getWorkspaceByInstallation(INST)) === null);
+await db.initSchema();
+workspace = await db.getWorkspaceByInstallation(INST);
+ok("schema migration backfills the legacy workspace", workspace?.workspaceId === originalWorkspaceId);
+const githubConnector = await db.getConnector("github", String(INST));
+ok(
+  "schema migration backfills the GitHub connector",
+  githubConnector?.workspaceId === workspace?.workspaceId && githubConnector.capabilities.length === 5,
+);
 
 // --- tenant_config defaults ---
 const cfg = await db.getTenantConfig(INST);
@@ -39,6 +56,9 @@ const mk = (repo, id, outcome = "rejected") => ({
 });
 await db.upsertDecisionRecord(mk("acme/a", "PR-42"));
 await db.upsertDecisionRecord(mk("acme/b", "PR-42")); // SAME id, different repo — must not collide
+await db.initSchema();
+const githubResources = await db.listConnectorResources(githubConnector.connectorId);
+eq("schema migration backfills repository resources", githubResources.map((resource) => resource.externalId), ["acme/a", "acme/b"]);
 const aRecs = await db.getDecisionRecords(INST, "acme/a");
 const bRecs = await db.getDecisionRecords(INST, "acme/b");
 eq("repo a sees only its PR-42", aRecs.map(r => `${r.repo}:${r.decisionId}`), ["acme/a:PR-42"]);
@@ -100,6 +120,48 @@ ok("drain is exhaustive (second drain empty)", drainedAgain.size === 0);
 await db.linkTenant("slack", "T123", INST);
 eq("resolveLink", await db.resolveLink("slack", "T123"), INST);
 ok("resolveLink unknown → null", await db.resolveLink("slack", "T999") === null);
+const linkedSlackConnector = await db.getConnector("slack", "T123");
+ok("tenant link creates a Slack connector", linkedSlackConnector?.workspaceId === workspace.workspaceId);
+await sql.query(`DELETE FROM connectors WHERE provider = 'slack' AND external_id = 'T123'`);
+await db.initSchema();
+ok("schema migration backfills tenant link connectors", (await db.getConnector("slack", "T123"))?.workspaceId === workspace.workspaceId);
+await db.linkTenant("linear", "L-unlink", INST);
+await db.unlinkTenant("linear", "L-unlink");
+ok("unlink removes the compatibility link", (await db.resolveLink("linear", "L-unlink")) === null);
+ok("unlink removes the connector", (await db.getConnector("linear", "L-unlink")) === null);
+
+const independentWorkspace = await db.createWorkspace({
+  displayName: "Standalone Slack",
+  datasetName: "workspace-standalone",
+  cogneeApiKey: "standalone-key",
+});
+ok("independent workspace has no GitHub installation", (await db.getWorkspaceByInstallation(999999999)) === null);
+const independentConnector = await db.upsertConnector({
+  workspaceId: independentWorkspace.workspaceId,
+  provider: "slack",
+  externalId: "T-independent",
+  displayName: "Standalone Slack",
+  capabilities: ["query", "record"],
+});
+eq("independent connector stores capabilities", independentConnector.capabilities, ["query", "record"]);
+const independentResource = await db.upsertConnectorResource({
+  connectorId: independentConnector.connectorId,
+  externalId: " C-engineering ",
+  kind: " Channel ",
+  displayName: "Engineering",
+});
+ok("connector resource normalizes its identity", independentResource.externalId === "C-engineering" && independentResource.kind === "channel");
+const disabledResource = await db.upsertConnectorResource({
+  connectorId: independentConnector.connectorId,
+  externalId: "C-engineering",
+  kind: "channel",
+  displayName: "Engineering Team",
+  enabled: false,
+});
+ok("connector resource update is idempotent", disabledResource.resourceId === independentResource.resourceId && disabledResource.enabled === false);
+eq("connector resources remain scoped", (await db.listConnectorResources(independentConnector.connectorId)).map((resource) => resource.displayName), ["Engineering Team"]);
+await db.deleteWorkspace(independentWorkspace.workspaceId);
+ok("workspace deletion cascades connectors", (await db.getConnector("slack", "T-independent")) === null);
 
 // --- slack_installs: ENCRYPTED roundtrip ---
 const install = { team: { id: "T123" }, bot: { token: "xoxb-super-secret" } };
@@ -119,10 +181,13 @@ ok("metrics.rejectionsActive excludes superseded", m.rejectionsActive === 1, JSO
 // --- deleteInstallation: cascade + explicit cleanup ---
 await db.deleteInstallation(INST);
 ok("installation gone", await db.getInstallation(INST) === null);
+ok("workspace compatibility row is removed", (await db.getWorkspaceByInstallation(INST)) === null);
+ok("workspace connector rows are removed", (await db.getConnector("github", String(INST))) === null);
 ok("decision_records cascaded", (await db.getDecisionRecords(INST, "acme/a")).length === 0);
 ok("deliveries cleared", await db.getDelivery(INST, "acme/a", 10, "sha1") === null);
 ok("preflight_keys cascaded", await db.lookupPreflightKey("hash-abc") === null);
 ok("tenant_links cascaded", await db.resolveLink("slack", "T123") === null);
 
+await sql.end();
 console.log(`\n=== db integration: ${pass} passed, ${fail} failed ===`);
 process.exit(fail ? 1 : 0);
