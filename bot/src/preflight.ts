@@ -5,6 +5,7 @@ import * as cognee from "./cognee.js";
 import { config } from "./config.js";
 import { evaluatePr } from "./pipeline.js";
 import type { TenantCredentials } from "./cognee.js";
+import { safeJobError } from "./queues.js";
 
 const cog = { baseUrl: config.cogneeBaseUrl };
 
@@ -143,7 +144,8 @@ export async function handleGraph(req: IncomingMessage, res: ServerResponse): Pr
       "X-Content-Type-Options": "nosniff",
     });
     res.end(html);
-  } catch (e) {
-    send(res, 502, { error: `graph unavailable: ${(e as Error).message}` });
+  } catch (error) {
+    console.error("preflight graph unavailable:", safeJobError(error));
+    send(res, 502, { error: "graph unavailable" });
   }
 }

@@ -36,8 +36,12 @@
         "chat:write",
         "reactions:read",
         "channels:history",
+        "channels:read",
+        "groups:history",
+        "groups:read",
         "app_mentions:read",
-        "users:read"
+        "users:read",
+        "users:read.email"
       ]
     }
   },
@@ -46,6 +50,9 @@
       "request_url": "https://orin-bot.duckdns.org/slack/events",
       "bot_events": [
         "message.channels",
+        "message.groups",
+        "member_joined_channel",
+        "member_left_channel",
         "reaction_added",
         "app_mention"
       ]

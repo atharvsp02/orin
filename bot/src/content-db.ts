@@ -10,10 +10,10 @@ import {
   type ContentPolicyOperator,
   type ContentPolicyTarget,
 } from "./content.js";
-import { can, type WorkspacePermission } from "./access.js";
+import type { WorkspacePermission } from "./access.js";
 import { decrypt, encrypt } from "./crypto.js";
 import { pool } from "./db.js";
-import { getWorkspaceAccess, userContentPrincipals } from "./enterprise-db.js";
+import { userContentPrincipals } from "./enterprise-db.js";
 
 const MAX_CONTENT_BYTES = 2_000_000;
 
@@ -77,6 +77,7 @@ export interface ConnectorSyncRun {
   itemsDeleted: number;
   errorText: string;
   startedAt: string;
+  heartbeatAt: string;
   finishedAt?: string;
 }
 
@@ -185,6 +186,7 @@ export async function upsertContentItem(input: {
   metadata?: Record<string, unknown>;
   sourceCreatedAt?: string;
   sourceUpdatedAt?: string;
+  syncRunId?: string;
 }): Promise<ContentItem> {
   const externalId = cleanText(input.externalId, "external id", 1000);
   const sourceType = cleanText(input.sourceType.toLowerCase(), "source type", 80);
@@ -209,14 +211,22 @@ export async function upsertContentItem(input: {
       );
       if (resource.rowCount !== 1) throw new Error("resource does not belong to connector");
     }
+    if (input.syncRunId) {
+      const syncRun = await client.query(
+        `SELECT 1 FROM connector_sync_runs
+         WHERE run_id = $1 AND workspace_id = $2 AND connector_id = $3 AND status = 'running'`,
+        [input.syncRunId, input.workspaceId, input.connectorId],
+      );
+      if (syncRun.rowCount !== 1) throw new Error("sync run does not belong to connector");
+    }
     const body = input.body.trim();
     const contentHash = createHash("sha256").update(body).digest("hex");
     const { rows } = await client.query(
       `INSERT INTO content_items
          (item_id, workspace_id, connector_id, resource_id, external_id, source_type, title, body, url,
           mime_type, owner_key, source_path, visibility, acl_status, content_hash, metadata,
-          source_created_at, source_updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+          source_created_at, source_updated_at, last_seen_sync_run_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
        ON CONFLICT (connector_id, external_id) DO UPDATE SET
          workspace_id = EXCLUDED.workspace_id,
          resource_id = EXCLUDED.resource_id,
@@ -233,6 +243,7 @@ export async function upsertContentItem(input: {
          metadata = EXCLUDED.metadata,
          source_created_at = EXCLUDED.source_created_at,
          source_updated_at = EXCLUDED.source_updated_at,
+         last_seen_sync_run_id = COALESCE(EXCLUDED.last_seen_sync_run_id, content_items.last_seen_sync_run_id),
          indexed_at = CASE WHEN content_items.content_hash <> EXCLUDED.content_hash THEN now() ELSE content_items.indexed_at END,
          last_synced_at = now(),
          deleted_at = NULL
@@ -242,7 +253,7 @@ export async function upsertContentItem(input: {
         title, body, input.url?.trim().slice(0, 4000) ?? "", input.mimeType?.trim().slice(0, 255) || "text/plain",
         input.ownerKey?.trim().slice(0, 320) ?? "", input.sourcePath?.trim().slice(0, 2000) ?? "",
         visibility, aclStatus, contentHash, input.metadata ?? {}, optionalTimestamp(input.sourceCreatedAt),
-        optionalTimestamp(input.sourceUpdatedAt),
+        optionalTimestamp(input.sourceUpdatedAt), input.syncRunId ?? null,
       ],
     );
     const item = contentFromRow(rows[0]);
@@ -281,6 +292,112 @@ export async function markContentDeleted(workspaceId: string, connectorId: strin
   return result.rowCount === 1;
 }
 
+export async function markContentSyncFailed(
+  workspaceId: string,
+  connectorId: string,
+  externalId: string,
+  runId: string,
+): Promise<boolean> {
+  const result = await pool.query(
+    `UPDATE content_items SET
+       acl_status = 'failed', last_seen_sync_run_id = $4, last_synced_at = now()
+     WHERE workspace_id = $1 AND connector_id = $2 AND external_id = $3 AND deleted_at IS NULL
+       AND EXISTS (
+         SELECT 1 FROM connector_sync_runs
+         WHERE run_id = $4 AND workspace_id = $1 AND connector_id = $2 AND status = 'running'
+       )`,
+    [workspaceId, connectorId, externalId, runId],
+  );
+  return result.rowCount === 1;
+}
+
+export async function markConnectorContentNotSeenInRun(
+  workspaceId: string,
+  connectorId: string,
+  runId: string,
+): Promise<number> {
+  const result = await pool.query(
+    `UPDATE content_items SET deleted_at = now()
+     WHERE workspace_id = $1 AND connector_id = $2 AND deleted_at IS NULL
+       AND last_seen_sync_run_id IS DISTINCT FROM $3
+       AND EXISTS (
+         SELECT 1 FROM connector_sync_runs
+         WHERE run_id = $3 AND workspace_id = $1 AND connector_id = $2 AND status = 'running'
+       )`,
+    [workspaceId, connectorId, runId],
+  );
+  return result.rowCount ?? 0;
+}
+
+export async function replaceConnectorResourceMemberships(
+  workspaceId: string,
+  resourceId: string,
+  acls: ContentAcl[],
+): Promise<void> {
+  const principals = [...new Set(acls.map((acl) => normalizePrincipal(acl.principalType, acl.principalKey)))];
+  if (principals.length > 50_000) throw new Error("resource membership exceeds 50000 principals");
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const resource = await client.query(
+      `SELECT 1 FROM connector_resources resource
+       JOIN connectors connector ON connector.connector_id = resource.connector_id
+       WHERE resource.resource_id = $1 AND connector.workspace_id = $2 FOR UPDATE OF resource`,
+      [resourceId, workspaceId],
+    );
+    if (resource.rowCount !== 1) throw new Error("connector resource not found in workspace");
+    await client.query(`DELETE FROM connector_resource_memberships WHERE resource_id = $1`, [resourceId]);
+    if (principals.length > 0) {
+      await client.query(
+        `INSERT INTO connector_resource_memberships (workspace_id, resource_id, principal)
+         SELECT $1, $2, principal FROM unnest($3::text[]) AS principal`,
+        [workspaceId, resourceId, principals],
+      );
+    }
+    await client.query(
+      `UPDATE connector_resources SET acl_status = 'current', acl_synced_at = now(), updated_at = now()
+       WHERE resource_id = $1`,
+      [resourceId],
+    );
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function markConnectorResourceAclStatus(
+  workspaceId: string,
+  resourceId: string,
+  status: "stale" | "failed",
+): Promise<boolean> {
+  const result = await pool.query(
+    `UPDATE connector_resources resource SET acl_status = $3, updated_at = now()
+     FROM connectors connector
+     WHERE resource.resource_id = $2 AND resource.connector_id = connector.connector_id
+       AND connector.workspace_id = $1`,
+    [workspaceId, resourceId, status],
+  );
+  return result.rowCount === 1;
+}
+
+export async function markConnectorResourcesAclStatus(
+  workspaceId: string,
+  connectorId: string,
+  status: "stale" | "failed",
+): Promise<number> {
+  const result = await pool.query(
+    `UPDATE connector_resources resource SET acl_status = $3, updated_at = now()
+     FROM connectors connector
+     WHERE resource.connector_id = $2 AND resource.connector_id = connector.connector_id
+       AND connector.workspace_id = $1`,
+    [workspaceId, connectorId, status],
+  );
+  return result.rowCount ?? 0;
+}
+
 function searchRow(row: Record<string, unknown>, query: string): SearchResult {
   return {
     itemId: String(row.item_id),
@@ -297,44 +414,75 @@ function searchRow(row: Record<string, unknown>, query: string): SearchResult {
   };
 }
 
-interface FeatureAccess {
-  defaultAllowed: boolean;
-  grants: Array<{ effect: "allow" | "deny"; conditions: Record<string, string[]> }>;
-}
-
-async function featureAccess(
-  workspaceId: string,
-  userId: string,
-  permission?: Extract<WorkspacePermission, "search.use" | "chat.use">,
-): Promise<FeatureAccess | null> {
-  if (!permission) return { defaultAllowed: true, grants: [] };
-  const access = await getWorkspaceAccess(userId, workspaceId);
-  if (!access) return null;
-  return {
-    defaultAllowed: can(access.membership.role, permission),
-    grants: access.grants
-      .filter((grant) => grant.permission === permission)
-      .map((grant) => ({
-        effect: grant.effect,
-        conditions: Object.fromEntries(Object.entries(grant.conditions ?? {}).map(([key, value]) => [
-          key,
-          (Array.isArray(value) ? value : [value]).map((part) => part.trim().toLowerCase()),
-        ])),
-      })),
-  };
-}
-
 function featureConditionSql(grant: string, connector: string, item: string): string {
   return `(
-    (NOT (${grant}.conditions ? 'connectorProvider') OR lower(${connector}.provider) IN (
-      SELECT expected.value FROM jsonb_array_elements_text(${grant}.conditions->'connectorProvider') AS expected(value)
-    )) AND
-    (NOT (${grant}.conditions ? 'resourceId') OR lower(COALESCE(${item}.resource_id::text, '')) IN (
-      SELECT expected.value FROM jsonb_array_elements_text(${grant}.conditions->'resourceId') AS expected(value)
-    )) AND
-    (NOT (${grant}.conditions ? 'sourceType') OR lower(${item}.source_type) IN (
-      SELECT expected.value FROM jsonb_array_elements_text(${grant}.conditions->'sourceType') AS expected(value)
-    ))
+    NOT EXISTS (
+      SELECT 1 FROM jsonb_object_keys(${grant}.conditions) AS condition_key(value)
+      WHERE condition_key.value NOT IN ('connectorProvider', 'resourceId', 'sourceType')
+    ) AND
+    (NOT (${grant}.conditions ? 'connectorProvider') OR CASE jsonb_typeof(${grant}.conditions->'connectorProvider')
+      WHEN 'string' THEN lower(${grant}.conditions->>'connectorProvider') = lower(${connector}.provider)
+      WHEN 'array' THEN lower(${connector}.provider) IN (
+        SELECT lower(expected.value) FROM jsonb_array_elements_text(${grant}.conditions->'connectorProvider') AS expected(value)
+      ) ELSE false END) AND
+    (NOT (${grant}.conditions ? 'resourceId') OR CASE jsonb_typeof(${grant}.conditions->'resourceId')
+      WHEN 'string' THEN lower(${grant}.conditions->>'resourceId') = lower(COALESCE(${item}.resource_id::text, ''))
+      WHEN 'array' THEN lower(COALESCE(${item}.resource_id::text, '')) IN (
+        SELECT lower(expected.value) FROM jsonb_array_elements_text(${grant}.conditions->'resourceId') AS expected(value)
+      ) ELSE false END) AND
+    (NOT (${grant}.conditions ? 'sourceType') OR CASE jsonb_typeof(${grant}.conditions->'sourceType')
+      WHEN 'string' THEN lower(${grant}.conditions->>'sourceType') = lower(${item}.source_type)
+      WHEN 'array' THEN lower(${item}.source_type) IN (
+        SELECT lower(expected.value) FROM jsonb_array_elements_text(${grant}.conditions->'sourceType') AS expected(value)
+      ) ELSE false END)
+  )`;
+}
+
+function contentAclSql(item: string, acl: string, principalsParameter: string, userParameter: string): string {
+  return `(
+    (${acl}.principal_type NOT IN ('group', 'external_group', 'resource_member')
+     AND ${acl}.principal = ANY(${principalsParameter}::text[])) OR
+    (${acl}.principal_type = 'group' AND EXISTS (
+      SELECT 1 FROM workspace_group_members membership
+      WHERE membership.workspace_id = ${item}.workspace_id
+        AND membership.user_id = ${userParameter}::uuid
+        AND membership.group_id::text = lower(${acl}.principal_key)
+    )) OR
+    (${acl}.principal_type = 'external_group' AND EXISTS (
+      SELECT 1 FROM workspace_group_members membership
+      JOIN workspace_groups workspace_group ON workspace_group.group_id = membership.group_id
+      WHERE membership.workspace_id = ${item}.workspace_id
+        AND membership.user_id = ${userParameter}::uuid
+        AND lower(workspace_group.external_id) = lower(${acl}.principal_key)
+    )) OR
+    (${acl}.principal_type = 'resource_member'
+     AND ${acl}.principal = 'resource_member:' || lower(${item}.resource_id::text)
+     AND EXISTS (
+       SELECT 1 FROM connector_resource_memberships membership
+       WHERE membership.workspace_id = ${item}.workspace_id
+         AND membership.resource_id = ${item}.resource_id
+         AND membership.principal = ANY(${principalsParameter}::text[])
+     ))
+  )`;
+}
+
+function featureAuthorizationSql(permissionParameter: string, connector: string, item: string): string {
+  return `(
+    ${permissionParameter}::text IS NULL OR (
+      NOT EXISTS (
+        SELECT 1 FROM feature_grants feature_grant
+        WHERE feature_grant.effect = 'deny' AND ${featureConditionSql("feature_grant", connector, item)}
+      ) AND (
+        EXISTS (
+          SELECT 1 FROM active_access access
+          WHERE (${permissionParameter}::text = 'search.use' AND access.role IN ('owner', 'admin', 'member', 'viewer'))
+             OR (${permissionParameter}::text = 'chat.use' AND access.role IN ('owner', 'admin', 'member'))
+        ) OR EXISTS (
+          SELECT 1 FROM feature_grants feature_grant
+          WHERE feature_grant.effect = 'allow' AND ${featureConditionSql("feature_grant", connector, item)}
+        )
+      )
+    )
   )`;
 }
 
@@ -353,13 +501,28 @@ export async function authorizedSearch(input: {
   const limit = Math.max(1, Math.min(Math.floor(input.limit ?? 10), 50));
   const principals = [...await userContentPrincipals(input.userId, input.workspaceId)];
   if (principals.length === 0) return [];
-  const feature = await featureAccess(input.workspaceId, input.userId, input.permission);
-  if (!feature) return [];
   const { rows } = await pool.query(
     `WITH search_query AS (SELECT websearch_to_tsquery('simple', $3::text) AS value),
+          active_access AS (
+            SELECT membership.role
+            FROM workspace_memberships membership
+            JOIN users app_user ON app_user.user_id = membership.user_id
+            WHERE membership.workspace_id = $1::uuid AND membership.user_id = $7::uuid
+              AND membership.status = 'active' AND app_user.status = 'active'
+          ),
           feature_grants AS (
-            SELECT effect, conditions
-            FROM jsonb_to_recordset($8::jsonb) AS feature_grant(effect text, conditions jsonb)
+            SELECT stored_grant.effect, stored_grant.conditions
+            FROM permission_grants stored_grant
+            CROSS JOIN active_access access
+            WHERE stored_grant.workspace_id = $1::uuid AND stored_grant.permission = $8::text AND (
+              (stored_grant.principal_type = 'role' AND stored_grant.principal_id = access.role) OR
+              (stored_grant.principal_type = 'user' AND stored_grant.principal_id = $7::text) OR
+              (stored_grant.principal_type = 'group' AND EXISTS (
+                SELECT 1 FROM workspace_group_members membership
+                WHERE membership.workspace_id = $1::uuid AND membership.user_id = $7::uuid
+                  AND membership.group_id::text = stored_grant.principal_id
+              ))
+            )
           )
      SELECT i.*, c.provider,
             (ts_rank_cd(i.search_vector, q.value) +
@@ -369,33 +532,28 @@ export async function authorizedSearch(input: {
      LEFT JOIN connector_resources r ON r.resource_id = i.resource_id AND r.connector_id = i.connector_id
      CROSS JOIN search_query q
      WHERE i.workspace_id = $1::uuid
+       AND EXISTS (SELECT 1 FROM active_access)
        AND i.deleted_at IS NULL
        AND c.status = 'active'
-       AND (i.resource_id IS NULL OR r.enabled = true)
+       AND (i.resource_id IS NULL OR (
+         r.enabled = true AND r.acl_status = 'current'
+         AND (c.provider <> 'slack' OR r.acl_synced_at > now() - interval '30 minutes')
+       ))
        AND ($4::text IS NULL OR c.provider = $4::text)
        AND ($5::uuid IS NULL OR i.resource_id = $5::uuid)
-       AND NOT EXISTS (
-         SELECT 1 FROM feature_grants g
-         WHERE g.effect = 'deny' AND ${featureConditionSql("g", "c", "i")}
-       )
-       AND (
-         $7::boolean OR EXISTS (
-           SELECT 1 FROM feature_grants g
-           WHERE g.effect = 'allow' AND ${featureConditionSql("g", "c", "i")}
-         )
-       )
+       AND ${featureAuthorizationSql("$8", "c", "i")}
        AND (
          i.visibility = 'workspace' OR (
            i.visibility = 'restricted' AND i.acl_status = 'current' AND EXISTS (
              SELECT 1 FROM content_acl_entries a
-             WHERE a.item_id = i.item_id AND a.principal = ANY($2::text[])
+             WHERE a.item_id = i.item_id AND ${contentAclSql("i", "a", "$2", "$7")}
            )
          )
        )
        AND (
          i.search_vector @@ q.value OR
-         i.title ILIKE '%' || $3::text || '%' OR
-         i.body ILIKE '%' || $3::text || '%'
+         position(lower($3::text) in lower(i.title)) > 0 OR
+         position(lower($3::text) in lower(i.body)) > 0
        )
      ORDER BY score DESC, i.source_updated_at DESC NULLS LAST, i.item_id
      LIMIT $6`,
@@ -406,8 +564,8 @@ export async function authorizedSearch(input: {
       input.provider?.trim().toLowerCase() || null,
       input.resourceId?.trim() || null,
       limit,
-      feature.defaultAllowed,
-      JSON.stringify(feature.grants),
+      input.userId,
+      input.permission ?? null,
     ],
   );
   return rows.map((row) => searchRow(row, query));
@@ -423,41 +581,50 @@ export async function getAuthorizedItemsByIds(input: {
   if (itemIds.length === 0) return [];
   const principals = [...await userContentPrincipals(input.userId, input.workspaceId)];
   if (principals.length === 0) return [];
-  const feature = await featureAccess(input.workspaceId, input.userId, input.permission);
-  if (!feature) return [];
   const { rows } = await pool.query(
-    `WITH feature_grants AS (
-       SELECT effect, conditions
-       FROM jsonb_to_recordset($5::jsonb) AS feature_grant(effect text, conditions jsonb)
+    `WITH active_access AS (
+       SELECT membership.role
+       FROM workspace_memberships membership
+       JOIN users app_user ON app_user.user_id = membership.user_id
+       WHERE membership.workspace_id = $1::uuid AND membership.user_id = $4::uuid
+         AND membership.status = 'active' AND app_user.status = 'active'
+     ), feature_grants AS (
+       SELECT stored_grant.effect, stored_grant.conditions
+       FROM permission_grants stored_grant
+       CROSS JOIN active_access access
+       WHERE stored_grant.workspace_id = $1::uuid AND stored_grant.permission = $5::text AND (
+         (stored_grant.principal_type = 'role' AND stored_grant.principal_id = access.role) OR
+         (stored_grant.principal_type = 'user' AND stored_grant.principal_id = $4::text) OR
+         (stored_grant.principal_type = 'group' AND EXISTS (
+           SELECT 1 FROM workspace_group_members membership
+           WHERE membership.workspace_id = $1::uuid AND membership.user_id = $4::uuid
+             AND membership.group_id::text = stored_grant.principal_id
+         ))
+       )
      )
      SELECT i.*, c.provider, 0::real AS score
      FROM content_items i
      JOIN connectors c ON c.connector_id = i.connector_id AND c.workspace_id = i.workspace_id
      LEFT JOIN connector_resources r ON r.resource_id = i.resource_id AND r.connector_id = i.connector_id
      WHERE i.workspace_id = $1::uuid
+       AND EXISTS (SELECT 1 FROM active_access)
        AND i.item_id = ANY($2::uuid[])
        AND i.deleted_at IS NULL
        AND c.status = 'active'
-       AND (i.resource_id IS NULL OR r.enabled = true)
-       AND NOT EXISTS (
-         SELECT 1 FROM feature_grants g
-         WHERE g.effect = 'deny' AND ${featureConditionSql("g", "c", "i")}
-       )
-       AND (
-         $4::boolean OR EXISTS (
-           SELECT 1 FROM feature_grants g
-           WHERE g.effect = 'allow' AND ${featureConditionSql("g", "c", "i")}
-         )
-       )
+       AND (i.resource_id IS NULL OR (
+         r.enabled = true AND r.acl_status = 'current'
+         AND (c.provider <> 'slack' OR r.acl_synced_at > now() - interval '30 minutes')
+       ))
+       AND ${featureAuthorizationSql("$5", "c", "i")}
        AND (
          i.visibility = 'workspace' OR (
            i.visibility = 'restricted' AND i.acl_status = 'current' AND EXISTS (
              SELECT 1 FROM content_acl_entries a
-             WHERE a.item_id = i.item_id AND a.principal = ANY($3::text[])
+             WHERE a.item_id = i.item_id AND ${contentAclSql("i", "a", "$3", "$4")}
            )
          )
        )`,
-    [input.workspaceId, itemIds, principals, feature.defaultAllowed, JSON.stringify(feature.grants)],
+    [input.workspaceId, itemIds, principals, input.userId, input.permission ?? null],
   );
   return rows.map((row) => searchRow(row, ""));
 }
@@ -523,6 +690,14 @@ export async function listConnectorPolicies(workspaceId: string, connectorId?: s
   return rows.map(policyFromRow);
 }
 
+export async function getConnectorPolicy(workspaceId: string, policyId: string): Promise<StoredConnectorPolicy | null> {
+  const { rows } = await pool.query(
+    `SELECT * FROM connector_policies WHERE workspace_id = $1 AND policy_id = $2`,
+    [workspaceId, policyId],
+  );
+  return rows[0] ? policyFromRow(rows[0]) : null;
+}
+
 export async function connectorContentAllowed(
   workspaceId: string,
   connectorId: string,
@@ -551,6 +726,7 @@ function syncRunFromRow(row: Record<string, unknown>): ConnectorSyncRun {
     itemsDeleted: Number(row.items_deleted ?? 0),
     errorText: String(row.error_text ?? ""),
     startedAt: String(row.started_at),
+    heartbeatAt: String(row.heartbeat_at ?? row.started_at),
     finishedAt: row.finished_at == null ? undefined : String(row.finished_at),
   };
 }
@@ -560,11 +736,32 @@ export async function startConnectorSync(workspaceId: string, connectorId: strin
     `INSERT INTO connector_sync_runs (run_id, workspace_id, connector_id, status)
      SELECT $1, $2, $3, 'running'
      WHERE EXISTS (SELECT 1 FROM connectors WHERE workspace_id = $2 AND connector_id = $3)
+     ON CONFLICT DO NOTHING
      RETURNING *`,
     [randomUUID(), workspaceId, connectorId],
   );
-  if (!rows[0]) throw new Error("connector not found in workspace");
+  if (!rows[0]) throw new Error("connector sync is already running or connector was not found");
   return syncRunFromRow(rows[0]);
+}
+
+export async function heartbeatConnectorSync(workspaceId: string, runId: string): Promise<boolean> {
+  const result = await pool.query(
+    `UPDATE connector_sync_runs SET heartbeat_at = now()
+     WHERE workspace_id = $1 AND run_id = $2 AND status = 'running'`,
+    [workspaceId, runId],
+  );
+  return result.rowCount === 1;
+}
+
+export async function failStaleConnectorSyncs(maxAgeMinutes = 15): Promise<number> {
+  const boundedAge = Math.max(15, Math.min(Math.floor(maxAgeMinutes), 24 * 60));
+  const result = await pool.query(
+    `UPDATE connector_sync_runs SET
+       status = 'failed', error_text = 'sync worker stopped before completion', finished_at = now()
+     WHERE status = 'running' AND heartbeat_at < now() - ($1::int * interval '1 minute')`,
+    [boundedAge],
+  );
+  return result.rowCount ?? 0;
 }
 
 export async function finishConnectorSync(input: {
@@ -586,6 +783,7 @@ export async function finishConnectorSync(input: {
        items_written = $6,
        items_deleted = $7,
        error_text = $8,
+       heartbeat_at = now(),
        finished_at = now()
      WHERE workspace_id = $1 AND run_id = $2 AND status = 'running'
      RETURNING *`,
@@ -653,6 +851,17 @@ export async function createChatExchange(input: {
     }
     const userMessageId = randomUUID();
     const assistantMessageId = randomUUID();
+    const citationItemIds = [...new Set(input.citationItemIds)].slice(0, 20);
+    if (citationItemIds.length > 0) {
+      const citationItems = await client.query(
+        `SELECT count(*)::int AS count FROM content_items
+         WHERE workspace_id = $1 AND item_id = ANY($2::uuid[])`,
+        [input.workspaceId, citationItemIds],
+      );
+      if (Number(citationItems.rows[0]?.count ?? 0) !== citationItemIds.length) {
+        throw new Error("chat citations do not belong to workspace");
+      }
+    }
     await client.query(
       `INSERT INTO chat_messages (message_id, thread_id, role, content) VALUES ($1, $2, 'user', $3)`,
       [userMessageId, threadId, question],
@@ -661,7 +870,7 @@ export async function createChatExchange(input: {
       `INSERT INTO chat_messages (message_id, thread_id, role, content) VALUES ($1, $2, 'assistant', $3)`,
       [assistantMessageId, threadId, answer],
     );
-    for (const [index, itemId] of [...new Set(input.citationItemIds)].slice(0, 20).entries()) {
+    for (const [index, itemId] of citationItemIds.entries()) {
       await client.query(
         `INSERT INTO chat_citations (message_id, item_id, ordinal) VALUES ($1, $2, $3)`,
         [assistantMessageId, itemId, index + 1],

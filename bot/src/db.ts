@@ -144,10 +144,28 @@ export async function initSchema(): Promise<void> {
       kind         TEXT NOT NULL,
       display_name TEXT NOT NULL,
       enabled      BOOLEAN NOT NULL DEFAULT true,
+      acl_status   TEXT NOT NULL DEFAULT 'current' CHECK (acl_status IN ('current', 'stale', 'failed')),
+      acl_synced_at TIMESTAMPTZ,
       created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
       updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
       UNIQUE (connector_id, kind, external_id)
     );
+    ALTER TABLE connector_resources ADD COLUMN IF NOT EXISTS acl_status TEXT NOT NULL DEFAULT 'current';
+    ALTER TABLE connector_resources ADD COLUMN IF NOT EXISTS acl_synced_at TIMESTAMPTZ;
+    DO $$ BEGIN
+      ALTER TABLE connector_resources ADD CONSTRAINT connector_resources_acl_status_check
+        CHECK (acl_status IN ('current', 'stale', 'failed'));
+    EXCEPTION WHEN duplicate_object THEN NULL;
+    END $$;
+    CREATE TABLE IF NOT EXISTS connector_resource_memberships (
+      workspace_id UUID NOT NULL REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
+      resource_id  UUID NOT NULL REFERENCES connector_resources(resource_id) ON DELETE CASCADE,
+      principal    TEXT NOT NULL,
+      synced_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (resource_id, principal)
+    );
+    CREATE INDEX IF NOT EXISTS connector_resource_memberships_principal_idx
+      ON connector_resource_memberships (workspace_id, principal, resource_id);
     CREATE TABLE IF NOT EXISTS users (
       user_id       UUID PRIMARY KEY,
       display_name  TEXT NOT NULL,
@@ -267,10 +285,21 @@ export async function initSchema(): Promise<void> {
       items_deleted  INT NOT NULL DEFAULT 0,
       error_text     TEXT NOT NULL DEFAULT '',
       started_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+      heartbeat_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
       finished_at    TIMESTAMPTZ
     );
+    ALTER TABLE connector_sync_runs ADD COLUMN IF NOT EXISTS heartbeat_at TIMESTAMPTZ NOT NULL DEFAULT now();
     CREATE INDEX IF NOT EXISTS connector_sync_runs_connector_time_idx
       ON connector_sync_runs (connector_id, started_at DESC);
+    WITH duplicate_syncs AS (
+      SELECT run_id, row_number() OVER (PARTITION BY connector_id ORDER BY started_at DESC, run_id DESC) AS position
+      FROM connector_sync_runs WHERE status = 'running'
+    )
+    UPDATE connector_sync_runs SET
+      status = 'failed', error_text = 'superseded incomplete sync', finished_at = now()
+    WHERE run_id IN (SELECT run_id FROM duplicate_syncs WHERE position > 1);
+    CREATE UNIQUE INDEX IF NOT EXISTS connector_sync_runs_running_unique
+      ON connector_sync_runs (connector_id) WHERE status = 'running';
     CREATE TABLE IF NOT EXISTS content_items (
       item_id          UUID PRIMARY KEY,
       workspace_id     UUID NOT NULL REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
@@ -292,6 +321,7 @@ export async function initSchema(): Promise<void> {
       source_updated_at TIMESTAMPTZ,
       indexed_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
       last_synced_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+      last_seen_sync_run_id UUID REFERENCES connector_sync_runs(run_id) ON DELETE SET NULL,
       deleted_at       TIMESTAMPTZ,
       search_vector    TSVECTOR GENERATED ALWAYS AS (
         setweight(to_tsvector('simple', coalesce(title, '')), 'A') ||
@@ -302,6 +332,7 @@ export async function initSchema(): Promise<void> {
     CREATE INDEX IF NOT EXISTS content_items_workspace_idx
       ON content_items (workspace_id, connector_id, resource_id) WHERE deleted_at IS NULL;
     CREATE INDEX IF NOT EXISTS content_items_search_idx ON content_items USING GIN (search_vector);
+    ALTER TABLE content_items ADD COLUMN IF NOT EXISTS last_seen_sync_run_id UUID REFERENCES connector_sync_runs(run_id) ON DELETE SET NULL;
     CREATE TABLE IF NOT EXISTS content_acl_entries (
       item_id         UUID NOT NULL REFERENCES content_items(item_id) ON DELETE CASCADE,
       principal_type  TEXT NOT NULL,
@@ -344,8 +375,11 @@ export async function initSchema(): Promise<void> {
       action       TEXT NOT NULL,
       bucket       BIGINT NOT NULL,
       request_count INT NOT NULL DEFAULT 1,
+      expires_at   TIMESTAMPTZ NOT NULL DEFAULT now() + interval '1 day',
       PRIMARY KEY (workspace_id, user_id, action, bucket)
     );
+    ALTER TABLE request_rate_limits ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ NOT NULL DEFAULT now() + interval '1 day';
+    CREATE INDEX IF NOT EXISTS request_rate_limits_expiry_idx ON request_rate_limits (expires_at);
     ALTER TABLE preflight_keys ADD COLUMN IF NOT EXISTS label TEXT NOT NULL DEFAULT '';
     ALTER TABLE deliveries ADD COLUMN IF NOT EXISTS error_text TEXT;
     INSERT INTO workspaces
@@ -451,6 +485,8 @@ function resourceFromRow(row: Record<string, unknown>): ConnectorResource {
     kind: String(row.kind),
     displayName: String(row.display_name),
     enabled: Boolean(row.enabled),
+    aclStatus: String(row.acl_status ?? "current") as ConnectorResource["aclStatus"],
+    aclSyncedAt: row.acl_synced_at == null ? undefined : String(row.acl_synced_at),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
   };
@@ -618,6 +654,28 @@ export async function listConnectorResources(connectorId: string): Promise<Conne
     [connectorId],
   );
   return rows.map(resourceFromRow);
+}
+
+export async function getConnectorResource(
+  connectorId: string,
+  kind: string,
+  externalId: string,
+): Promise<ConnectorResource | null> {
+  const { rows } = await pool.query(
+    `SELECT * FROM connector_resources WHERE connector_id = $1 AND kind = $2 AND external_id = $3`,
+    [connectorId, kind.trim().toLowerCase(), externalId.trim()],
+  );
+  return rows[0] ? resourceFromRow(rows[0]) : null;
+}
+
+export async function getConnectorForResource(workspaceId: string, resourceId: string): Promise<ConnectorAccount | null> {
+  const { rows } = await pool.query(
+    `SELECT connector.* FROM connectors connector
+     JOIN connector_resources resource ON resource.connector_id = connector.connector_id
+     WHERE connector.workspace_id = $1 AND resource.resource_id = $2`,
+    [workspaceId, resourceId],
+  );
+  return rows[0] ? connectorFromRow(rows[0]) : null;
 }
 
 export async function setConnectorResourceEnabled(
@@ -1068,6 +1126,11 @@ export async function fetchSlackInstall(id: string): Promise<unknown | null> {
   return rows[0] ? JSON.parse(decrypt(rows[0].data)) : null;
 }
 
+export async function listSlackInstallationIds(): Promise<string[]> {
+  const { rows } = await pool.query(`SELECT id FROM slack_installs ORDER BY id`);
+  return rows.map((row) => String(row.id));
+}
+
 export async function deleteSlackInstall(id: string): Promise<void> {
   await pool.query(`DELETE FROM slack_installs WHERE id = $1`, [id]);
 }
@@ -1180,6 +1243,43 @@ export async function recentDeliveries(installationId: number, limit = 20): Prom
     errorText: r.error_text,
     updatedAt: String(r.updated_at),
   }));
+}
+
+export async function recentDeliveriesForRepos(
+  installationId: number,
+  repos: string[],
+  limit = 20,
+): Promise<DeliveryFeedRow[]> {
+  const boundedLimit = Math.max(1, Math.min(Math.floor(limit), 100));
+  const allowedRepos = [...new Set(repos.map((repo) => repo.trim()).filter(Boolean))];
+  if (allowedRepos.length === 0) return [];
+  const { rows } = await pool.query(
+    `SELECT repo, number, kind, decision_id, state, error_text, updated_at FROM deliveries
+     WHERE installation_id = $1 AND repo = ANY($2::text[])
+     ORDER BY updated_at DESC LIMIT $3`,
+    [installationId, allowedRepos, boundedLimit],
+  );
+  return rows.map((row) => ({
+    repo: row.repo,
+    number: Number(row.number),
+    kind: row.kind,
+    decisionId: row.decision_id,
+    state: row.state,
+    errorText: row.error_text,
+    updatedAt: String(row.updated_at),
+  }));
+}
+
+export async function countPreventedForRepos(installationId: number, repos: string[]): Promise<number> {
+  const allowedRepos = [...new Set(repos.map((repo) => repo.trim()).filter(Boolean))];
+  if (allowedRepos.length === 0) return 0;
+  const { rows } = await pool.query(
+    `SELECT COUNT(DISTINCT (repo, number))::int AS count FROM deliveries
+     WHERE installation_id = $1 AND repo = ANY($2::text[]) AND kind = 'pr'
+       AND decision_id IS NOT NULL AND state = 'posted'`,
+    [installationId, allowedRepos],
+  );
+  return Number(rows[0]?.count ?? 0);
 }
 
 // Settings update from the dashboard (whitelisted columns only).

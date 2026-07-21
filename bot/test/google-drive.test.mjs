@@ -65,11 +65,13 @@ await test("maps Drive permission principals", () => {
     principalType: "external_group",
     principalKey: "team@example.com",
   });
-  assert.deepEqual(drivePermissionAcl({ type: "domain", domain: "example.com" }), {
+  assert.deepEqual(drivePermissionAcl({ type: "domain", domain: "example.com", allowFileDiscovery: true }), {
     principalType: "domain",
     principalKey: "example.com",
   });
-  assert.deepEqual(drivePermissionAcl({ type: "anyone" }), { principalType: "anyone", principalKey: "*" });
+  assert.deepEqual(drivePermissionAcl({ type: "anyone", allowFileDiscovery: true }), { principalType: "anyone", principalKey: "*" });
+  assert.equal(drivePermissionAcl({ type: "anyone", allowFileDiscovery: false }), null);
+  assert.equal(drivePermissionAcl({ type: "domain", domain: "example.com", allowFileDiscovery: false }), null);
   assert.equal(drivePermissionAcl({ type: "domain" }), null);
 });
 
@@ -88,6 +90,21 @@ await test("paginates shared drives with bearer authorization", async () => {
   ]);
   assert.equal(requests.length, 2);
   assert.equal(requests[0].authorization, "Bearer access-token");
+});
+
+await test("requests permission discovery fields across pages", async () => {
+  const requests = [];
+  const client = new GoogleDriveClient("access-token", async (input) => {
+    const url = new URL(String(input));
+    requests.push(url);
+    return Response.json(url.searchParams.get("pageToken")
+      ? { permissions: [{ id: "p2", type: "user", emailAddress: "user@example.com" }] }
+      : { nextPageToken: "next", permissions: [{ id: "p1", type: "anyone", allowFileDiscovery: false }] });
+  });
+  assert.equal((await client.listPermissions("file-1")).length, 2);
+  assert.equal(requests.length, 2);
+  assert.match(requests[0].searchParams.get("fields") ?? "", /allowFileDiscovery/);
+  assert.equal(requests[1].searchParams.get("pageToken"), "next");
 });
 
 await test("downloads text and rejects oversized metadata", async () => {

@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Orin GitHub App — webhook listener + async workers.",
+  "description": "Orin workspace memory API, connector services, and async workers.",
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
@@ -13,7 +13,7 @@
     "linear": "node dist/linear.js",
     "dev": "node --watch src/index.ts",
     "typecheck": "tsc --noEmit",
-    "test": "tsc && node test/access.test.mjs && node test/content.test.mjs && node test/knowledge.test.mjs && node test/google-drive.test.mjs && node test/connectors.test.mjs && node test/dashboard.test.mjs && node test/patch.test.mjs && node test/commands.test.mjs && node test/pipeline.test.mjs && node test/queues.test.mjs",
+    "test": "tsc && node test/access.test.mjs && node test/content.test.mjs && node test/knowledge.test.mjs && node test/google-drive.test.mjs && node test/slack.test.mjs && node test/connectors.test.mjs && node test/auth.test.mjs && node test/dashboard.test.mjs && node test/patch.test.mjs && node test/commands.test.mjs && node test/pipeline.test.mjs && node test/queues.test.mjs",
     "test:integration": "tsc && node test/integration/db.mjs && node test/integration/cognee.mjs"
   },
   "dependencies": {
@@ -23,6 +23,7 @@
     "@linear/sdk": "^88.0.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@slack/bolt": "^4.7.3",
+    "@slack/web-api": "^7.19.0",
     "ai": "^7.0.11",
     "dotenv": "^17.4.2",
     "octokit": "^5.0.5",

@@ -13,10 +13,14 @@ import type { DeliveryMode } from "./types.js";
 import type { CatchJob, CommandJob, IngestJob } from "./queues.js";
 import type { DriveSyncJob } from "./queues.js";
 import { runGoogleDriveSync } from "./google-drive.js";
+import * as enterprise from "./enterprise-db.js";
+import * as content from "./content-db.js";
 
 export async function startQueue(): Promise<PgBoss> {
   const boss = new PgBoss(config.databaseUrl);
   await boss.start();
+  await content.failStaleConnectorSyncs();
+  await enterprise.pruneExpiredRateLimits();
   await boss.createQueue(QUEUE.ingest);
   await boss.createQueue(QUEUE.catch, { name: QUEUE.catch, ...CATCH_RETRY_OPTIONS });
   await boss.updateQueue(QUEUE.catch, { name: QUEUE.catch, ...CATCH_RETRY_OPTIONS });
@@ -32,6 +36,8 @@ export async function startQueue(): Promise<PgBoss> {
     for (const job of jobs) await runGoogleDriveSync(job.data);
   });
   await boss.work(QUEUE.connectorScheduler, async () => {
+    await enterprise.pruneExpiredRateLimits();
+    await content.failStaleConnectorSyncs();
     for (const connector of await db.listActiveConnectorsByProvider("gdrive")) {
       await boss.send(QUEUE.driveSync, {
         workspaceId: connector.workspaceId,

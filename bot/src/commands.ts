@@ -86,6 +86,24 @@ async function isAdmin(octokit: Gh, owner: string, repo: string, username: strin
   return (await permission(octokit, owner, repo, username)) === "admin";
 }
 
+export function githubInstallationLinkEligible(
+  owner: string,
+  username: string,
+  membership?: { state?: string; role?: string },
+): boolean {
+  return owner.toLowerCase() === username.toLowerCase() || membership?.state === "active" && membership.role === "admin";
+}
+
+async function canLinkInstallation(octokit: Gh, owner: string, username: string): Promise<boolean> {
+  if (githubInstallationLinkEligible(owner, username)) return true;
+  try {
+    const { data } = await octokit.rest.orgs.getMembershipForUser({ org: owner, username });
+    return githubInstallationLinkEligible(owner, username, data);
+  } catch {
+    return false;
+  }
+}
+
 export async function handleCommand(job: CommandJob, boss: PgBoss): Promise<void> {
   const cmd = parseCommand(job.body);
   if (!cmd) return;
@@ -188,10 +206,9 @@ export async function handleCommand(job: CommandJob, boss: PgBoss): Promise<void
       break;
     }
     case "link": {
-      // Consume a one-time code minted in Slack (`/orin link`) → link that workspace to THIS
-      // installation's memory. Write access required so outsiders can't attach workspaces here.
-      if (!(await canMutate(octokit, owner, repo, job.sender))) {
-        await reply(`@${job.sender} — \`link\` needs write access to this repo.`);
+      // Consume a workspace-bound one-time code only after an administrator approves the installation-wide link.
+      if (!(await canLinkInstallation(octokit, owner, job.sender))) {
+        await reply(`@${job.sender}: \`link\` needs personal installation ownership or active organization ownership.`);
         break;
       }
       if (!cmd.code) {

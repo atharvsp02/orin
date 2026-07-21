@@ -139,26 +139,26 @@ async function main() {
     });
   });
 
-  createServer((req, res) => {
+  const server = createServer((req, res) => {
     const pathname = (req.url ?? "/").split("?")[0];
     if (req.method === "POST" && pathname === "/api/github/webhooks") {
-      void handleWebhook(req, res);
+      void handleWebhook(req, res).catch((error) => failRequest(res, "webhook failed", error));
       return;
     }
     if (req.method === "POST" && pathname === "/v1/preflight") {
-      void handlePreflight(req, res);
+      void handlePreflight(req, res).catch((error) => failRequest(res, "preflight failed", error));
       return;
     }
     if (req.method === "POST" && pathname === "/v1/preflight-keys") {
-      void handleIssueKey(req, res);
+      void handleIssueKey(req, res).catch((error) => failRequest(res, "key issuance failed", error));
       return;
     }
     if (req.method === "GET" && pathname === "/v1/metrics") {
-      void handleMetrics(req, res);
+      void handleMetrics(req, res).catch((error) => failRequest(res, "metrics failed", error));
       return;
     }
     if (req.method === "GET" && pathname === "/v1/graph") {
-      void handleGraph(req, res);
+      void handleGraph(req, res).catch((error) => failRequest(res, "graph failed", error));
       return;
     }
     // Dashboard sign-in + API (session-cookie auth).
@@ -168,8 +168,7 @@ async function main() {
     }
     if (req.method === "GET" && pathname === "/v1/auth/callback") {
       void handleAuthCallback(req, res).catch((e) => {
-        console.error("auth callback failed:", (e as Error).message);
-        res.writeHead(500).end("sign-in failed");
+        failRequest(res, "auth callback failed", e);
       });
       return;
     }
@@ -178,31 +177,40 @@ async function main() {
       return;
     }
     if (req.method === "GET" && pathname === "/v1/me") {
-      void handleMe(req, res);
+      void handleMe(req, res).catch((error) => failRequest(res, "session lookup failed", error));
       return;
     }
     if (req.method === "GET" && pathname === "/v1/connectors/google-drive/start") {
       void handleGoogleDriveStart(req, res).catch((error) => {
-        console.error("Google Drive OAuth start failed:", safeJobError(error));
-        send(res, 500, { error: "Google Drive connection failed" });
+        failRequest(res, "Google Drive OAuth start failed", error);
       });
       return;
     }
     if (req.method === "GET" && pathname === "/v1/connectors/google-drive/callback") {
       void handleGoogleDriveCallback(req, res).catch((error) => {
-        console.error("Google Drive OAuth callback failed:", safeJobError(error));
-        send(res, 500, { error: "Google Drive connection failed" });
+        failRequest(res, "Google Drive OAuth callback failed", error);
       });
       return;
     }
     if (pathname.startsWith("/v1/dash/") || pathname.startsWith("/v1/workspaces/")) {
       void handleDash(req, res, pathname).then((handled) => {
         if (!handled) res.writeHead(404, { "Content-Type": "application/json" }).end('{"error":"not found"}');
-      });
+      }).catch((error) => failRequest(res, "dashboard request failed", error));
       return;
     }
     res.writeHead(404, { "Content-Type": "application/json" }).end('{"error":"not found"}');
-  }).listen(config.port, () => console.log(`Orin bot listening on :${config.port}`));
+  });
+  server.headersTimeout = 15_000;
+  server.requestTimeout = 120_000;
+  server.keepAliveTimeout = 5_000;
+  server.maxHeadersCount = 100;
+  server.listen(config.port, () => console.log(`Orin bot listening on :${config.port}`));
+}
+
+function failRequest(res: ServerResponse, label: string, error: unknown): void {
+  console.error(`${label}:`, safeJobError(error));
+  if (!res.headersSent) send(res, 500, { error: "internal request failure" });
+  else if (!res.writableEnded) res.end();
 }
 
 // Verify + dispatch a GitHub App webhook using the App's own webhooks instance (App-JWT auth, no OAuth).
@@ -214,19 +222,31 @@ async function handleWebhook(req: IncomingMessage, res: ServerResponse): Promise
     res.writeHead(400).end("missing webhook headers");
     return;
   }
+  const maxBytes = 25 * 1024 * 1024;
+  const declaredBytes = Number(req.headers["content-length"] ?? 0);
+  if (Number.isFinite(declaredBytes) && declaredBytes > maxBytes) {
+    res.writeHead(413).end("webhook payload too large");
+    return;
+  }
   const chunks: Buffer[] = [];
-  req.on("data", (c: Buffer) => chunks.push(c));
-  req.on("end", () => {
-    const payload = Buffer.concat(chunks).toString("utf8"); // exact bytes GitHub signed
-    app.webhooks
-      .verifyAndReceive({ id, name: name as never, signature, payload })
-      .then(() => res.writeHead(200, { "Content-Type": "application/json" }).end('{"ok":true}'))
-      .catch((e: Error) => {
-        console.warn("webhook rejected:", e.message);
-        res.writeHead(400).end("invalid signature or handler error");
-      });
-  });
-  req.on("error", () => res.writeHead(400).end("read error"));
+  let length = 0;
+  for await (const chunk of req) {
+    const buffer = Buffer.from(chunk);
+    length += buffer.length;
+    if (length > maxBytes) {
+      res.writeHead(413).end("webhook payload too large");
+      return;
+    }
+    chunks.push(buffer);
+  }
+  const payload = Buffer.concat(chunks).toString("utf8");
+  try {
+    await app.webhooks.verifyAndReceive({ id, name: name as never, signature, payload });
+    res.writeHead(200, { "Content-Type": "application/json" }).end('{"ok":true}');
+  } catch (error) {
+    console.warn("webhook rejected:", safeJobError(error));
+    res.writeHead(400).end("invalid signature or handler error");
+  }
 }
 
 main().catch((err) => {

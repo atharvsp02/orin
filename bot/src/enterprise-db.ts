@@ -120,6 +120,8 @@ function cleanEmail(value?: string): string {
   return email;
 }
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 function parseConditions(value: unknown): Record<string, string | string[]> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const parsed: Record<string, string | string[]> = {};
@@ -149,6 +151,7 @@ export async function upsertUserIdentity(input: {
   displayName: string;
   email?: string;
   avatarUrl?: string;
+  reactivate?: boolean;
 }): Promise<OrinUser> {
   const provider = cleanProvider(input.provider);
   const externalId = cleanExternalId(input.externalId);
@@ -174,9 +177,9 @@ export async function upsertUserIdentity(input: {
          display_name = EXCLUDED.display_name,
          primary_email = CASE WHEN EXCLUDED.primary_email <> '' THEN EXCLUDED.primary_email ELSE users.primary_email END,
          avatar_url = CASE WHEN EXCLUDED.avatar_url <> '' THEN EXCLUDED.avatar_url ELSE users.avatar_url END,
-         status = 'active',
+         status = CASE WHEN $5 THEN 'active' ELSE users.status END,
          updated_at = now()`,
-      [userId, displayName, email, input.avatarUrl?.trim().slice(0, 1000) ?? ""],
+      [userId, displayName, email, input.avatarUrl?.trim().slice(0, 1000) ?? "", input.reactivate ?? true],
     );
     await client.query(
       `INSERT INTO user_identities (provider, external_id, user_id, handle, email)
@@ -211,16 +214,18 @@ export async function addUserIdentity(userId: string, input: {
 }): Promise<void> {
   const provider = cleanProvider(input.provider);
   const externalId = cleanExternalId(input.externalId);
-  await pool.query(
+  const result = await pool.query(
     `INSERT INTO user_identities (provider, external_id, user_id, handle, email)
      VALUES ($1, $2, $3, $4, $5)
      ON CONFLICT (provider, external_id) DO UPDATE SET
-       user_id = EXCLUDED.user_id,
        handle = EXCLUDED.handle,
        email = CASE WHEN EXCLUDED.email <> '' THEN EXCLUDED.email ELSE user_identities.email END,
-       updated_at = now()`,
+       updated_at = now()
+     WHERE user_identities.user_id = EXCLUDED.user_id
+     RETURNING user_id`,
     [provider, externalId, userId, input.handle?.trim().slice(0, 160) ?? "", cleanEmail(input.email)],
   );
+  if (result.rowCount !== 1) throw new Error("identity is already linked to another user");
 }
 
 export async function getUser(userId: string): Promise<OrinUser | null> {
@@ -239,19 +244,31 @@ export async function getUserByIdentity(provider: string, externalId: string): P
 }
 
 export async function bootstrapWorkspaceMembership(userId: string, workspaceId: string): Promise<WorkspaceMembership> {
-  const { rows: countRows } = await pool.query(
-    `SELECT count(*)::int AS count FROM workspace_memberships WHERE workspace_id = $1 AND status = 'active'`,
-    [workspaceId],
-  );
-  const initialRole: WorkspaceRole = Number(countRows[0]?.count ?? 0) === 0 ? "owner" : "admin";
-  const { rows } = await pool.query(
-    `INSERT INTO workspace_memberships (workspace_id, user_id, role)
-     VALUES ($1, $2, $3)
-     ON CONFLICT (workspace_id, user_id) DO UPDATE SET status = 'active', updated_at = now()
-     RETURNING *, status AS membership_status`,
-    [workspaceId, userId, initialRole],
-  );
-  return membershipFromRow(rows[0]);
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const workspace = await client.query(`SELECT 1 FROM workspaces WHERE workspace_id = $1 FOR UPDATE`, [workspaceId]);
+    if (workspace.rowCount !== 1) throw new Error("workspace not found");
+    const { rows: countRows } = await client.query(
+      `SELECT count(*)::int AS count FROM workspace_memberships WHERE workspace_id = $1 AND status = 'active'`,
+      [workspaceId],
+    );
+    const initialRole: WorkspaceRole = Number(countRows[0]?.count ?? 0) === 0 ? "owner" : "admin";
+    const { rows } = await client.query(
+      `INSERT INTO workspace_memberships (workspace_id, user_id, role)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (workspace_id, user_id) DO UPDATE SET updated_at = workspace_memberships.updated_at
+       RETURNING *, status AS membership_status`,
+      [workspaceId, userId, initialRole],
+    );
+    await client.query("COMMIT");
+    return membershipFromRow(rows[0]);
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function listUserWorkspaces(userId: string): Promise<Array<{
@@ -349,29 +366,87 @@ export async function listMemberships(workspaceId: string): Promise<WorkspaceMem
   return rows.map(membershipFromRow);
 }
 
+export async function getWorkspaceMembership(workspaceId: string, userId: string): Promise<WorkspaceMembership | null> {
+  const { rows } = await pool.query(
+    `SELECT m.*, m.status AS membership_status, u.display_name, u.primary_email, u.avatar_url
+     FROM workspace_memberships m
+     JOIN users u ON u.user_id = m.user_id
+     WHERE m.workspace_id = $1 AND m.user_id = $2`,
+    [workspaceId, userId],
+  );
+  return rows[0] ? membershipFromRow(rows[0]) : null;
+}
+
 export async function inviteWorkspaceMember(input: {
   workspaceId: string;
   email: string;
   displayName?: string;
   role: WorkspaceRole;
+  allowOwnerChange?: boolean;
 }): Promise<WorkspaceMembership> {
   if (!isWorkspaceRole(input.role)) throw new Error("invalid workspace role");
   const email = cleanEmail(input.email);
   if (!email) throw new Error("email is required");
-  const user = await upsertUserIdentity({
-    provider: "email",
-    externalId: email,
-    displayName: input.displayName?.trim() || email.split("@")[0],
-    email,
-  });
-  const { rows } = await pool.query(
-    `INSERT INTO workspace_memberships (workspace_id, user_id, role)
-     VALUES ($1, $2, $3)
-     ON CONFLICT (workspace_id, user_id) DO UPDATE SET role = EXCLUDED.role, status = 'active', updated_at = now()
-     RETURNING *, status AS membership_status`,
-    [input.workspaceId, user.userId, input.role],
-  );
-  return membershipFromRow(rows[0]);
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const workspace = await client.query(`SELECT 1 FROM workspaces WHERE workspace_id = $1 FOR UPDATE`, [input.workspaceId]);
+    if (workspace.rowCount !== 1) throw new Error("workspace not found");
+    await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, [`orin-invite:${email}`]);
+    const existingUser = await client.query(
+      `SELECT user_id FROM users WHERE lower(primary_email) = $1 FOR UPDATE`,
+      [email],
+    );
+    const userId = existingUser.rows[0]?.user_id
+      ? String(existingUser.rows[0].user_id)
+      : stableUserId("email", email);
+    const existing = await client.query(
+      `SELECT role, status FROM workspace_memberships WHERE workspace_id = $1 AND user_id = $2 FOR UPDATE`,
+      [input.workspaceId, userId],
+    );
+    const current = existing.rows[0] as { role?: string; status?: string } | undefined;
+    if ((current?.role === "owner" || input.role === "owner") && !input.allowOwnerChange) {
+      throw new Error("only an owner can change owner access");
+    }
+    if (current?.role === "owner" && current.status === "active" && input.role !== "owner") {
+      const owners = await client.query(
+        `SELECT count(*)::int AS count FROM workspace_memberships
+         WHERE workspace_id = $1 AND role = 'owner' AND status = 'active'`,
+        [input.workspaceId],
+      );
+      if (Number(owners.rows[0]?.count ?? 0) <= 1) throw new Error("a workspace must keep at least one active owner");
+    }
+    if (existingUser.rowCount === 0) {
+      await client.query(
+        `INSERT INTO users (user_id, display_name, primary_email)
+         VALUES ($1, $2, $3)`,
+        [userId, input.displayName?.trim().slice(0, 160) || email.split("@")[0], email],
+      );
+    }
+    const identity = await client.query(
+      `INSERT INTO user_identities (provider, external_id, user_id, handle, email)
+       VALUES ('email', $1, $2, $1, $1)
+       ON CONFLICT (provider, external_id) DO UPDATE SET updated_at = now()
+       WHERE user_identities.user_id = EXCLUDED.user_id
+       RETURNING user_id`,
+      [email, userId],
+    );
+    if (identity.rowCount !== 1) throw new Error("identity is already linked to another user");
+    const { rows } = await client.query(
+      `INSERT INTO workspace_memberships (workspace_id, user_id, role)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (workspace_id, user_id) DO UPDATE SET role = EXCLUDED.role, status = 'active', updated_at = now()
+       RETURNING *, status AS membership_status`,
+      [input.workspaceId, userId, input.role],
+    );
+    await client.query("COMMIT");
+    return membershipFromRow(rows[0]);
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function updateWorkspaceMember(input: {
@@ -379,16 +454,54 @@ export async function updateWorkspaceMember(input: {
   userId: string;
   role?: WorkspaceRole;
   status?: "active" | "suspended";
+  allowOwnerChange?: boolean;
 }): Promise<WorkspaceMembership | null> {
   if (input.role !== undefined && !isWorkspaceRole(input.role)) throw new Error("invalid workspace role");
-  const { rows } = await pool.query(
-    `UPDATE workspace_memberships
-     SET role = COALESCE($3, role), status = COALESCE($4, status), updated_at = now()
-     WHERE workspace_id = $1 AND user_id = $2
-     RETURNING *, status AS membership_status`,
-    [input.workspaceId, input.userId, input.role ?? null, input.status ?? null],
-  );
-  return rows[0] ? membershipFromRow(rows[0]) : null;
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const workspace = await client.query(`SELECT 1 FROM workspaces WHERE workspace_id = $1 FOR UPDATE`, [input.workspaceId]);
+    if (workspace.rowCount !== 1) {
+      await client.query("ROLLBACK");
+      return null;
+    }
+    const current = await client.query(
+      `SELECT * FROM workspace_memberships WHERE workspace_id = $1 AND user_id = $2 FOR UPDATE`,
+      [input.workspaceId, input.userId],
+    );
+    if (current.rowCount !== 1) {
+      await client.query("ROLLBACK");
+      return null;
+    }
+    const row = current.rows[0] as { role: WorkspaceRole; status: "active" | "suspended" };
+    const nextRole = input.role ?? row.role;
+    const nextStatus = input.status ?? row.status;
+    if ((row.role === "owner" || nextRole === "owner") && !input.allowOwnerChange) {
+      throw new Error("only an owner can change owner access");
+    }
+    if (row.role === "owner" && row.status === "active" && (nextRole !== "owner" || nextStatus !== "active")) {
+      const owners = await client.query(
+        `SELECT count(*)::int AS count FROM workspace_memberships
+         WHERE workspace_id = $1 AND role = 'owner' AND status = 'active'`,
+        [input.workspaceId],
+      );
+      if (Number(owners.rows[0]?.count ?? 0) <= 1) throw new Error("a workspace must keep at least one active owner");
+    }
+    const { rows } = await client.query(
+      `UPDATE workspace_memberships
+       SET role = $3, status = $4, updated_at = now()
+       WHERE workspace_id = $1 AND user_id = $2
+       RETURNING *, status AS membership_status`,
+      [input.workspaceId, input.userId, nextRole, nextStatus],
+    );
+    await client.query("COMMIT");
+    return membershipFromRow(rows[0]);
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function countActiveOwners(workspaceId: string): Promise<number> {
@@ -407,11 +520,12 @@ export async function createGroup(input: {
 }): Promise<WorkspaceGroup> {
   const displayName = input.displayName.trim().slice(0, 160);
   if (!displayName) throw new Error("group name is required");
+  const externalId = input.externalId?.trim().toLowerCase().slice(0, 320) || null;
   const { rows } = await pool.query(
     `INSERT INTO workspace_groups (group_id, workspace_id, display_name, external_id)
      VALUES ($1, $2, $3, $4)
      RETURNING *, 0::int AS member_count`,
-    [randomUUID(), input.workspaceId, displayName, input.externalId?.trim().slice(0, 320) || null],
+    [randomUUID(), input.workspaceId, displayName, externalId],
   );
   return groupFromRow(rows[0]);
 }
@@ -441,15 +555,39 @@ export async function listGroups(workspaceId: string): Promise<WorkspaceGroup[]>
 }
 
 export async function deleteGroup(workspaceId: string, groupId: string): Promise<boolean> {
-  const result = await pool.query(
-    `DELETE FROM workspace_groups WHERE workspace_id = $1 AND group_id = $2`,
-    [workspaceId, groupId],
-  );
-  return result.rowCount === 1;
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const group = await client.query(
+      `SELECT 1 FROM workspace_groups WHERE workspace_id = $1 AND group_id = $2 FOR UPDATE`,
+      [workspaceId, groupId],
+    );
+    if (group.rowCount !== 1) {
+      await client.query("ROLLBACK");
+      return false;
+    }
+    await client.query(
+      `DELETE FROM permission_grants
+       WHERE workspace_id = $1 AND principal_type = 'group' AND principal_id = $2::text`,
+      [workspaceId, groupId],
+    );
+    const result = await client.query(
+      `DELETE FROM workspace_groups WHERE workspace_id = $1 AND group_id = $2`,
+      [workspaceId, groupId],
+    );
+    await client.query("COMMIT");
+    return result.rowCount === 1;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function replaceGroupMembers(workspaceId: string, groupId: string, userIds: string[]): Promise<void> {
   const uniqueIds = [...new Set(userIds)];
+  if (uniqueIds.length > 1000) throw new Error("group membership exceeds 1000 users");
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -497,17 +635,42 @@ export async function upsertPermissionGrant(input: {
   const principalId = input.principalId.trim().toLowerCase();
   if (!principalId) throw new Error("grant principal id is required");
   if (input.principalType === "role" && !isWorkspaceRole(principalId)) throw new Error("invalid grant role");
+  if (input.principalType !== "role" && !UUID_PATTERN.test(principalId)) throw new Error("invalid grant principal id");
   const conditions = parseConditions(input.conditions);
-  const { rows } = await pool.query(
-    `INSERT INTO permission_grants
-       (grant_id, workspace_id, principal_type, principal_id, permission, effect, conditions)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
-     ON CONFLICT (workspace_id, principal_type, principal_id, permission, conditions) DO UPDATE SET
-       effect = EXCLUDED.effect, updated_at = now()
-     RETURNING *`,
-    [input.grantId ?? randomUUID(), input.workspaceId, input.principalType, principalId, input.permission, input.effect, conditions],
-  );
-  return grantFromRow(rows[0]);
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    if (input.principalType === "user") {
+      const member = await client.query(
+        `SELECT 1 FROM workspace_memberships WHERE workspace_id = $1 AND user_id = $2 FOR SHARE`,
+        [input.workspaceId, principalId],
+      );
+      if (member.rowCount !== 1) throw new Error("grant user is not a workspace member");
+    }
+    if (input.principalType === "group") {
+      const group = await client.query(
+        `SELECT 1 FROM workspace_groups WHERE workspace_id = $1 AND group_id = $2 FOR SHARE`,
+        [input.workspaceId, principalId],
+      );
+      if (group.rowCount !== 1) throw new Error("grant group not found");
+    }
+    const { rows } = await client.query(
+      `INSERT INTO permission_grants
+         (grant_id, workspace_id, principal_type, principal_id, permission, effect, conditions)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (workspace_id, principal_type, principal_id, permission, conditions) DO UPDATE SET
+         effect = EXCLUDED.effect, updated_at = now()
+       RETURNING *`,
+      [input.grantId ?? randomUUID(), input.workspaceId, input.principalType, principalId, input.permission, input.effect, conditions],
+    );
+    await client.query("COMMIT");
+    return grantFromRow(rows[0]);
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function listPermissionGrants(workspaceId: string): Promise<StoredPermissionGrant[]> {
@@ -516,6 +679,14 @@ export async function listPermissionGrants(workspaceId: string): Promise<StoredP
     [workspaceId],
   );
   return rows.filter((row) => isWorkspacePermission(row.permission)).map(grantFromRow);
+}
+
+export async function getPermissionGrant(workspaceId: string, grantId: string): Promise<StoredPermissionGrant | null> {
+  const { rows } = await pool.query(
+    `SELECT * FROM permission_grants WHERE workspace_id = $1 AND grant_id = $2`,
+    [workspaceId, grantId],
+  );
+  return rows[0] && isWorkspacePermission(rows[0].permission) ? grantFromRow(rows[0]) : null;
 }
 
 export async function deletePermissionGrant(workspaceId: string, grantId: string): Promise<boolean> {
@@ -624,13 +795,15 @@ export async function consumeRateLimit(input: {
   const limit = Math.max(1, Math.min(Math.floor(input.limit), 10_000));
   const nowSeconds = Math.floor(Date.now() / 1000);
   const bucket = Math.floor(nowSeconds / windowSeconds);
+  const expiresAt = new Date(((bucket + 1) * windowSeconds + 3600) * 1000).toISOString();
   const { rows } = await pool.query(
-    `INSERT INTO request_rate_limits (workspace_id, user_id, action, bucket, request_count)
-     VALUES ($1, $2, $3, $4, 1)
+    `INSERT INTO request_rate_limits (workspace_id, user_id, action, bucket, request_count, expires_at)
+     VALUES ($1, $2, $3, $4, 1, $5)
      ON CONFLICT (workspace_id, user_id, action, bucket) DO UPDATE SET
-       request_count = request_rate_limits.request_count + 1
+       request_count = request_rate_limits.request_count + 1,
+       expires_at = GREATEST(request_rate_limits.expires_at, EXCLUDED.expires_at)
      RETURNING request_count`,
-    [input.workspaceId, input.userId, input.action.trim().slice(0, 80), bucket],
+    [input.workspaceId, input.userId, input.action.trim().slice(0, 80), bucket, expiresAt],
   );
   const count = Number(rows[0].request_count);
   return {
@@ -638,4 +811,9 @@ export async function consumeRateLimit(input: {
     remaining: Math.max(0, limit - count),
     retryAfterSeconds: windowSeconds - nowSeconds % windowSeconds,
   };
+}
+
+export async function pruneExpiredRateLimits(): Promise<number> {
+  const result = await pool.query(`DELETE FROM request_rate_limits WHERE expires_at < now()`);
+  return result.rowCount ?? 0;
 }

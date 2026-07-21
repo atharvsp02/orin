@@ -35,6 +35,8 @@ export interface ConnectorResource {
   kind: string;
   displayName: string;
   enabled: boolean;
+  aclStatus: "current" | "stale" | "failed";
+  aclSyncedAt?: string;
   createdAt: string;
   updatedAt: string;
 }

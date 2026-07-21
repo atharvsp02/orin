@@ -7,7 +7,7 @@ process.env.GITHUB_PRIVATE_KEY ??= "dummy";
 process.env.GITHUB_WEBHOOK_SECRET ??= "dummy";
 
 const { dashboardPermission, isDashboardEntityId, parseDashboardPath } = await import("../dist/dash.js");
-const { originsMatch } = await import("../dist/auth.js");
+const { githubInstallationBootstrapEligible, originsMatch } = await import("../dist/auth.js");
 
 let passed = 0;
 const test = (name, fn) => {
@@ -91,6 +91,34 @@ test("compares mutation origins exactly", () => {
   assert.equal(originsMatch("https://evil.example", "https://orin.example"), false);
   assert.equal(originsMatch("https://orin.example.evil.test", "https://orin.example"), false);
   assert.equal(originsMatch("not a url", "https://orin.example"), false);
+});
+
+test("bootstraps only GitHub installation owners", () => {
+  const user = { id: 7, login: "owner" };
+  assert.equal(githubInstallationBootstrapEligible({
+    id: 1,
+    app_id: 1,
+    target_type: "User",
+    account: { id: 7, login: "owner", type: "User" },
+  }, user), true);
+  assert.equal(githubInstallationBootstrapEligible({
+    id: 2,
+    app_id: 1,
+    target_type: "Organization",
+    account: { id: 8, login: "acme", type: "Organization" },
+  }, user, { state: "active", role: "admin" }), true);
+  assert.equal(githubInstallationBootstrapEligible({
+    id: 2,
+    app_id: 1,
+    target_type: "Organization",
+    account: { id: 8, login: "acme", type: "Organization" },
+  }, user, { state: "active", role: "member" }), false);
+  assert.equal(githubInstallationBootstrapEligible({
+    id: 3,
+    app_id: 1,
+    target_type: "User",
+    account: { id: 99, login: "someone-else", type: "User" },
+  }, user), false);
 });
 
 console.log(`${passed} dashboard route checks passed`);

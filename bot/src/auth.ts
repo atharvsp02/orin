@@ -3,7 +3,7 @@
 // THIS App the user can access, and that list (in a signed cookie) is all they can see.
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { canPotentially, WORKSPACE_PERMISSIONS } from "./access.js";
+import { can, canPotentially, WORKSPACE_PERMISSIONS } from "./access.js";
 import { config } from "./config.js";
 import * as db from "./db.js";
 import * as enterprise from "./enterprise-db.js";
@@ -18,6 +18,64 @@ export interface Session {
   avatar: string;
   ids: number[]; // installation ids this user administers
   exp: number;
+}
+
+interface GitHubUser {
+  id?: number;
+  login?: string;
+  name?: string;
+  email?: string;
+  avatar_url?: string;
+}
+
+interface GitHubInstallation {
+  id: number;
+  app_id: number;
+  target_type?: string;
+  account?: { id?: number; login?: string; type?: string };
+}
+
+interface GitHubOrganizationMembership {
+  state?: string;
+  role?: string;
+}
+
+export async function fetchGitHubInstallations(
+  headers: Record<string, string>,
+  fetchImpl: typeof fetch = fetch,
+): Promise<GitHubInstallation[] | null> {
+  const installations: GitHubInstallation[] = [];
+  const seen = new Set<string>();
+  let url = "https://api.github.com/user/installations?per_page=100";
+  while (url && !seen.has(url) && seen.size < 100) {
+    seen.add(url);
+    const response = await fetchImpl(url, { headers });
+    if (!response.ok) return null;
+    const page = await response.json() as { installations?: GitHubInstallation[] };
+    if (page.installations !== undefined && !Array.isArray(page.installations)) return null;
+    installations.push(...(page.installations ?? []));
+    const next = response.headers.get("link")?.split(",").find((part) => part.includes('rel="next"'))?.match(/<([^>]+)>/)?.[1] ?? "";
+    if (next) {
+      try {
+        const parsed = new URL(next);
+        if (parsed.origin !== "https://api.github.com" || parsed.pathname !== "/user/installations") return null;
+        url = parsed.toString();
+      } catch {
+        return null;
+      }
+    } else url = "";
+  }
+  return url ? null : installations;
+}
+
+export function githubInstallationBootstrapEligible(
+  installation: GitHubInstallation,
+  user: GitHubUser,
+  membership?: GitHubOrganizationMembership,
+): boolean {
+  const targetType = installation.target_type ?? installation.account?.type;
+  if (targetType === "User") return installation.account?.id === user.id;
+  return targetType === "Organization" && membership?.state === "active" && membership.role === "admin";
 }
 
 const b64u = (b: Buffer) => b.toString("base64url");
@@ -143,39 +201,66 @@ export async function handleAuthCallback(req: IncomingMessage, res: ServerRespon
       redirect_uri: `${requestOrigin(req)}/v1/auth/callback`,
     }),
   });
-  const token = ((await tokenRes.json()) as { access_token?: string }).access_token;
+  const token = tokenRes.ok ? ((await tokenRes.json()) as { access_token?: string }).access_token : undefined;
   if (!token) return send(res, 502, { error: "github token exchange failed" });
 
-  const gh = { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "User-Agent": "orin-bot" };
-  const user = (await (await fetch("https://api.github.com/user", { headers: gh })).json()) as {
-    id?: number;
-    login?: string;
-    name?: string;
-    email?: string;
-    avatar_url?: string;
+  const gh = {
+    Authorization: `Bearer ${token}`,
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2026-03-10",
+    "User-Agent": "orin-bot",
   };
-  const insts = (await (await fetch("https://api.github.com/user/installations?per_page=100", { headers: gh })).json()) as {
-    installations?: Array<{ id: number; app_id: number }>;
-  };
-  // The user token is used ONLY here and discarded; the session carries just the outcome.
-  const ids = (insts.installations ?? [])
-    .filter((i) => String(i.app_id) === String(config.github.appId))
-    .map((i) => i.id);
+  const [userResponse, installationRows, emailsResponse] = await Promise.all([
+    fetch("https://api.github.com/user", { headers: gh }),
+    fetchGitHubInstallations(gh),
+    fetch("https://api.github.com/user/emails?per_page=100", { headers: gh }),
+  ]);
+  if (!userResponse.ok || !installationRows) return send(res, 502, { error: "github account lookup failed" });
+  const user = await userResponse.json() as GitHubUser;
+  const emails = emailsResponse.ok
+    ? await emailsResponse.json() as Array<{ email?: string; primary?: boolean; verified?: boolean }>
+    : [];
 
   if (!user.login || !user.id) return send(res, 502, { error: "github user lookup failed" });
+  const verifiedEmail = emails.find((email) => email.primary && email.verified)?.email;
+  const installations = installationRows.filter(
+    (installation) => String(installation.app_id) === String(config.github.appId),
+  );
+  const eligibleInstallations: GitHubInstallation[] = [];
+  for (let offset = 0; offset < installations.length; offset += 10) {
+    const batch = installations.slice(offset, offset + 10);
+    const eligible = await Promise.all(batch.map(async (installation) => {
+      let membership: GitHubOrganizationMembership | undefined;
+      const targetType = installation.target_type ?? installation.account?.type;
+      if (targetType === "Organization" && installation.account?.login) {
+        try {
+          const response = await fetch(
+            `https://api.github.com/user/memberships/orgs/${encodeURIComponent(installation.account.login)}`,
+            { headers: gh },
+          );
+          if (response.ok) membership = await response.json() as GitHubOrganizationMembership;
+        } catch {
+          membership = undefined;
+        }
+      }
+      return githubInstallationBootstrapEligible(installation, user, membership) ? installation : null;
+    }));
+    eligibleInstallations.push(...eligible.filter((installation): installation is GitHubInstallation => installation !== null));
+  }
+  const ids = eligibleInstallations.map((installation) => installation.id);
   const orinUser = await enterprise.upsertUserIdentity({
     provider: "github",
     externalId: String(user.id),
     handle: user.login,
     displayName: user.name?.trim() || user.login,
-    email: user.email,
+    email: verifiedEmail,
     avatarUrl: user.avatar_url,
   });
   await enterprise.addUserIdentity(orinUser.userId, {
     provider: "github_login",
     externalId: user.login.toLowerCase(),
     handle: user.login,
-    email: user.email,
+    email: verifiedEmail,
   });
   await bootstrapSessionMemberships(ids, orinUser.userId);
   const session: Session = {
@@ -221,7 +306,7 @@ export async function authenticatedUser(req: IncomingMessage): Promise<{
     displayName: session.login,
     avatarUrl: session.avatar,
   });
-  await bootstrapSessionMemberships(session.ids, user.userId);
+  if (user.status !== "active") return null;
   return { session, user };
 }
 
@@ -233,7 +318,8 @@ export async function handleMe(req: IncomingMessage, res: ServerResponse): Promi
   const installations = [];
   for (const id of s.ids) {
     const inst = await db.getInstallation(id);
-    if (inst) {
+    const workspace = await db.getWorkspaceByInstallation(id);
+    if (inst && workspace && await enterprise.getWorkspaceAccess(user.userId, workspace.workspaceId)) {
       const decisions = await db.countDecisions(id);
       installations.push({
         installationId: id,
@@ -245,6 +331,24 @@ export async function handleMe(req: IncomingMessage, res: ServerResponse): Promi
   const workspaces = await Promise.all((await enterprise.listUserWorkspaces(user.userId)).map(async (workspace) => {
     const connectors = await db.listConnectors(workspace.workspaceId);
     const access = await enterprise.getWorkspaceAccess(user.userId, workspace.workspaceId);
+    const visibleConnectors = [];
+    if (access) {
+      for (const connector of connectors) {
+        const providerVisible = can(
+          access.membership.role,
+          "connectors.read",
+          access.grants,
+          { connectorProvider: connector.provider },
+        );
+        const resourceVisible = !providerVisible && (await db.listConnectorResources(connector.connectorId)).some((resource) => can(
+          access.membership.role,
+          "connectors.read",
+          access.grants,
+          { connectorProvider: connector.provider, resourceId: resource.resourceId },
+        ));
+        if (providerVisible || resourceVisible) visibleConnectors.push(connector);
+      }
+    }
     return {
       workspaceId: workspace.workspaceId,
       displayName: workspace.displayName,
@@ -254,7 +358,7 @@ export async function handleMe(req: IncomingMessage, res: ServerResponse): Promi
       permissions: access
         ? WORKSPACE_PERMISSIONS.filter((permission) => canPotentially(access.membership.role, permission, access.grants))
         : [],
-      connectors: connectors.map(({ provider, displayName, status, capabilities }) => ({
+      connectors: visibleConnectors.map(({ provider, displayName, status, capabilities }) => ({
         provider,
         displayName,
         status,

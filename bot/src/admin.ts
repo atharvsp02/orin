@@ -79,10 +79,15 @@ function parseConditions(value: unknown): Record<string, string | string[]> | nu
   return conditions;
 }
 
-async function targetIsOwner(workspaceId: string, userId: string): Promise<boolean> {
-  return (await enterprise.listMemberships(workspaceId)).some(
-    (membership) => membership.userId === userId && membership.role === "owner" && membership.status === "active",
-  );
+async function targetHasOwnerRole(workspaceId: string, userId: string): Promise<boolean> {
+  return (await enterprise.getWorkspaceMembership(workspaceId, userId))?.role === "owner";
+}
+
+function membershipErrorStatus(error: unknown): number {
+  const message = error instanceof Error ? error.message : "membership update failed";
+  if (message === "only an owner can change owner access") return 403;
+  if (message === "a workspace must keep at least one active owner") return 409;
+  return 400;
 }
 
 export async function handleWorkspaceAdmin(input: {
@@ -123,11 +128,12 @@ export async function handleWorkspaceAdmin(input: {
         email: body.email,
         displayName: typeof body.displayName === "string" ? body.displayName : undefined,
         role,
+        allowOwnerChange: access.membership.role === "owner",
       });
       await audit(req, workspaceId, actorUserId, "membership.invited", "user", membership.userId, { role });
       send(res, 201, membership);
     } catch (error) {
-      send(res, 400, { error: (error as Error).message });
+      send(res, membershipErrorStatus(error), { error: (error as Error).message });
     }
     return true;
   }
@@ -140,26 +146,28 @@ export async function handleWorkspaceAdmin(input: {
     const body = await jsonBody(req);
     const role = body?.role;
     const status = body?.status;
-    if (!body || (role !== undefined && !isWorkspaceRole(role)) || (status !== undefined && status !== "active" && status !== "suspended")) {
+    if (!body || (role === undefined && status === undefined) || (role !== undefined && !isWorkspaceRole(role)) || (status !== undefined && status !== "active" && status !== "suspended")) {
       send(res, 400, { error: "valid role or status is required" });
       return true;
     }
-    const ownerTarget = await targetIsOwner(workspaceId, sub);
+    const ownerTarget = await targetHasOwnerRole(workspaceId, sub);
     if ((ownerTarget || role === "owner") && access.membership.role !== "owner") {
       send(res, 403, { error: "only an owner can change owner access" });
       return true;
     }
-    const removesOwner = ownerTarget && (role !== undefined && role !== "owner" || status === "suspended");
-    if (removesOwner && await enterprise.countActiveOwners(workspaceId) <= 1) {
-      send(res, 409, { error: "a workspace must keep at least one active owner" });
+    let membership;
+    try {
+      membership = await enterprise.updateWorkspaceMember({
+        workspaceId,
+        userId: sub,
+        role: role as WorkspaceRole | undefined,
+        status: status as "active" | "suspended" | undefined,
+        allowOwnerChange: access.membership.role === "owner",
+      });
+    } catch (error) {
+      send(res, membershipErrorStatus(error), { error: (error as Error).message });
       return true;
     }
-    const membership = await enterprise.updateWorkspaceMember({
-      workspaceId,
-      userId: sub,
-      role: role as WorkspaceRole | undefined,
-      status: status as "active" | "suspended" | undefined,
-    });
     if (!membership) {
       send(res, 404, { error: "member not found" });
       return true;
@@ -205,7 +213,7 @@ export async function handleWorkspaceAdmin(input: {
 
   if (resource === "groups" && req.method === "PUT" && sub) {
     const body = await jsonBody(req);
-    if (!UUID_PATTERN.test(sub) || !body || !Array.isArray(body.userIds) || !body.userIds.every((id) => typeof id === "string" && UUID_PATTERN.test(id))) {
+    if (!UUID_PATTERN.test(sub) || !body || !Array.isArray(body.userIds) || body.userIds.length > 1000 || !body.userIds.every((id) => typeof id === "string" && UUID_PATTERN.test(id))) {
       send(res, 400, { error: "valid group and user ids are required" });
       return true;
     }
@@ -253,7 +261,7 @@ export async function handleWorkspaceAdmin(input: {
       return true;
     }
     const targetsOwner = principalType === "role" && body.principalId === "owner" ||
-      principalType === "user" && await targetIsOwner(workspaceId, body.principalId);
+      principalType === "user" && await targetHasOwnerRole(workspaceId, body.principalId);
     if (targetsOwner && access.membership.role !== "owner") {
       send(res, 403, { error: "only an owner can change owner grants" });
       return true;
@@ -283,6 +291,17 @@ export async function handleWorkspaceAdmin(input: {
   if (resource === "policies" && req.method === "DELETE" && sub) {
     if (!UUID_PATTERN.test(sub)) {
       send(res, 400, { error: "invalid grant id" });
+      return true;
+    }
+    const grant = await enterprise.getPermissionGrant(workspaceId, sub);
+    if (!grant) {
+      send(res, 404, { error: "grant not found" });
+      return true;
+    }
+    const targetsOwner = grant.principalType === "role" && grant.principalId === "owner" ||
+      grant.principalType === "user" && await targetHasOwnerRole(workspaceId, grant.principalId);
+    if (targetsOwner && access.membership.role !== "owner") {
+      send(res, 403, { error: "only an owner can change owner grants" });
       return true;
     }
     if (!await enterprise.deletePermissionGrant(workspaceId, sub)) {

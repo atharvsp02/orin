@@ -36,6 +36,13 @@ function queryHash(query: string): string {
   return createHash("sha256").update(query.trim().toLowerCase()).digest("hex");
 }
 
+function providerFilter(value: unknown): string | undefined | null {
+  if (value === undefined || value === "") return undefined;
+  if (typeof value !== "string") return null;
+  const provider = value.trim().toLowerCase();
+  return /^[a-z][a-z0-9_-]{0,63}$/.test(provider) ? provider : null;
+}
+
 async function audit(input: {
   workspaceId: string;
   userId: string;
@@ -94,23 +101,37 @@ export async function handleWorkspaceKnowledge(input: {
   }
 
   if (resource === "search" && req.method === "POST" && !sub) {
-    if (!await rateLimit(res, workspaceId, userId, "search")) return true;
     const body = await jsonBody(req);
     if (!body || typeof body.query !== "string") {
       send(res, 400, { error: "query is required" });
+      return true;
+    }
+    const query = body.query.replace(/\s+/g, " ").trim();
+    if (!query || query.length > 500) {
+      send(res, 400, { error: query ? "query is too long" : "query is required" });
       return true;
     }
     if (body.resourceId !== undefined && (typeof body.resourceId !== "string" || !UUID_PATTERN.test(body.resourceId))) {
       send(res, 400, { error: "invalid resource id" });
       return true;
     }
+    const provider = providerFilter(body.provider);
+    if (provider === null) {
+      send(res, 400, { error: "invalid provider" });
+      return true;
+    }
+    if (body.limit !== undefined && (typeof body.limit !== "number" || !Number.isInteger(body.limit) || body.limit < 1 || body.limit > 50)) {
+      send(res, 400, { error: "limit must be an integer from 1 to 50" });
+      return true;
+    }
+    if (!await rateLimit(res, workspaceId, userId, "search")) return true;
     try {
       const results = await content.authorizedSearch({
         workspaceId,
         userId,
         permission: "search.use",
-        query: body.query,
-        provider: typeof body.provider === "string" ? body.provider : undefined,
+        query,
+        provider,
         resourceId: typeof body.resourceId === "string" ? body.resourceId : undefined,
         limit: typeof body.limit === "number" ? body.limit : undefined,
       });
@@ -118,11 +139,19 @@ export async function handleWorkspaceKnowledge(input: {
         workspaceId,
         userId,
         action: "search.executed",
-        details: { queryHash: queryHash(body.query), resultItemIds: results.map((result) => result.itemId) },
+        details: { queryHash: queryHash(query), resultItemIds: results.map((result) => result.itemId) },
       });
       send(res, 200, { results });
     } catch (error) {
-      send(res, 400, { error: (error as Error).message });
+      console.error("permission-aware search failed:", safeJobError(error));
+      await audit({
+        workspaceId,
+        userId,
+        action: "search.failed",
+        outcome: "failure",
+        details: { queryHash: queryHash(query), error: safeJobError(error) },
+      });
+      send(res, 500, { error: "permission-aware search failed" });
     }
     return true;
   }
@@ -147,7 +176,6 @@ export async function handleWorkspaceKnowledge(input: {
   }
 
   if (resource === "chat" && req.method === "POST" && !sub) {
-    if (!await rateLimit(res, workspaceId, userId, "chat")) return true;
     const body = await jsonBody(req);
     if (!body || typeof body.question !== "string") {
       send(res, 400, { error: "question is required" });
@@ -166,26 +194,47 @@ export async function handleWorkspaceKnowledge(input: {
       send(res, 400, { error: "invalid resource id" });
       return true;
     }
+    const provider = providerFilter(body.provider);
+    if (provider === null) {
+      send(res, 400, { error: "invalid provider" });
+      return true;
+    }
+    const threadId = typeof body.threadId === "string" ? body.threadId : undefined;
+    if (threadId && !(await content.listChatThreads(workspaceId, userId)).some((thread) => thread.threadId === threadId)) {
+      send(res, 404, { error: "thread not found" });
+      return true;
+    }
+    if (!await rateLimit(res, workspaceId, userId, "chat")) return true;
     try {
-      const results = await content.authorizedSearch({
+      let results = await content.authorizedSearch({
         workspaceId,
         userId,
         permission: "chat.use",
         query: question,
-        provider: typeof body.provider === "string" ? body.provider : undefined,
+        provider,
         resourceId: typeof body.resourceId === "string" && UUID_PATTERN.test(body.resourceId) ? body.resourceId : undefined,
         limit: 8,
       });
-      const answer = await llm.answerQuestion(question, results.map((result) => ({
+      let answer = await llm.answerQuestion(question, results.map((result) => ({
         title: result.title,
         snippet: result.snippet,
         provider: result.provider,
         url: result.url,
       })));
+      const currentResults = await content.getAuthorizedItemsByIds({
+        workspaceId,
+        userId,
+        itemIds: results.map((result) => result.itemId),
+        permission: "chat.use",
+      });
+      if (currentResults.length !== results.length) {
+        results = [];
+        answer = "Your source access changed while I was answering. Please ask again.";
+      }
       const exchange = await content.createChatExchange({
         workspaceId,
         userId,
-        threadId: typeof body.threadId === "string" ? body.threadId : undefined,
+        threadId,
         question,
         answer,
         citationItemIds: results.map((result) => result.itemId),

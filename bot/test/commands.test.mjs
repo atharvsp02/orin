@@ -6,7 +6,7 @@ process.env.GITHUB_APP_ID ??= "1";
 process.env.GITHUB_PRIVATE_KEY ??= "dummy";
 process.env.GITHUB_WEBHOOK_SECRET ??= "dummy";
 
-const { parseCommand } = await import("../dist/commands.js");
+const { githubInstallationLinkEligible, parseCommand } = await import("../dist/commands.js");
 
 let pass = 0,
   fail = 0;
@@ -52,6 +52,10 @@ eq("orinbot mention (autocomplete form)", parseCommand("@orinbot why did we do t
 eq("OrinBot case-insensitive", parseCommand("@OrinBot good catch"), { name: "good" });
 eq("orinbot override with ref", parseCommand('@orinbot override PR-42 "changed our mind"'), { name: "override", ref: "PR-42", reason: "changed our mind" });
 eq("no partial-word match (overrides)", parseCommand("@orin overrides everything"), null);
+eq("personal installation owner can approve a link", githubInstallationLinkEligible("atharv", "Atharv"), true);
+eq("active organization owner can approve a link", githubInstallationLinkEligible("acme", "maintainer", { state: "active", role: "admin" }), true);
+eq("organization member cannot approve a link", githubInstallationLinkEligible("acme", "maintainer", { state: "active", role: "member" }), false);
+eq("pending organization owner cannot approve a link", githubInstallationLinkEligible("acme", "maintainer", { state: "pending", role: "admin" }), false);
 
 console.log(`\n=== commands.ts: ${pass} passed, ${fail} failed ===`);
 process.exit(fail ? 1 : 0);

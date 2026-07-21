@@ -92,7 +92,7 @@ async function handleSession(client: Linear, wh: AgentSessionWebhook): Promise<v
     await db.insertLinkCode(createHash("sha256").update(code).digest("hex"), "linear", wh.organizationId, 15);
     await respond(
       `🔗 Link code: \`${code}\` (expires in 15 minutes, single-use).\n\n` +
-        `Have someone with **write access** comment \`@orin link ${code}\` on any issue or PR in the GitHub org you want to connect. ` +
+        `Have an active GitHub organization owner comment \`@orin link ${code}\` on any issue or PR in the organization you want to connect. ` +
         `That replaces this workspace's memory with the org's decision memory, so \`/why\` and mentions here answer from the same graph.`,
     );
     return;

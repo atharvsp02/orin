@@ -9,6 +9,7 @@ const BOT = new URL("../../dist/", import.meta.url).href;
 const db = await import(`${BOT}db.js`);
 const enterprise = await import(`${BOT}enterprise-db.js`);
 const contentDb = await import(`${BOT}content-db.js`);
+const slack = await import(`${BOT}slack.js`);
 const { Pool } = await import("pg");
 const sql = new Pool({ connectionString: process.env.DATABASE_URL });
 
@@ -77,6 +78,16 @@ const adminUser = await enterprise.upsertUserIdentity({
 });
 const adminMembership = await enterprise.bootstrapWorkspaceMembership(adminUser.userId, workspace.workspaceId);
 ok("later GitHub administrator becomes admin", adminMembership.role === "admin");
+eq(
+  "an external identity cannot be transferred between users",
+  await enterprise.addUserIdentity(adminUser.userId, {
+    provider: "github_login",
+    externalId: "owner",
+    handle: "owner",
+  }).then(() => "transferred", error => error.message),
+  "identity is already linked to another user",
+);
+ok("rejected identity transfer preserves its owner", (await enterprise.getUserByIdentity("github_login", "owner"))?.userId === ownerUser.userId);
 const viewerMembership = await enterprise.inviteWorkspaceMember({
   workspaceId: workspace.workspaceId,
   email: "viewer@example.com",
@@ -84,15 +95,108 @@ const viewerMembership = await enterprise.inviteWorkspaceMember({
   role: "viewer",
 });
 ok("email invitation creates viewer membership", viewerMembership.role === "viewer");
+eq(
+  "a non-owner cannot demote an owner through an invitation",
+  await enterprise.inviteWorkspaceMember({
+    workspaceId: workspace.workspaceId,
+    email: "owner@example.com",
+    displayName: "Changed without permission",
+    role: "viewer",
+  }).then(() => "changed", error => error.message),
+  "only an owner can change owner access",
+);
+eq("a rejected invitation cannot mutate owner profile data", (await enterprise.getUser(ownerUser.userId))?.displayName, "Workspace Owner");
+eq(
+  "a rejected owner invitation does not create a user",
+  await enterprise.inviteWorkspaceMember({
+    workspaceId: workspace.workspaceId,
+    email: "rejected-owner@example.com",
+    role: "owner",
+  }).then(() => "created", error => error.message),
+  "only an owner can change owner access",
+);
+ok("rejected owner identity is absent", (await enterprise.getUserByIdentity("email", "rejected-owner@example.com")) === null);
+const inactiveDirectoryUser = await enterprise.upsertUserIdentity({
+  provider: "slack_user",
+  externalId: "T-directory:U-inactive",
+  displayName: "Inactive directory user",
+  email: "inactive-directory@example.com",
+});
+await sql.query(`UPDATE users SET status = 'inactive' WHERE user_id = $1`, [inactiveDirectoryUser.userId]);
+await enterprise.upsertUserIdentity({
+  provider: "slack_user",
+  externalId: "T-directory:U-inactive",
+  displayName: "Inactive directory user",
+  email: "inactive-directory@example.com",
+  reactivate: false,
+});
+eq("directory synchronization cannot reactivate a disabled user", (await enterprise.getUser(inactiveDirectoryUser.userId))?.status, "inactive");
 eq("active owner count", await enterprise.countActiveOwners(workspace.workspaceId), 1);
+eq(
+  "the last active owner cannot be suspended",
+  await enterprise.updateWorkspaceMember({
+    workspaceId: workspace.workspaceId,
+    userId: ownerUser.userId,
+    status: "suspended",
+    allowOwnerChange: true,
+  }).then(() => "suspended", error => error.message),
+  "a workspace must keep at least one active owner",
+);
+await enterprise.updateWorkspaceMember({
+  workspaceId: workspace.workspaceId,
+  userId: adminUser.userId,
+  role: "owner",
+  allowOwnerChange: true,
+});
+const concurrentOwnerChanges = await Promise.allSettled([
+  enterprise.updateWorkspaceMember({
+    workspaceId: workspace.workspaceId,
+    userId: ownerUser.userId,
+    role: "admin",
+    allowOwnerChange: true,
+  }),
+  enterprise.updateWorkspaceMember({
+    workspaceId: workspace.workspaceId,
+    userId: adminUser.userId,
+    role: "admin",
+    allowOwnerChange: true,
+  }),
+]);
+ok("concurrent owner changes keep one active owner", concurrentOwnerChanges.filter((result) => result.status === "fulfilled").length === 1);
+eq("owner invariant survives concurrent updates", await enterprise.countActiveOwners(workspace.workspaceId), 1);
+await enterprise.updateWorkspaceMember({
+  workspaceId: workspace.workspaceId,
+  userId: ownerUser.userId,
+  role: "owner",
+  allowOwnerChange: true,
+});
+await enterprise.updateWorkspaceMember({
+  workspaceId: workspace.workspaceId,
+  userId: adminUser.userId,
+  role: "admin",
+  allowOwnerChange: true,
+});
+await enterprise.updateWorkspaceMember({
+  workspaceId: workspace.workspaceId,
+  userId: adminUser.userId,
+  status: "suspended",
+});
+const suspendedBootstrap = await enterprise.bootstrapWorkspaceMembership(adminUser.userId, workspace.workspaceId);
+ok("GitHub bootstrap cannot reactivate a suspended membership", suspendedBootstrap.status === "suspended");
+await enterprise.updateWorkspaceMember({
+  workspaceId: workspace.workspaceId,
+  userId: adminUser.userId,
+  status: "active",
+});
 ok("viewer receives default search access", await enterprise.userCan(viewerMembership.userId, workspace.workspaceId, "search.use"));
 ok("viewer has no default chat access", !(await enterprise.userCan(viewerMembership.userId, workspace.workspaceId, "chat.use")));
 
 const rolloutGroup = await enterprise.createGroup({
   workspaceId: workspace.workspaceId,
   displayName: "AI rollout",
-  externalId: "drive-group:ai-rollout@example.com",
+  externalId: "AI-ROLLOUT@EXAMPLE.COM",
 });
+eq("external group identities are normalized", rolloutGroup.externalId, "ai-rollout@example.com");
 await enterprise.replaceGroupMembers(workspace.workspaceId, rolloutGroup.groupId, [viewerMembership.userId]);
 eq("group membership is replaceable", await enterprise.listGroupMemberIds(workspace.workspaceId, rolloutGroup.groupId), [viewerMembership.userId]);
 eq("group reports its member count", (await enterprise.listGroups(workspace.workspaceId))[0].memberCount, 1);
@@ -120,13 +224,57 @@ const denyGrant = await enterprise.upsertPermissionGrant({
   effect: "deny",
 });
 ok("user deny overrides viewer search role", !(await enterprise.userCan(viewerMembership.userId, workspace.workspaceId, "search.use")));
+ok("permission grant can be read within its workspace", (await enterprise.getPermissionGrant(workspace.workspaceId, denyGrant.grantId))?.grantId === denyGrant.grantId);
+eq(
+  "permission grant rejects a missing workspace user",
+  await enterprise.upsertPermissionGrant({
+    workspaceId: workspace.workspaceId,
+    principalType: "user",
+    principalId: "123e4567-e89b-12d3-a456-426614174099",
+    permission: "search.use",
+    effect: "allow",
+  }).then(() => "created", error => error.message),
+  "grant user is not a workspace member",
+);
 ok("permission grants remain workspace scoped", (await enterprise.listPermissionGrants(workspace.workspaceId)).length === 2);
 ok("permission grant can be deleted", await enterprise.deletePermissionGrant(workspace.workspaceId, denyGrant.grantId));
 ok("deleting deny restores viewer search", await enterprise.userCan(viewerMembership.userId, workspace.workspaceId, "search.use"));
 const principals = await enterprise.userContentPrincipals(viewerMembership.userId, workspace.workspaceId);
 ok("content principals include normalized email", principals.has("email:viewer@example.com"));
 ok("content principals include internal group", principals.has(`group:${rolloutGroup.groupId}`));
-ok("content principals include external group", principals.has("external_group:drive-group:ai-rollout@example.com"));
+ok("content principals include external group", principals.has("external_group:ai-rollout@example.com"));
+const disposableGroup = await enterprise.createGroup({
+  workspaceId: workspace.workspaceId,
+  displayName: "Disposable group",
+});
+const disposableGrant = await enterprise.upsertPermissionGrant({
+  workspaceId: workspace.workspaceId,
+  principalType: "group",
+  principalId: disposableGroup.groupId,
+  permission: "chat.use",
+  effect: "allow",
+});
+ok("group deletion succeeds", await enterprise.deleteGroup(workspace.workspaceId, disposableGroup.groupId));
+ok("group deletion removes dangling grants", (await enterprise.getPermissionGrant(workspace.workspaceId, disposableGrant.grantId)) === null);
+const concurrentGroup = await enterprise.createGroup({
+  workspaceId: workspace.workspaceId,
+  displayName: "Concurrent group",
+});
+const [, concurrentDelete] = await Promise.allSettled([
+  enterprise.upsertPermissionGrant({
+    workspaceId: workspace.workspaceId,
+    principalType: "group",
+    principalId: concurrentGroup.groupId,
+    permission: "chat.use",
+    effect: "allow",
+  }),
+  enterprise.deleteGroup(workspace.workspaceId, concurrentGroup.groupId),
+]);
+ok("concurrent group deletion completes", concurrentDelete.status === "fulfilled" && concurrentDelete.value === true);
+ok(
+  "concurrent group deletion cannot leave a dangling grant",
+  !(await enterprise.listPermissionGrants(workspace.workspaceId)).some((grant) => grant.principalId === concurrentGroup.groupId),
+);
 const audit = await enterprise.recordAuditEvent({
   workspaceId: workspace.workspaceId,
   actorUserId: ownerUser.userId,
@@ -220,7 +368,7 @@ const groupContent = await contentDb.upsertContentItem({
   body: "The group roadmap covers the permission-aware assistant rollout.",
   visibility: "restricted",
   aclStatus: "current",
-  acls: [{ principalType: "external_group", principalKey: "drive-group:ai-rollout@example.com" }],
+  acls: [{ principalType: "external_group", principalKey: "ai-rollout@example.com" }],
 });
 await contentDb.upsertContentItem({
   workspaceId: workspace.workspaceId,
@@ -273,6 +421,27 @@ const viewerSearch = await contentDb.authorizedSearch({
 ok("viewer search sees workspace and matching group ACL", viewerSearch.some((item) => item.itemId === workspaceContent.itemId) && viewerSearch.some((item) => item.itemId === groupContent.itemId));
 ok("viewer search cannot see direct owner ACL", !viewerSearch.some((item) => item.itemId === ownerContent.itemId));
 ok("stale, empty ACL, and disabled resources fail closed", viewerSearch.length === 2, JSON.stringify(viewerSearch));
+await enterprise.updateWorkspaceMember({
+  workspaceId: workspace.workspaceId,
+  userId: viewerMembership.userId,
+  status: "suspended",
+});
+ok("search SQL rejects a suspended member", (await contentDb.authorizedSearch({
+  workspaceId: workspace.workspaceId,
+  userId: viewerMembership.userId,
+  permission: "search.use",
+  query: "roadmap",
+})).length === 0);
+await enterprise.updateWorkspaceMember({
+  workspaceId: workspace.workspaceId,
+  userId: viewerMembership.userId,
+  status: "active",
+});
+ok("search treats SQL wildcard characters literally", (await contentDb.authorizedSearch({
+  workspaceId: workspace.workspaceId,
+  userId: viewerMembership.userId,
+  query: "%",
+})).length === 0);
 const providerDeny = await enterprise.upsertPermissionGrant({
   workspaceId: workspace.workspaceId,
   principalType: "user",
@@ -346,7 +515,78 @@ ok("connector policies list by workspace", (await contentDb.listConnectorPolicie
 ok("connector policy can be deleted", await contentDb.deleteConnectorPolicy(workspace.workspaceId, excludePolicy.policyId));
 ok("other connector policy remains", (await contentDb.listConnectorPolicies(workspace.workspaceId)).some((policy) => policy.policyId === includePolicy.policyId));
 
-const syncRun = await contentDb.startConnectorSync(workspace.workspaceId, driveConnector.connectorId);
+const reconciliationConnector = await db.upsertConnector({
+  workspaceId: workspace.workspaceId,
+  provider: "gdrive",
+  externalId: "drive-reconciliation",
+  displayName: "Drive reconciliation fixture",
+  capabilities: ["ingest", "query"],
+});
+const staleContent = await contentDb.upsertContentItem({
+  workspaceId: workspace.workspaceId,
+  connectorId: reconciliationConnector.connectorId,
+  externalId: "stale-after-full-sync",
+  sourceType: "document",
+  title: "Stale full sync item",
+  body: "This item is absent from the next full source listing.",
+  visibility: "workspace",
+});
+const temporarilyFailedContent = await contentDb.upsertContentItem({
+  workspaceId: workspace.workspaceId,
+  connectorId: reconciliationConnector.connectorId,
+  externalId: "failed-during-full-sync",
+  sourceType: "document",
+  title: "Temporarily unavailable item",
+  body: "This item must fail closed without being treated as deleted.",
+  visibility: "restricted",
+  aclStatus: "current",
+  acls: [{ principalType: "email", principalKey: "owner@example.com" }],
+});
+const syncRun = await contentDb.startConnectorSync(workspace.workspaceId, reconciliationConnector.connectorId);
+eq(
+  "a connector cannot start overlapping sync runs",
+  await contentDb.startConnectorSync(workspace.workspaceId, reconciliationConnector.connectorId)
+    .then(() => "started", error => error.message),
+  "connector sync is already running or connector was not found",
+);
+const refreshedContent = await contentDb.upsertContentItem({
+  workspaceId: workspace.workspaceId,
+  connectorId: reconciliationConnector.connectorId,
+  externalId: "seen-during-full-sync",
+  sourceType: "document",
+  title: "Current full sync item",
+  body: "This item was seen during the full source listing.",
+  visibility: "workspace",
+  syncRunId: syncRun.runId,
+});
+ok("a transient item failure is recorded without deleting content", await contentDb.markContentSyncFailed(
+  workspace.workspaceId,
+  reconciliationConnector.connectorId,
+  "failed-during-full-sync",
+  syncRun.runId,
+));
+const reconciled = await contentDb.markConnectorContentNotSeenInRun(workspace.workspaceId, reconciliationConnector.connectorId, syncRun.runId);
+ok("full sync reconciliation deletes only content not seen during the run", reconciled >= 1);
+ok("full sync reconciliation hides the stale item", (await contentDb.getAuthorizedItemsByIds({
+  workspaceId: workspace.workspaceId,
+  userId: ownerUser.userId,
+  itemIds: [staleContent.itemId],
+})).length === 0);
+ok("full sync reconciliation keeps refreshed content", (await contentDb.getAuthorizedItemsByIds({
+  workspaceId: workspace.workspaceId,
+  userId: ownerUser.userId,
+  itemIds: [refreshedContent.itemId],
+})).length === 1);
+ok("transiently failed content fails closed", (await contentDb.getAuthorizedItemsByIds({
+  workspaceId: workspace.workspaceId,
+  userId: ownerUser.userId,
+  itemIds: [temporarilyFailedContent.itemId],
+})).length === 0);
+const failedContentState = await sql.query(
+  `SELECT acl_status, deleted_at FROM content_items WHERE item_id = $1`,
+  [temporarilyFailedContent.itemId],
+);
+ok("transiently failed content remains recoverable", failedContentState.rows[0].acl_status === "failed" && failedContentState.rows[0].deleted_at === null);
 const finishedSync = await contentDb.finishConnectorSync({
   workspaceId: workspace.workspaceId,
   runId: syncRun.runId,
@@ -359,6 +599,25 @@ const finishedSync = await contentDb.finishConnectorSync({
 ok("connector sync records completion and counts", finishedSync?.status === "succeeded" && finishedSync.itemsWritten === 6);
 ok("finished sync cannot be finished twice", await contentDb.finishConnectorSync({ workspaceId: workspace.workspaceId, runId: syncRun.runId, status: "failed" }) === null);
 eq("latest sync is available per connector", (await contentDb.latestConnectorSyncs(workspace.workspaceId)).map((run) => run.runId), [syncRun.runId]);
+const abandonedSync = await contentDb.startConnectorSync(workspace.workspaceId, reconciliationConnector.connectorId);
+await sql.query(
+  `UPDATE connector_sync_runs SET started_at = now() - interval '2 hours', heartbeat_at = now() - interval '2 hours' WHERE run_id = $1`,
+  [abandonedSync.runId],
+);
+ok("an active sync can renew its lease", await contentDb.heartbeatConnectorSync(workspace.workspaceId, abandonedSync.runId));
+ok("a renewed sync is not failed as stale", await contentDb.failStaleConnectorSyncs() === 0);
+await sql.query(
+  `UPDATE connector_sync_runs SET heartbeat_at = now() - interval '2 hours' WHERE run_id = $1`,
+  [abandonedSync.runId],
+);
+ok("stale running syncs are failed for recovery", await contentDb.failStaleConnectorSyncs() === 1);
+ok("a connector can sync again after stale-run recovery", Boolean(await contentDb.startConnectorSync(
+  workspace.workspaceId,
+  reconciliationConnector.connectorId,
+).then(async (run) => {
+  await contentDb.finishConnectorSync({ workspaceId: workspace.workspaceId, runId: run.runId, status: "succeeded" });
+  return run;
+})));
 
 const exchange = await contentDb.createChatExchange({
   workspaceId: workspace.workspaceId,
@@ -384,6 +643,18 @@ const rateTwo = await enterprise.consumeRateLimit({ workspaceId: workspace.works
 const rateThree = await enterprise.consumeRateLimit({ workspaceId: workspace.workspaceId, userId: ownerUser.userId, action: "search-test", limit: 2 });
 ok("rate limit permits requests through the boundary", rateOne.allowed && rateTwo.allowed);
 ok("rate limit rejects overflow", !rateThree.allowed && rateThree.remaining === 0 && rateThree.retryAfterSeconds > 0);
+await sql.query(
+  `UPDATE request_rate_limits SET expires_at = now() - interval '1 second'
+   WHERE workspace_id = $1 AND user_id = $2 AND action = 'search-test'`,
+  [workspace.workspaceId, ownerUser.userId],
+);
+ok("expired rate limit buckets are pruned", await enterprise.pruneExpiredRateLimits() >= 1);
+ok("a pruned rate limit bucket starts clean", (await enterprise.consumeRateLimit({
+  workspaceId: workspace.workspaceId,
+  userId: ownerUser.userId,
+  action: "search-test",
+  limit: 2,
+})).remaining === 1);
 const foreignWorkspace = await db.createWorkspace({
   displayName: "Foreign workspace",
   datasetName: "foreign-dataset",
@@ -412,6 +683,17 @@ ok("content id from another workspace is rejected", (await contentDb.getAuthoriz
   userId: viewerMembership.userId,
   itemIds: [foreignContent.itemId],
 })).length === 0);
+eq(
+  "chat citations reject content from another workspace",
+  await contentDb.createChatExchange({
+    workspaceId: workspace.workspaceId,
+    userId: viewerMembership.userId,
+    question: "Can I cite foreign content?",
+    answer: "No.",
+    citationItemIds: [foreignContent.itemId],
+  }).then(() => "created", error => error.message),
+  "chat citations do not belong to workspace",
+);
 await db.deleteWorkspace(foreignWorkspace.workspaceId);
 
 // --- tenant_config defaults ---
@@ -513,9 +795,9 @@ const independentConnector = await db.upsertConnector({
   provider: "slack",
   externalId: "T-independent",
   displayName: "Standalone Slack",
-  capabilities: ["query", "record"],
+  capabilities: ["ingest", "query", "record"],
 });
-eq("independent connector stores capabilities", independentConnector.capabilities, ["query", "record"]);
+eq("independent connector stores capabilities", independentConnector.capabilities, ["ingest", "query", "record"]);
 const independentResource = await db.upsertConnectorResource({
   connectorId: independentConnector.connectorId,
   externalId: " C-engineering ",
@@ -553,6 +835,89 @@ ok("connector resource can be enabled within its workspace", enabledResource?.en
 ok("enabled resource allows connector activity", await db.connectorAllowsResource("slack", "T-independent", "channel", "C-engineering") === true);
 ok("unregistered resource inherits active connector status", await db.connectorAllowsResource("slack", "T-independent", "channel", "C-other") === true);
 ok("connector resource cannot be changed from another workspace", await db.setConnectorResourceEnabled(workspace.workspaceId, independentResource.resourceId, false) === null);
+await enterprise.bootstrapWorkspaceMembership(ownerUser.userId, independentWorkspace.workspaceId);
+const slackOutsider = await enterprise.inviteWorkspaceMember({
+  workspaceId: independentWorkspace.workspaceId,
+  email: "slack-outsider@example.com",
+  role: "viewer",
+});
+const slackClient = {
+  conversations: {
+    info: async () => ({ channel: { id: "C-secure", name: "secure-decisions", is_private: true, is_member: true } }),
+    members: async () => ({ members: ["U-owner"], response_metadata: { next_cursor: "" } }),
+  },
+  users: {
+    list: async () => ({
+      members: [{ id: "U-owner", profile: { email: "owner@example.com" } }],
+      response_metadata: { next_cursor: "" },
+    }),
+  },
+};
+eq("Slack message event writes permission-aware content", await slack.ingestSlackMessageEvent("T-independent", {
+  type: "message",
+  channel: "C-secure",
+  ts: "1720000000.000100",
+  user: "U-owner",
+  text: "The secure Slack deployment decision uses blue green releases.",
+}, slackClient), "written");
+ok("Slack channel member can search an indexed message", (await contentDb.authorizedSearch({
+  workspaceId: independentWorkspace.workspaceId,
+  userId: ownerUser.userId,
+  query: "blue green",
+  provider: "slack",
+})).length === 1);
+const secureSlackResource = await db.getConnectorResource(independentConnector.connectorId, "channel", "C-secure");
+await contentDb.replaceConnectorResourceMemberships(independentWorkspace.workspaceId, secureSlackResource.resourceId, []);
+ok("Slack membership revocation immediately removes search access", (await contentDb.authorizedSearch({
+  workspaceId: independentWorkspace.workspaceId,
+  userId: ownerUser.userId,
+  query: "blue green",
+  provider: "slack",
+})).length === 0);
+await contentDb.replaceConnectorResourceMemberships(independentWorkspace.workspaceId, secureSlackResource.resourceId, [
+  { principalType: "slack_user", principalKey: "T-independent:U-owner" },
+]);
+await contentDb.markConnectorResourceAclStatus(independentWorkspace.workspaceId, secureSlackResource.resourceId, "failed");
+ok("failed Slack channel ACL synchronization fails closed", (await contentDb.authorizedSearch({
+  workspaceId: independentWorkspace.workspaceId,
+  userId: ownerUser.userId,
+  query: "blue green",
+  provider: "slack",
+})).length === 0);
+await contentDb.replaceConnectorResourceMemberships(independentWorkspace.workspaceId, secureSlackResource.resourceId, [
+  { principalType: "slack_user", principalKey: "T-independent:U-owner" },
+]);
+await sql.query(
+  `UPDATE connector_resources SET acl_synced_at = now() - interval '31 minutes' WHERE resource_id = $1`,
+  [secureSlackResource.resourceId],
+);
+ok("expired Slack channel ACL synchronization fails closed", (await contentDb.authorizedSearch({
+  workspaceId: independentWorkspace.workspaceId,
+  userId: ownerUser.userId,
+  query: "blue green",
+  provider: "slack",
+})).length === 0);
+await contentDb.replaceConnectorResourceMemberships(independentWorkspace.workspaceId, secureSlackResource.resourceId, [
+  { principalType: "slack_user", principalKey: "T-independent:U-owner" },
+]);
+ok("Slack channel non-member cannot search an indexed message", (await contentDb.authorizedSearch({
+  workspaceId: independentWorkspace.workspaceId,
+  userId: slackOutsider.userId,
+  query: "blue green",
+  provider: "slack",
+})).length === 0);
+eq("Slack deletion event removes indexed content", await slack.ingestSlackMessageEvent("T-independent", {
+  type: "message",
+  subtype: "message_deleted",
+  channel: "C-secure",
+  deleted_ts: "1720000000.000100",
+}, slackClient), "deleted");
+ok("deleted Slack message is no longer searchable", (await contentDb.authorizedSearch({
+  workspaceId: independentWorkspace.workspaceId,
+  userId: ownerUser.userId,
+  query: "blue green",
+  provider: "slack",
+})).length === 0);
 await db.deleteWorkspace(independentWorkspace.workspaceId);
 ok("workspace deletion cascades connectors", (await db.getConnector("slack", "T-independent")) === null);
 

@@ -42,6 +42,12 @@ const rolePermissions: Record<WorkspaceRole, ReadonlySet<WorkspacePermission>> =
   viewer: new Set(["workspace.read", "search.use", "connectors.read"]),
 };
 
+const ownerRecoveryPermissions = new Set<WorkspacePermission>([
+  "workspace.read",
+  "people.manage",
+  "policies.manage",
+]);
+
 export function isWorkspaceRole(value: unknown): value is WorkspaceRole {
   return typeof value === "string" && WORKSPACE_ROLES.includes(value as WorkspaceRole);
 }
@@ -82,6 +88,7 @@ export function can(
   grants: readonly PermissionGrant[] = [],
   context: PermissionContext = {},
 ): boolean {
+  if (role === "owner" && ownerRecoveryPermissions.has(permission)) return true;
   const applicable = grants.filter(
     (grant) => grant.permission === permission && matchesConditions(grant.conditions, context),
   );

@@ -47,6 +47,17 @@ test("deny takes precedence over allow and role", () => {
   assert.equal(can("owner", "search.use", grants), false);
 });
 
+test("active owners retain workspace recovery permissions", () => {
+  const denies = [
+    { permission: "workspace.read", effect: "deny" },
+    { permission: "people.manage", effect: "deny" },
+    { permission: "policies.manage", effect: "deny" },
+  ];
+  assert.equal(can("owner", "workspace.read", denies), true);
+  assert.equal(can("owner", "people.manage", denies), true);
+  assert.equal(can("owner", "policies.manage", denies), true);
+});
+
 test("applies conditional grants only in matching context", () => {
   const grants = [{
     permission: "chat.use",

@@ -1,7 +1,7 @@
 // Dashboard API: session-cookie auth with legacy installation and workspace routes.
 import { createHash, randomBytes } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { WorkspacePermission } from "./access.js";
+import { can, canPotentially, type WorkspacePermission } from "./access.js";
 import { config } from "./config.js";
 import * as db from "./db.js";
 import * as enterprise from "./enterprise-db.js";
@@ -17,9 +17,93 @@ import { handleWorkspaceAdmin } from "./admin.js";
 import { handleWorkspaceKnowledge } from "./knowledge-api.js";
 import { handleWorkspaceGoogleDrive } from "./google-drive.js";
 import * as content from "./content-db.js";
+import type { ConnectorAccount, ConnectorResource } from "./connectors.js";
+import type { DecisionRecord } from "./types.js";
+import { safeJobError } from "./queues.js";
 
 const cog = { baseUrl: config.cogneeBaseUrl };
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
+
+async function ensureGithubRepoResources(
+  connector: ConnectorAccount,
+  repos: string[],
+): Promise<ConnectorResource[]> {
+  let resources = await db.listConnectorResources(connector.connectorId);
+  const known = new Set(resources.filter((item) => item.kind === "repository").map((item) => item.externalId));
+  const missing = [...new Set(repos.map((repo) => repo.trim()).filter(Boolean))].filter((repo) => !known.has(repo));
+  if (missing.length > 0) {
+    await Promise.all(missing.map((repo) => db.upsertConnectorResource({
+      connectorId: connector.connectorId,
+      externalId: repo,
+      kind: "repository",
+      displayName: repo,
+    })));
+    resources = await db.listConnectorResources(connector.connectorId);
+  }
+  return resources;
+}
+
+function authorizedGithubRecords(
+  access: enterprise.WorkspaceAccess,
+  resources: ConnectorResource[],
+  records: DecisionRecord[],
+): DecisionRecord[] {
+  const byRepo = new Map(resources.filter((resource) => resource.kind === "repository").map((resource) => [resource.externalId, resource]));
+  return records.filter((record) => {
+    const resource = byRepo.get(record.repo);
+    return Boolean(resource?.enabled) && can(access.membership.role, "search.use", access.grants, {
+      connectorProvider: "github",
+      resourceId: resource?.resourceId,
+      sourceType: record.sourceType,
+    });
+  });
+}
+
+function canUseUnscopedGithub(access: enterprise.WorkspaceAccess, permission: WorkspacePermission): boolean {
+  const hasScopedGrant = access.grants.some((grant) =>
+    grant.permission === permission && (grant.conditions?.resourceId !== undefined || grant.conditions?.sourceType !== undefined)
+  );
+  return !hasScopedGrant && can(access.membership.role, permission, access.grants, { connectorProvider: "github" });
+}
+
+async function workspaceGithubRecords(
+  installationId: number,
+  workspaceId: string,
+  access: enterprise.WorkspaceAccess,
+): Promise<DecisionRecord[]> {
+  const connector = await db.getConnector("github", String(installationId));
+  if (!connector || connector.workspaceId !== workspaceId || connector.status !== "active") return [];
+  const records = await db.getDecisionRecords(installationId);
+  const resources = await ensureGithubRepoResources(connector, records.map((record) => record.repo));
+  return authorizedGithubRecords(access, resources, records);
+}
+
+async function visibleConnectorInventory(
+  workspaceId: string,
+  access: enterprise.WorkspaceAccess,
+): Promise<{ connectors: ConnectorAccount[]; resources: ConnectorResource[] }> {
+  const connectors: ConnectorAccount[] = [];
+  const resources: ConnectorResource[] = [];
+  for (const connector of await db.listConnectors(workspaceId)) {
+    const connectorResources = await db.listConnectorResources(connector.connectorId);
+    const visibleResources = connectorResources.filter((resource) => can(
+      access.membership.role,
+      "connectors.read",
+      access.grants,
+      { connectorProvider: connector.provider, resourceId: resource.resourceId },
+    ));
+    if (visibleResources.length > 0 || can(
+      access.membership.role,
+      "connectors.read",
+      access.grants,
+      { connectorProvider: connector.provider },
+    )) {
+      connectors.push(connector);
+      resources.push(...visibleResources);
+    }
+  }
+  return { connectors, resources };
+}
 
 function readBody(req: IncomingMessage, limit = 100_000): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -119,9 +203,12 @@ export async function handleDash(req: IncomingMessage, res: ServerResponse, path
     return true;
   }
   const permission = dashboardPermission(target.resource, req.method ?? "GET");
-  const allowed = resourceUsesContext(target.resource)
-    ? Boolean(await enterprise.getWorkspaceAccess(auth.user.userId, currentWorkspace.workspaceId))
-    : await enterprise.userCan(auth.user.userId, currentWorkspace.workspaceId, permission);
+  const access = await enterprise.getWorkspaceAccess(auth.user.userId, currentWorkspace.workspaceId);
+  const allowed = access
+    ? resourceUsesContext(target.resource)
+      ? canPotentially(access.membership.role, permission, access.grants)
+      : can(access.membership.role, permission, access.grants)
+    : false;
   if (!allowed) {
     await enterprise.recordAuditEvent({
       workspaceId: currentWorkspace.workspaceId,
@@ -161,10 +248,55 @@ export async function handleDash(req: IncomingMessage, res: ServerResponse, path
     resource,
     sub,
   })) return true;
+  if ((resource === "connectors" || resource === "resources") && req.method === "PUT" && sub) {
+    if (!isDashboardEntityId(sub)) {
+      send(res, 400, { error: `invalid ${resource.slice(0, -1)} id` });
+      return true;
+    }
+    let body: { enabled?: unknown };
+    try {
+      body = JSON.parse(await readBody(req)) as { enabled?: unknown };
+    } catch {
+      send(res, 400, { error: "invalid json" });
+      return true;
+    }
+    if (typeof body.enabled !== "boolean") {
+      send(res, 400, { error: "enabled must be a boolean" });
+      return true;
+    }
+    const connector = resource === "connectors"
+      ? await db.getConnectorById(currentWorkspace.workspaceId, sub)
+      : await db.getConnectorForResource(currentWorkspace.workspaceId, sub);
+    if (!connector) {
+      send(res, 404, { error: `${resource.slice(0, -1)} not found` });
+      return true;
+    }
+    if (!can(access!.membership.role, "connectors.manage", access!.grants, {
+      connectorProvider: connector.provider,
+      ...(resource === "resources" ? { resourceId: sub } : {}),
+    })) {
+      await enterprise.recordAuditEvent({
+        workspaceId: currentWorkspace.workspaceId,
+        actorUserId: auth.user.userId,
+        action: "authorization.denied",
+        targetType: resource.slice(0, -1),
+        targetId: sub,
+        outcome: "denied",
+        details: { permission: "connectors.manage", connectorProvider: connector.provider },
+      });
+      send(res, 403, { error: `no access to manage this ${resource.slice(0, -1)}` });
+      return true;
+    }
+    const updated = resource === "connectors"
+      ? await db.setConnectorEnabled(currentWorkspace.workspaceId, sub, body.enabled)
+      : await db.setConnectorResourceEnabled(currentWorkspace.workspaceId, sub, body.enabled);
+    send(res, 200, updated);
+    return true;
+  }
   const inst = currentWorkspace.legacyInstallationId;
   if (resource === "overview" && req.method === "GET" && inst === undefined) {
-    const connectors = await db.listConnectors(currentWorkspace.workspaceId);
-    const resources = (await Promise.all(connectors.map((connector) => db.listConnectorResources(connector.connectorId)))).flat();
+    const { connectors, resources } = await visibleConnectorInventory(currentWorkspace.workspaceId, access!);
+    const visibleConnectorIds = new Set(connectors.map((connector) => connector.connectorId));
     send(res, 200, {
       account: currentWorkspace.displayName,
       workspace: { workspaceId: currentWorkspace.workspaceId, displayName: currentWorkspace.displayName },
@@ -175,15 +307,19 @@ export async function handleDash(req: IncomingMessage, res: ServerResponse, path
         status,
         capabilities,
       })),
-      resources: resources.map(({ resourceId, connectorId, externalId, kind, displayName, enabled }) => ({
+      resources: resources.map(({ resourceId, connectorId, externalId, kind, displayName, enabled, aclStatus, aclSyncedAt }) => ({
         resourceId,
         connectorId,
         externalId,
         kind,
         displayName,
         enabled,
+        aclStatus,
+        aclSyncedAt,
       })),
-      syncs: await content.latestConnectorSyncs(currentWorkspace.workspaceId),
+      syncs: (await content.latestConnectorSyncs(currentWorkspace.workspaceId)).filter(
+        (sync) => visibleConnectorIds.has(sync.connectorId),
+      ),
       metrics: { prsPrevented: 0, decisionsTracked: 0, rejectionsActive: 0 },
       recent: [],
       repos: [],
@@ -205,75 +341,82 @@ export async function handleDash(req: IncomingMessage, res: ServerResponse, path
     send(res, 404, { error: "unknown installation" });
     return true;
   }
-
-  if ((resource === "connectors" || resource === "resources") && req.method === "PUT" && sub) {
-    if (!isDashboardEntityId(sub)) {
-      send(res, 400, { error: `invalid ${resource.slice(0, -1)} id` });
-      return true;
-    }
-    let body: { enabled?: unknown };
-    try {
-      body = JSON.parse(await readBody(req)) as { enabled?: unknown };
-    } catch {
-      send(res, 400, { error: "invalid json" });
-      return true;
-    }
-    if (typeof body.enabled !== "boolean") {
-      send(res, 400, { error: "enabled must be a boolean" });
-      return true;
-    }
-    if (!currentWorkspace) {
-      send(res, 404, { error: "unknown workspace" });
-      return true;
-    }
-    const updated = resource === "connectors"
-      ? await db.setConnectorEnabled(currentWorkspace.workspaceId, sub, body.enabled)
-      : await db.setConnectorResourceEnabled(currentWorkspace.workspaceId, sub, body.enabled);
-    if (!updated) {
-      send(res, 404, { error: `${resource.slice(0, -1)} not found` });
-      return true;
-    }
-    send(res, 200, updated);
+  if (["graph", "rules", "docs"].includes(resource) && !canUseUnscopedGithub(access!, permission)) {
+    await enterprise.recordAuditEvent({
+      workspaceId: currentWorkspace.workspaceId,
+      actorUserId: auth.user.userId,
+      action: "authorization.denied",
+      targetType: "dashboard_resource",
+      targetId: resource,
+      outcome: "denied",
+      details: { permission, connectorProvider: "github", reason: "resource cannot be filtered safely" },
+    });
+    send(res, 403, { error: "this GitHub resource cannot be shown with the current scoped access policy" });
     return true;
   }
 
   if (resource === "overview" && req.method === "GET") {
-    const [metrics, recent, repos, links, connectors, syncs] = await Promise.all([
-      db.metricsAll(inst),
-      db.recentDeliveries(inst, 20),
-      db.distinctRepos(inst),
-      db.linksFor(inst),
-      currentWorkspace ? db.listConnectors(currentWorkspace.workspaceId) : [],
-      content.latestConnectorSyncs(currentWorkspace.workspaceId),
+    const inventory = await visibleConnectorInventory(currentWorkspace.workspaceId, access!);
+    const connectors = inventory.connectors;
+    const [allLinks, allSyncs] = await Promise.all([
+      connectors.length > 0 ? db.linksFor(inst) : Promise.resolve([]),
+      connectors.length > 0 ? content.latestConnectorSyncs(currentWorkspace.workspaceId) : Promise.resolve([]),
     ]);
-    let resources = (await Promise.all(connectors.map((connector) => db.listConnectorResources(connector.connectorId)))).flat();
-    // Repos the App is INSTALLED on, straight from GitHub (always current, covers adds/removes).
+    const visibleConnectorIds = new Set(connectors.map((connector) => connector.connectorId));
+    const visibleConnectorRefs = new Set(connectors.map((connector) => `${connector.provider}:${connector.externalId}`));
+    const links = allLinks.filter((link) => visibleConnectorRefs.has(`${link.platform}:${link.externalId}`));
+    const syncs = allSyncs.filter((sync) => visibleConnectorIds.has(sync.connectorId));
+    let resources = inventory.resources;
     let installedRepos: string[] = [];
-    try {
-      const octokit = await installationOctokit(inst);
-      const rows = await octokit.paginate(octokit.rest.apps.listReposAccessibleToInstallation, { per_page: 100 });
-      installedRepos = rows.map((r) => r.full_name);
-    } catch (e) {
-      console.warn("overview: listing installed repos failed:", (e as Error).message);
-    }
     const githubConnector = connectors.find((connector) => connector.provider === "github");
     if (githubConnector) {
-      const knownResources = new Set(
-        resources
-          .filter((item) => item.connectorId === githubConnector.connectorId && item.kind === "repository")
-          .map((item) => item.externalId),
-      );
-      const missingRepos = installedRepos.filter((repo) => !knownResources.has(repo));
-      if (missingRepos.length > 0) {
-        await Promise.all(missingRepos.map((repo) => db.upsertConnectorResource({
-          connectorId: githubConnector.connectorId,
-          externalId: repo,
-          kind: "repository",
-          displayName: repo,
-        })));
-        resources = (await Promise.all(connectors.map((connector) => db.listConnectorResources(connector.connectorId)))).flat();
+      try {
+        const octokit = await installationOctokit(inst);
+        const rows = await octokit.paginate(octokit.rest.apps.listReposAccessibleToInstallation, { per_page: 100 });
+        installedRepos = rows.map((r) => r.full_name);
+      } catch (error) {
+        console.warn("overview: listing installed repos failed:", (error as Error).message);
       }
     }
+    let records: DecisionRecord[] = [];
+    let githubResources: ConnectorResource[] = [];
+    if (githubConnector) {
+      records = await db.getDecisionRecords(inst);
+      githubResources = await ensureGithubRepoResources(githubConnector, [
+        ...installedRepos,
+        ...records.map((record) => record.repo),
+      ]);
+      resources = [
+        ...resources.filter((item) => item.connectorId !== githubConnector.connectorId),
+        ...githubResources.filter((item) => can(
+          access!.membership.role,
+          "connectors.read",
+          access!.grants,
+          { connectorProvider: "github", resourceId: item.resourceId },
+        )),
+      ];
+    }
+    const visibleRecords = githubConnector?.status === "active"
+      ? authorizedGithubRecords(access!, githubResources, records)
+      : [];
+    const catchRepos = githubConnector?.status === "active" ? githubResources
+      .filter((item) => item.kind === "repository" && item.enabled && can(
+        access!.membership.role,
+        "search.use",
+        access!.grants,
+        { connectorProvider: "github", resourceId: item.resourceId, sourceType: "catch" },
+      ))
+      .map((item) => item.externalId) : [];
+    const [prsPrevented, recent] = await Promise.all([
+      db.countPreventedForRepos(inst, catchRepos),
+      db.recentDeliveriesForRepos(inst, catchRepos, 20),
+    ]);
+    const repos = [...new Set([...visibleRecords.map((record) => record.repo), ...catchRepos])].sort();
+    const metrics = {
+      prsPrevented,
+      decisionsTracked: visibleRecords.length,
+      rejectionsActive: visibleRecords.filter((record) => record.outcome === "rejected" && !record.supersededBy).length,
+    };
     send(res, 200, {
       account: installation.githubAccount,
       workspace: currentWorkspace ? {
@@ -287,13 +430,15 @@ export async function handleDash(req: IncomingMessage, res: ServerResponse, path
         status,
         capabilities,
       })),
-      resources: resources.map(({ resourceId, connectorId, externalId, kind, displayName, enabled }) => ({
+      resources: resources.map(({ resourceId, connectorId, externalId, kind, displayName, enabled, aclStatus, aclSyncedAt }) => ({
         resourceId,
         connectorId,
         externalId,
         kind,
         displayName,
         enabled,
+        aclStatus,
+        aclSyncedAt,
       })),
       metrics,
       recent,
@@ -306,7 +451,7 @@ export async function handleDash(req: IncomingMessage, res: ServerResponse, path
   }
 
   if (resource === "decisions" && req.method === "GET") {
-    const records = await db.getDecisionRecords(inst);
+    const records = await workspaceGithubRecords(inst, currentWorkspace.workspaceId, access!);
     send(res, 200, {
       decisions: records.map((r) => ({
         decisionId: r.decisionId,
@@ -326,7 +471,7 @@ export async function handleDash(req: IncomingMessage, res: ServerResponse, path
     // Clean, self-contained graph built from this tenant's real decision memory: decisions,
     // the entities/terms Cognee extracted from each, the repo, and supersession links. Rendered
     // by our own themed force layout (no third-party embed, no runtime fetch).
-    const records = await db.getDecisionRecords(inst);
+    const records = await workspaceGithubRecords(inst, currentWorkspace.workspaceId, access!);
     type GNode = { id: string; type: "decision" | "term" | "repo"; label: string; outcome?: string; title?: string; repo?: string; url?: string; degree?: number };
     const nodes = new Map<string, GNode>();
     const edges: Array<{ source: string; target: string; kind: "has-term" | "in-repo" | "supersedes" }> = [];
@@ -382,8 +527,9 @@ export async function handleDash(req: IncomingMessage, res: ServerResponse, path
         Vary: "Cookie",
       });
       res.end(html);
-    } catch (e) {
-      send(res, 502, { error: `graph unavailable: ${(e as Error).message}` });
+    } catch (error) {
+      console.error("dashboard graph unavailable:", safeJobError(error));
+      send(res, 502, { error: "graph unavailable" });
     }
     return true;
   }
@@ -548,5 +694,8 @@ export async function handleDash(req: IncomingMessage, res: ServerResponse, path
 }
 
 function resourceUsesContext(resource: string): boolean {
-  return resource === "search" || resource === "chat";
+  return [
+    "search", "chat", "connectors", "resources", "syncs", "connectorpolicies", "disconnects",
+    "decisions", "graph", "graphdata", "rules", "docs",
+  ].includes(resource);
 }
