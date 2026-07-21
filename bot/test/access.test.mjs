@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 
 const {
   can,
+  canPotentially,
   canAccessContent,
   isWorkspacePermission,
   isWorkspaceRole,
@@ -57,6 +58,18 @@ test("applies conditional grants only in matching context", () => {
   assert.equal(can("viewer", "chat.use", grants, { connectorProvider: "slack" }), false);
 });
 
+test("recognizes conditional and universal feature availability", () => {
+  const conditionalAllow = [{ permission: "chat.use", effect: "allow", conditions: { connectorProvider: "slack" } }];
+  assert.equal(canPotentially("viewer", "chat.use", conditionalAllow), true);
+  assert.equal(canPotentially("viewer", "chat.use"), false);
+  assert.equal(canPotentially("member", "search.use", [{
+    permission: "search.use",
+    effect: "deny",
+    conditions: { connectorProvider: "gdrive" },
+  }]), true);
+  assert.equal(canPotentially("owner", "search.use", [{ permission: "search.use", effect: "deny" }]), false);
+});
+
 test("rejects unknown condition keys", () => {
   assert.equal(matchesConditions({ department: "engineering" }, {}), false);
 });
@@ -102,4 +115,3 @@ test("fails closed for stale, failed, and empty ACLs", () => {
 });
 
 console.log(`${passed} workspace access checks passed`);
-

@@ -273,6 +273,36 @@ const viewerSearch = await contentDb.authorizedSearch({
 ok("viewer search sees workspace and matching group ACL", viewerSearch.some((item) => item.itemId === workspaceContent.itemId) && viewerSearch.some((item) => item.itemId === groupContent.itemId));
 ok("viewer search cannot see direct owner ACL", !viewerSearch.some((item) => item.itemId === ownerContent.itemId));
 ok("stale, empty ACL, and disabled resources fail closed", viewerSearch.length === 2, JSON.stringify(viewerSearch));
+const providerDeny = await enterprise.upsertPermissionGrant({
+  workspaceId: workspace.workspaceId,
+  principalType: "user",
+  principalId: viewerMembership.userId,
+  permission: "search.use",
+  effect: "deny",
+  conditions: { connectorProvider: "gdrive" },
+});
+ok("conditional feature deny filters matching search items in SQL", (await contentDb.authorizedSearch({
+  workspaceId: workspace.workspaceId,
+  userId: viewerMembership.userId,
+  permission: "search.use",
+  query: "roadmap",
+})).length === 0);
+await enterprise.deletePermissionGrant(workspace.workspaceId, providerDeny.grantId);
+const driveChatGrant = await enterprise.upsertPermissionGrant({
+  workspaceId: workspace.workspaceId,
+  principalType: "group",
+  principalId: rolloutGroup.groupId,
+  permission: "chat.use",
+  effect: "allow",
+  conditions: { connectorProvider: "gdrive", sourceType: "document" },
+});
+const driveChatEvidence = await contentDb.authorizedSearch({
+  workspaceId: workspace.workspaceId,
+  userId: viewerMembership.userId,
+  permission: "chat.use",
+  query: "roadmap",
+});
+ok("conditional feature allow admits only matching chat evidence", driveChatEvidence.length === 2 && driveChatEvidence.every((item) => item.provider === "gdrive" && item.sourceType === "document"));
 await db.setConnectorStatus(workspace.workspaceId, driveConnector.connectorId, "error");
 ok("connector error hides all of its search content", (await contentDb.authorizedSearch({
   workspaceId: workspace.workspaceId,
@@ -338,12 +368,15 @@ const exchange = await contentDb.createChatExchange({
   citationItemIds: [groupContent.itemId],
 });
 ok("chat exchange creates a user-owned thread", (await contentDb.listChatThreads(workspace.workspaceId, viewerMembership.userId))[0].threadId === exchange.threadId);
-ok("authorized chat citation renders", (await contentDb.listAuthorizedChatMessages(workspace.workspaceId, viewerMembership.userId, exchange.threadId))[1].citations.length === 1);
+const authorizedChat = await contentDb.listAuthorizedChatMessages(workspace.workspaceId, viewerMembership.userId, exchange.threadId, "chat.use");
+ok("chat messages keep user and assistant order", authorizedChat[0]?.role === "user" && authorizedChat[1]?.role === "assistant");
+ok("authorized chat citation renders", authorizedChat.find((message) => message.role === "assistant")?.citations.length === 1);
 await enterprise.replaceGroupMembers(workspace.workspaceId, rolloutGroup.groupId, []);
-const revokedChat = (await contentDb.listAuthorizedChatMessages(workspace.workspaceId, viewerMembership.userId, exchange.threadId))[1];
-ok("historical chat citation disappears after ACL revocation", revokedChat.citations.length === 0);
-eq("historical answer is redacted after ACL revocation", revokedChat.content, "This answer is unavailable because your source access changed.");
+const revokedChat = (await contentDb.listAuthorizedChatMessages(workspace.workspaceId, viewerMembership.userId, exchange.threadId, "chat.use")).find((message) => message.role === "assistant");
+ok("historical chat citation disappears after ACL revocation", revokedChat?.citations.length === 0);
+eq("historical answer is redacted after ACL revocation", revokedChat?.content, "This answer is unavailable because your source access changed.");
 ok("another user cannot read the chat thread", (await contentDb.listAuthorizedChatMessages(workspace.workspaceId, ownerUser.userId, exchange.threadId)).length === 0);
+await enterprise.deletePermissionGrant(workspace.workspaceId, driveChatGrant.grantId);
 ok("deleted content disappears from search", await contentDb.markContentDeleted(workspace.workspaceId, driveConnector.connectorId, "workspace-roadmap"));
 ok("deleted content is no longer returned", !(await contentDb.authorizedSearch({ workspaceId: workspace.workspaceId, userId: ownerUser.userId, query: "permission-aware" })).some((item) => item.itemId === workspaceContent.itemId));
 const rateOne = await enterprise.consumeRateLimit({ workspaceId: workspace.workspaceId, userId: ownerUser.userId, action: "search-test", limit: 2 });

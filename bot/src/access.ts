@@ -90,9 +90,21 @@ export function can(
   return rolePermissions[role].has(permission);
 }
 
+export function canPotentially(
+  role: WorkspaceRole,
+  permission: WorkspacePermission,
+  grants: readonly PermissionGrant[] = [],
+): boolean {
+  const relevant = grants.filter((grant) => grant.permission === permission);
+  const hasUniversalDeny = relevant.some(
+    (grant) => grant.effect === "deny" && (!grant.conditions || Object.keys(grant.conditions).length === 0),
+  );
+  if (hasUniversalDeny) return false;
+  return can(role, permission, relevant) || relevant.some((grant) => grant.effect === "allow");
+}
+
 export function canAccessContent(input: ContentAccessInput, principals: ReadonlySet<string>): boolean {
   if (input.visibility === "workspace") return true;
   if (input.aclStatus !== "current" || input.aclPrincipals.length === 0) return false;
   return input.aclPrincipals.some((principal) => principals.has(principal.toLowerCase()));
 }
-

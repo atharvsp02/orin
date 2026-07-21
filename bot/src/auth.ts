@@ -3,7 +3,7 @@
 // THIS App the user can access, and that list (in a signed cookie) is all they can see.
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { can, WORKSPACE_PERMISSIONS } from "./access.js";
+import { canPotentially, WORKSPACE_PERMISSIONS } from "./access.js";
 import { config } from "./config.js";
 import * as db from "./db.js";
 import * as enterprise from "./enterprise-db.js";
@@ -250,8 +250,9 @@ export async function handleMe(req: IncomingMessage, res: ServerResponse): Promi
       displayName: workspace.displayName,
       decisions: workspace.decisions,
       role: workspace.role,
+      hasGitHubCompatibility: workspace.legacyInstallationId !== undefined,
       permissions: access
-        ? WORKSPACE_PERMISSIONS.filter((permission) => can(access.membership.role, permission, access.grants))
+        ? WORKSPACE_PERMISSIONS.filter((permission) => canPotentially(access.membership.role, permission, access.grants))
         : [],
       connectors: connectors.map(({ provider, displayName, status, capabilities }) => ({
         provider,

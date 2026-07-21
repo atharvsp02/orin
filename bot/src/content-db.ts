@@ -10,9 +10,10 @@ import {
   type ContentPolicyOperator,
   type ContentPolicyTarget,
 } from "./content.js";
+import { can, type WorkspacePermission } from "./access.js";
 import { decrypt, encrypt } from "./crypto.js";
 import { pool } from "./db.js";
-import { userContentPrincipals } from "./enterprise-db.js";
+import { getWorkspaceAccess, userContentPrincipals } from "./enterprise-db.js";
 
 const MAX_CONTENT_BYTES = 2_000_000;
 
@@ -296,9 +297,51 @@ function searchRow(row: Record<string, unknown>, query: string): SearchResult {
   };
 }
 
+interface FeatureAccess {
+  defaultAllowed: boolean;
+  grants: Array<{ effect: "allow" | "deny"; conditions: Record<string, string[]> }>;
+}
+
+async function featureAccess(
+  workspaceId: string,
+  userId: string,
+  permission?: Extract<WorkspacePermission, "search.use" | "chat.use">,
+): Promise<FeatureAccess | null> {
+  if (!permission) return { defaultAllowed: true, grants: [] };
+  const access = await getWorkspaceAccess(userId, workspaceId);
+  if (!access) return null;
+  return {
+    defaultAllowed: can(access.membership.role, permission),
+    grants: access.grants
+      .filter((grant) => grant.permission === permission)
+      .map((grant) => ({
+        effect: grant.effect,
+        conditions: Object.fromEntries(Object.entries(grant.conditions ?? {}).map(([key, value]) => [
+          key,
+          (Array.isArray(value) ? value : [value]).map((part) => part.trim().toLowerCase()),
+        ])),
+      })),
+  };
+}
+
+function featureConditionSql(grant: string, connector: string, item: string): string {
+  return `(
+    (NOT (${grant}.conditions ? 'connectorProvider') OR lower(${connector}.provider) IN (
+      SELECT expected.value FROM jsonb_array_elements_text(${grant}.conditions->'connectorProvider') AS expected(value)
+    )) AND
+    (NOT (${grant}.conditions ? 'resourceId') OR lower(COALESCE(${item}.resource_id::text, '')) IN (
+      SELECT expected.value FROM jsonb_array_elements_text(${grant}.conditions->'resourceId') AS expected(value)
+    )) AND
+    (NOT (${grant}.conditions ? 'sourceType') OR lower(${item}.source_type) IN (
+      SELECT expected.value FROM jsonb_array_elements_text(${grant}.conditions->'sourceType') AS expected(value)
+    ))
+  )`;
+}
+
 export async function authorizedSearch(input: {
   workspaceId: string;
   userId: string;
+  permission?: Extract<WorkspacePermission, "search.use" | "chat.use">;
   query: string;
   provider?: string;
   resourceId?: string;
@@ -310,8 +353,14 @@ export async function authorizedSearch(input: {
   const limit = Math.max(1, Math.min(Math.floor(input.limit ?? 10), 50));
   const principals = [...await userContentPrincipals(input.userId, input.workspaceId)];
   if (principals.length === 0) return [];
+  const feature = await featureAccess(input.workspaceId, input.userId, input.permission);
+  if (!feature) return [];
   const { rows } = await pool.query(
-    `WITH search_query AS (SELECT websearch_to_tsquery('simple', $3::text) AS value)
+    `WITH search_query AS (SELECT websearch_to_tsquery('simple', $3::text) AS value),
+          feature_grants AS (
+            SELECT effect, conditions
+            FROM jsonb_to_recordset($8::jsonb) AS feature_grant(effect text, conditions jsonb)
+          )
      SELECT i.*, c.provider,
             (ts_rank_cd(i.search_vector, q.value) +
              CASE WHEN i.source_updated_at > now() - interval '30 days' THEN 0.05 ELSE 0 END) AS score
@@ -325,6 +374,16 @@ export async function authorizedSearch(input: {
        AND (i.resource_id IS NULL OR r.enabled = true)
        AND ($4::text IS NULL OR c.provider = $4::text)
        AND ($5::uuid IS NULL OR i.resource_id = $5::uuid)
+       AND NOT EXISTS (
+         SELECT 1 FROM feature_grants g
+         WHERE g.effect = 'deny' AND ${featureConditionSql("g", "c", "i")}
+       )
+       AND (
+         $7::boolean OR EXISTS (
+           SELECT 1 FROM feature_grants g
+           WHERE g.effect = 'allow' AND ${featureConditionSql("g", "c", "i")}
+         )
+       )
        AND (
          i.visibility = 'workspace' OR (
            i.visibility = 'restricted' AND i.acl_status = 'current' AND EXISTS (
@@ -347,6 +406,8 @@ export async function authorizedSearch(input: {
       input.provider?.trim().toLowerCase() || null,
       input.resourceId?.trim() || null,
       limit,
+      feature.defaultAllowed,
+      JSON.stringify(feature.grants),
     ],
   );
   return rows.map((row) => searchRow(row, query));
@@ -356,13 +417,20 @@ export async function getAuthorizedItemsByIds(input: {
   workspaceId: string;
   userId: string;
   itemIds: string[];
+  permission?: Extract<WorkspacePermission, "search.use" | "chat.use">;
 }): Promise<SearchResult[]> {
   const itemIds = [...new Set(input.itemIds)].slice(0, 100);
   if (itemIds.length === 0) return [];
   const principals = [...await userContentPrincipals(input.userId, input.workspaceId)];
   if (principals.length === 0) return [];
+  const feature = await featureAccess(input.workspaceId, input.userId, input.permission);
+  if (!feature) return [];
   const { rows } = await pool.query(
-    `SELECT i.*, c.provider, 0::real AS score
+    `WITH feature_grants AS (
+       SELECT effect, conditions
+       FROM jsonb_to_recordset($5::jsonb) AS feature_grant(effect text, conditions jsonb)
+     )
+     SELECT i.*, c.provider, 0::real AS score
      FROM content_items i
      JOIN connectors c ON c.connector_id = i.connector_id AND c.workspace_id = i.workspace_id
      LEFT JOIN connector_resources r ON r.resource_id = i.resource_id AND r.connector_id = i.connector_id
@@ -371,6 +439,16 @@ export async function getAuthorizedItemsByIds(input: {
        AND i.deleted_at IS NULL
        AND c.status = 'active'
        AND (i.resource_id IS NULL OR r.enabled = true)
+       AND NOT EXISTS (
+         SELECT 1 FROM feature_grants g
+         WHERE g.effect = 'deny' AND ${featureConditionSql("g", "c", "i")}
+       )
+       AND (
+         $4::boolean OR EXISTS (
+           SELECT 1 FROM feature_grants g
+           WHERE g.effect = 'allow' AND ${featureConditionSql("g", "c", "i")}
+         )
+       )
        AND (
          i.visibility = 'workspace' OR (
            i.visibility = 'restricted' AND i.acl_status = 'current' AND EXISTS (
@@ -379,7 +457,7 @@ export async function getAuthorizedItemsByIds(input: {
            )
          )
        )`,
-    [input.workspaceId, itemIds, principals],
+    [input.workspaceId, itemIds, principals, feature.defaultAllowed, JSON.stringify(feature.grants)],
   );
   return rows.map((row) => searchRow(row, ""));
 }
@@ -618,7 +696,12 @@ export async function listChatThreads(workspaceId: string, userId: string): Prom
   }));
 }
 
-export async function listAuthorizedChatMessages(workspaceId: string, userId: string, threadId: string): Promise<Array<{
+export async function listAuthorizedChatMessages(
+  workspaceId: string,
+  userId: string,
+  threadId: string,
+  permission?: Extract<WorkspacePermission, "search.use" | "chat.use">,
+): Promise<Array<{
   messageId: string;
   role: "user" | "assistant";
   content: string;
@@ -636,13 +719,13 @@ export async function listAuthorizedChatMessages(workspaceId: string, userId: st
      LEFT JOIN chat_citations c ON c.message_id = m.message_id
      WHERE m.thread_id = $1
      GROUP BY m.message_id
-     ORDER BY m.created_at, m.message_id`,
+     ORDER BY m.created_at, CASE m.role WHEN 'user' THEN 0 ELSE 1 END, m.message_id`,
     [threadId],
   );
   const messages = [];
   for (const row of rows) {
     const itemIds: string[] = Array.isArray(row.item_ids) ? row.item_ids.map(String) : [];
-    const authorized = await getAuthorizedItemsByIds({ workspaceId, userId, itemIds });
+    const authorized = await getAuthorizedItemsByIds({ workspaceId, userId, itemIds, permission });
     const byItemId = new Map(authorized.map((item) => [item.itemId, item]));
     const citations = itemIds.map((itemId) => byItemId.get(itemId)).filter((item) => item !== undefined);
     const accessChanged = itemIds.length > 0 && citations.length !== itemIds.length;

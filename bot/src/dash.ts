@@ -16,6 +16,7 @@ import type { DeliveryMode } from "./types.js";
 import { handleWorkspaceAdmin } from "./admin.js";
 import { handleWorkspaceKnowledge } from "./knowledge-api.js";
 import { handleWorkspaceGoogleDrive } from "./google-drive.js";
+import * as content from "./content-db.js";
 
 const cog = { baseUrl: config.cogneeBaseUrl };
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -118,7 +119,9 @@ export async function handleDash(req: IncomingMessage, res: ServerResponse, path
     return true;
   }
   const permission = dashboardPermission(target.resource, req.method ?? "GET");
-  const allowed = await enterprise.userCan(auth.user.userId, currentWorkspace.workspaceId, permission);
+  const allowed = resourceUsesContext(target.resource)
+    ? Boolean(await enterprise.getWorkspaceAccess(auth.user.userId, currentWorkspace.workspaceId))
+    : await enterprise.userCan(auth.user.userId, currentWorkspace.workspaceId, permission);
   if (!allowed) {
     await enterprise.recordAuditEvent({
       workspaceId: currentWorkspace.workspaceId,
@@ -159,6 +162,40 @@ export async function handleDash(req: IncomingMessage, res: ServerResponse, path
     sub,
   })) return true;
   const inst = currentWorkspace.legacyInstallationId;
+  if (resource === "overview" && req.method === "GET" && inst === undefined) {
+    const connectors = await db.listConnectors(currentWorkspace.workspaceId);
+    const resources = (await Promise.all(connectors.map((connector) => db.listConnectorResources(connector.connectorId)))).flat();
+    send(res, 200, {
+      account: currentWorkspace.displayName,
+      workspace: { workspaceId: currentWorkspace.workspaceId, displayName: currentWorkspace.displayName },
+      connectors: connectors.map(({ connectorId, provider, displayName, status, capabilities }) => ({
+        connectorId,
+        provider,
+        displayName,
+        status,
+        capabilities,
+      })),
+      resources: resources.map(({ resourceId, connectorId, externalId, kind, displayName, enabled }) => ({
+        resourceId,
+        connectorId,
+        externalId,
+        kind,
+        displayName,
+        enabled,
+      })),
+      syncs: await content.latestConnectorSyncs(currentWorkspace.workspaceId),
+      metrics: { prsPrevented: 0, decisionsTracked: 0, rejectionsActive: 0 },
+      recent: [],
+      repos: [],
+      links: [],
+      installedRepos: [],
+    });
+    return true;
+  }
+  if (resource === "decisions" && req.method === "GET" && inst === undefined) {
+    send(res, 200, { decisions: [] });
+    return true;
+  }
   if (inst === undefined) {
     send(res, 409, { error: "this resource requires a GitHub-compatible workspace" });
     return true;
@@ -201,12 +238,13 @@ export async function handleDash(req: IncomingMessage, res: ServerResponse, path
   }
 
   if (resource === "overview" && req.method === "GET") {
-    const [metrics, recent, repos, links, connectors] = await Promise.all([
+    const [metrics, recent, repos, links, connectors, syncs] = await Promise.all([
       db.metricsAll(inst),
       db.recentDeliveries(inst, 20),
       db.distinctRepos(inst),
       db.linksFor(inst),
       currentWorkspace ? db.listConnectors(currentWorkspace.workspaceId) : [],
+      content.latestConnectorSyncs(currentWorkspace.workspaceId),
     ]);
     let resources = (await Promise.all(connectors.map((connector) => db.listConnectorResources(connector.connectorId)))).flat();
     // Repos the App is INSTALLED on, straight from GitHub (always current, covers adds/removes).
@@ -262,6 +300,7 @@ export async function handleDash(req: IncomingMessage, res: ServerResponse, path
       repos,
       links,
       installedRepos,
+      syncs,
     });
     return true;
   }
@@ -506,4 +545,8 @@ export async function handleDash(req: IncomingMessage, res: ServerResponse, path
 
   send(res, 405, { error: "unsupported method or resource" });
   return true;
+}
+
+function resourceUsesContext(resource: string): boolean {
+  return resource === "search" || resource === "chat";
 }

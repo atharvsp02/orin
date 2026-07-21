@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { canPotentially, type WorkspacePermission } from "./access.js";
 import { send } from "./auth.js";
 import * as content from "./content-db.js";
 import * as enterprise from "./enterprise-db.js";
@@ -84,6 +85,13 @@ export async function handleWorkspaceKnowledge(input: {
 }): Promise<boolean> {
   const { req, res, workspaceId, userId, resource, sub } = input;
   if (resource !== "search" && resource !== "chat") return false;
+  const permission: WorkspacePermission = resource === "search" ? "search.use" : "chat.use";
+  const access = await enterprise.getWorkspaceAccess(userId, workspaceId);
+  if (!access || !canPotentially(access.membership.role, permission, access.grants)) {
+    await audit({ workspaceId, userId, action: "authorization.denied", outcome: "denied", details: { permission } });
+    send(res, 403, { error: `no access to ${resource}` });
+    return true;
+  }
 
   if (resource === "search" && req.method === "POST" && !sub) {
     if (!await rateLimit(res, workspaceId, userId, "search")) return true;
@@ -100,6 +108,7 @@ export async function handleWorkspaceKnowledge(input: {
       const results = await content.authorizedSearch({
         workspaceId,
         userId,
+        permission: "search.use",
         query: body.query,
         provider: typeof body.provider === "string" ? body.provider : undefined,
         resourceId: typeof body.resourceId === "string" ? body.resourceId : undefined,
@@ -128,7 +137,7 @@ export async function handleWorkspaceKnowledge(input: {
       send(res, 400, { error: "invalid thread id" });
       return true;
     }
-    const messages = await content.listAuthorizedChatMessages(workspaceId, userId, sub);
+    const messages = await content.listAuthorizedChatMessages(workspaceId, userId, sub, "chat.use");
     if (messages.length === 0 && !(await content.listChatThreads(workspaceId, userId)).some((thread) => thread.threadId === sub)) {
       send(res, 404, { error: "thread not found" });
       return true;
@@ -161,6 +170,7 @@ export async function handleWorkspaceKnowledge(input: {
       const results = await content.authorizedSearch({
         workspaceId,
         userId,
+        permission: "chat.use",
         query: question,
         provider: typeof body.provider === "string" ? body.provider : undefined,
         resourceId: typeof body.resourceId === "string" && UUID_PATTERN.test(body.resourceId) ? body.resourceId : undefined,
