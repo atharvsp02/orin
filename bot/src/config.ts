@@ -36,5 +36,9 @@ export const config = {
     clientId: process.env.GITHUB_OAUTH_CLIENT_ID,
     clientSecret: process.env.GITHUB_OAUTH_CLIENT_SECRET,
   },
+  googleDrive: {
+    clientId: process.env.GOOGLE_DRIVE_CLIENT_ID,
+    clientSecret: process.env.GOOGLE_DRIVE_CLIENT_SECRET,
+  },
   webOrigin: process.env.WEB_ORIGIN ?? "https://orin-seven.vercel.app",
 };

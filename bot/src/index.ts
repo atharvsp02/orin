@@ -5,12 +5,17 @@ import { app } from "./github.js";
 import * as db from "./db.js";
 import * as cognee from "./cognee.js";
 import { startQueue } from "./worker.js";
-import { QUEUE } from "./queues.js";
+import { QUEUE, safeJobError } from "./queues.js";
 import { handlePreflight, handleIssueKey, handleMetrics, handleGraph } from "./preflight.js";
-import { handleAuthStart, handleAuthCallback, handleLogout, handleMe } from "./auth.js";
+import { handleAuthStart, handleAuthCallback, handleLogout, handleMe, send } from "./auth.js";
 import { handleDash } from "./dash.js";
 import { forgetTenant } from "./lifecycle.js";
 import { DECISION_OWL, ONTOLOGY_KEY, ONTOLOGY_FILENAME } from "./ontology.js";
+import {
+  handleGoogleDriveCallback,
+  handleGoogleDriveStart,
+  setGoogleDriveQueue,
+} from "./google-drive.js";
 
 async function syncGithubResources(
   installationId: number,
@@ -33,6 +38,7 @@ async function syncGithubResources(
 async function main() {
   await db.initSchema();
   const boss = await startQueue();
+  setGoogleDriveQueue(boss);
   const cog = { baseUrl: config.cogneeBaseUrl };
 
   // New install -> provision an isolated Cognee tenant, then backfill each repo (async).
@@ -173,6 +179,20 @@ async function main() {
     }
     if (req.method === "GET" && pathname === "/v1/me") {
       void handleMe(req, res);
+      return;
+    }
+    if (req.method === "GET" && pathname === "/v1/connectors/google-drive/start") {
+      void handleGoogleDriveStart(req, res).catch((error) => {
+        console.error("Google Drive OAuth start failed:", safeJobError(error));
+        send(res, 500, { error: "Google Drive connection failed" });
+      });
+      return;
+    }
+    if (req.method === "GET" && pathname === "/v1/connectors/google-drive/callback") {
+      void handleGoogleDriveCallback(req, res).catch((error) => {
+        console.error("Google Drive OAuth callback failed:", safeJobError(error));
+        send(res, 500, { error: "Google Drive connection failed" });
+      });
       return;
     }
     if (pathname.startsWith("/v1/dash/") || pathname.startsWith("/v1/workspaces/")) {

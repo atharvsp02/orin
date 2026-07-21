@@ -15,6 +15,7 @@ import type { TenantCredentials } from "./cognee.js";
 import type { DeliveryMode } from "./types.js";
 import { handleWorkspaceAdmin } from "./admin.js";
 import { handleWorkspaceKnowledge } from "./knowledge-api.js";
+import { handleWorkspaceGoogleDrive } from "./google-drive.js";
 
 const cog = { baseUrl: config.cogneeBaseUrl };
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -78,6 +79,9 @@ export function dashboardPermission(resource: string, method = "GET"): Workspace
   if (resource === "keys" || resource === "settings") return "settings.manage";
   if (resource === "people" || resource === "groups") return "people.manage";
   if (resource === "policies") return "policies.manage";
+  if (resource === "connectorpolicies") return "policies.manage";
+  if (resource === "syncs") return method === "GET" ? "connectors.read" : "connectors.manage";
+  if (resource === "disconnects") return "connectors.manage";
   if (resource === "audit") return "audit.read";
   if (resource === "chat") return "chat.use";
   if (resource === "search") return "search.use";
@@ -143,6 +147,14 @@ export async function handleDash(req: IncomingMessage, res: ServerResponse, path
     res,
     workspaceId: currentWorkspace.workspaceId,
     userId: auth.user.userId,
+    resource,
+    sub,
+  })) return true;
+  if (await handleWorkspaceGoogleDrive({
+    req,
+    res,
+    workspaceId: currentWorkspace.workspaceId,
+    actorUserId: auth.user.userId,
     resource,
     sub,
   })) return true;

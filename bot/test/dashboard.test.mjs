@@ -82,6 +82,8 @@ test("maps administrative mutations to management permissions", () => {
   assert.equal(dashboardPermission("docs", "POST"), "content.manage");
   assert.equal(dashboardPermission("people", "GET"), "people.manage");
   assert.equal(dashboardPermission("audit", "GET"), "audit.read");
+  assert.equal(dashboardPermission("syncs", "POST"), "connectors.manage");
+  assert.equal(dashboardPermission("connectorpolicies", "POST"), "policies.manage");
 });
 
 test("compares mutation origins exactly", () => {

@@ -11,6 +11,8 @@ import type { DeliveryRefs } from "./delivery.js";
 import type { TenantCredentials } from "./cognee.js";
 import type { DeliveryMode } from "./types.js";
 import type { CatchJob, CommandJob, IngestJob } from "./queues.js";
+import type { DriveSyncJob } from "./queues.js";
+import { runGoogleDriveSync } from "./google-drive.js";
 
 export async function startQueue(): Promise<PgBoss> {
   const boss = new PgBoss(config.databaseUrl);
@@ -20,12 +22,32 @@ export async function startQueue(): Promise<PgBoss> {
   await boss.updateQueue(QUEUE.catch, { name: QUEUE.catch, ...CATCH_RETRY_OPTIONS });
   await boss.createQueue(QUEUE.command);
   await boss.createQueue(QUEUE.lifecycle);
+  await boss.createQueue(QUEUE.driveSync);
+  await boss.createQueue(QUEUE.connectorScheduler);
   await boss.work<IngestJob>(QUEUE.ingest, ingestWorker);
   await boss.work<CatchJob>(QUEUE.catch, { includeMetadata: true }, catchWorker);
   await boss.work<CommandJob>(QUEUE.command, (jobs) => commandWorker(jobs, boss));
   await boss.work(QUEUE.lifecycle, () => runImprove());
+  await boss.work<DriveSyncJob>(QUEUE.driveSync, async (jobs) => {
+    for (const job of jobs) await runGoogleDriveSync(job.data);
+  });
+  await boss.work(QUEUE.connectorScheduler, async () => {
+    for (const connector of await db.listActiveConnectorsByProvider("gdrive")) {
+      await boss.send(QUEUE.driveSync, {
+        workspaceId: connector.workspaceId,
+        connectorId: connector.connectorId,
+      } satisfies DriveSyncJob, {
+        singletonKey: connector.connectorId,
+        singletonSeconds: 15 * 60,
+        retryLimit: 3,
+        retryDelay: 30,
+        retryBackoff: true,
+      });
+    }
+  });
   // Apply accumulated maintainer feedback to the graph once an hour (the /improve verb).
   await boss.schedule(QUEUE.lifecycle, "0 * * * *");
+  await boss.schedule(QUEUE.connectorScheduler, "*/15 * * * *");
   return boss;
 }
 

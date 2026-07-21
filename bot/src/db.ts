@@ -527,10 +527,27 @@ export async function getConnector(provider: string, externalId: string): Promis
   return rows[0] ? connectorFromRow(rows[0]) : null;
 }
 
+export async function getConnectorById(workspaceId: string, connectorId: string): Promise<ConnectorAccount | null> {
+  const { rows } = await pool.query(
+    `SELECT * FROM connectors WHERE workspace_id = $1 AND connector_id = $2`,
+    [workspaceId, connectorId],
+  );
+  return rows[0] ? connectorFromRow(rows[0]) : null;
+}
+
 export async function listConnectors(workspaceId: string): Promise<ConnectorAccount[]> {
   const { rows } = await pool.query(
     `SELECT * FROM connectors WHERE workspace_id = $1 ORDER BY provider, display_name`,
     [workspaceId],
+  );
+  return rows.map(connectorFromRow);
+}
+
+export async function listActiveConnectorsByProvider(provider: string): Promise<ConnectorAccount[]> {
+  const normalized = normalizeConnectorRef({ provider, externalId: "placeholder" }).provider;
+  const { rows } = await pool.query(
+    `SELECT * FROM connectors WHERE provider = $1 AND status = 'active' ORDER BY workspace_id, connector_id`,
+    [normalized],
   );
   return rows.map(connectorFromRow);
 }
@@ -546,6 +563,20 @@ export async function setConnectorEnabled(
      WHERE workspace_id = $1 AND connector_id = $2
      RETURNING *`,
     [workspaceId, connectorId, enabled ? "active" : "disabled"],
+  );
+  return rows[0] ? connectorFromRow(rows[0]) : null;
+}
+
+export async function setConnectorStatus(
+  workspaceId: string,
+  connectorId: string,
+  status: ConnectorStatus,
+): Promise<ConnectorAccount | null> {
+  const { rows } = await pool.query(
+    `UPDATE connectors SET status = $3, updated_at = now()
+     WHERE workspace_id = $1 AND connector_id = $2
+     RETURNING *`,
+    [workspaceId, connectorId, status],
   );
   return rows[0] ? connectorFromRow(rows[0]) : null;
 }
@@ -570,13 +601,13 @@ export async function upsertConnectorResource(input: {
   const { rows } = await pool.query(
     `INSERT INTO connector_resources
        (resource_id, connector_id, external_id, kind, display_name, enabled)
-     VALUES ($1, $2, $3, $4, $5, $6)
+     VALUES ($1, $2, $3, $4, $5, COALESCE($6, true))
      ON CONFLICT (connector_id, kind, external_id) DO UPDATE SET
        display_name = EXCLUDED.display_name,
-       enabled = EXCLUDED.enabled,
+       enabled = COALESCE($6, connector_resources.enabled),
        updated_at = now()
      RETURNING *`,
-    [input.resourceId ?? randomUUID(), input.connectorId, externalId, kind, input.displayName, input.enabled ?? true],
+    [input.resourceId ?? randomUUID(), input.connectorId, externalId, kind, input.displayName, input.enabled ?? null],
   );
   return resourceFromRow(rows[0]);
 }

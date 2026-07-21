@@ -1,5 +1,12 @@
 // Queue names + job payloads, shared by the webhook entry point, the worker, and command handling.
-export const QUEUE = { ingest: "ingest", catch: "catch", command: "command", lifecycle: "lifecycle" } as const;
+export const QUEUE = {
+  ingest: "ingest",
+  catch: "catch",
+  command: "command",
+  lifecycle: "lifecycle",
+  driveSync: "drive-sync",
+  connectorScheduler: "connector-scheduler",
+} as const;
 
 export const CATCH_RETRY_OPTIONS = {
   retryLimit: 5,
@@ -50,4 +57,10 @@ export interface CommandJob {
   body: string;
   sender: string;
   isPr: boolean;
+}
+
+export interface DriveSyncJob {
+  workspaceId: string;
+  connectorId: string;
+  actorUserId?: string;
 }

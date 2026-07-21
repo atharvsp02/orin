@@ -529,6 +529,24 @@ export async function latestConnectorSyncs(workspaceId: string): Promise<Connect
   return rows.map(syncRunFromRow);
 }
 
+export async function latestSuccessfulConnectorCursor(connectorId: string): Promise<string> {
+  const { rows } = await pool.query(
+    `SELECT cursor_value FROM connector_sync_runs
+     WHERE connector_id = $1 AND status IN ('succeeded', 'partial') AND cursor_value <> ''
+     ORDER BY finished_at DESC NULLS LAST LIMIT 1`,
+    [connectorId],
+  );
+  return String(rows[0]?.cursor_value ?? "");
+}
+
+export async function markConnectorAclStale(workspaceId: string, connectorId: string): Promise<void> {
+  await pool.query(
+    `UPDATE content_items SET acl_status = 'stale'
+     WHERE workspace_id = $1 AND connector_id = $2 AND visibility = 'restricted' AND deleted_at IS NULL`,
+    [workspaceId, connectorId],
+  );
+}
+
 export async function createChatExchange(input: {
   workspaceId: string;
   userId: string;

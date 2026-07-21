@@ -159,6 +159,8 @@ const driveConnector = await db.upsertConnector({
   displayName: "Acme Drive",
   capabilities: ["ingest", "query"],
 });
+ok("connector can be resolved by workspace and id", (await db.getConnectorById(workspace.workspaceId, driveConnector.connectorId))?.externalId === "drive-content");
+ok("active provider connector listing is provider scoped", (await db.listActiveConnectorsByProvider("gdrive")).some((connector) => connector.connectorId === driveConnector.connectorId));
 const driveResource = await db.upsertConnectorResource({
   connectorId: driveConnector.connectorId,
   externalId: "shared-drive-1",
@@ -271,6 +273,13 @@ const viewerSearch = await contentDb.authorizedSearch({
 ok("viewer search sees workspace and matching group ACL", viewerSearch.some((item) => item.itemId === workspaceContent.itemId) && viewerSearch.some((item) => item.itemId === groupContent.itemId));
 ok("viewer search cannot see direct owner ACL", !viewerSearch.some((item) => item.itemId === ownerContent.itemId));
 ok("stale, empty ACL, and disabled resources fail closed", viewerSearch.length === 2, JSON.stringify(viewerSearch));
+await db.setConnectorStatus(workspace.workspaceId, driveConnector.connectorId, "error");
+ok("connector error hides all of its search content", (await contentDb.authorizedSearch({
+  workspaceId: workspace.workspaceId,
+  userId: viewerMembership.userId,
+  query: "roadmap",
+})).length === 0);
+await db.setConnectorStatus(workspace.workspaceId, driveConnector.connectorId, "active");
 eq("empty search query rejects", await contentDb.authorizedSearch({ workspaceId: workspace.workspaceId, userId: ownerUser.userId, query: " " }).then(() => "accepted", error => error.message), "query is required");
 eq("oversized content rejects", await contentDb.upsertContentItem({
   workspaceId: workspace.workspaceId,
@@ -489,6 +498,13 @@ const disabledResource = await db.upsertConnectorResource({
   enabled: false,
 });
 ok("connector resource update is idempotent", disabledResource.resourceId === independentResource.resourceId && disabledResource.enabled === false);
+const rediscoveredResource = await db.upsertConnectorResource({
+  connectorId: independentConnector.connectorId,
+  externalId: "C-engineering",
+  kind: "channel",
+  displayName: "Engineering Team",
+});
+ok("resource discovery preserves an administrator disable", rediscoveredResource.enabled === false);
 eq("connector resources remain scoped", (await db.listConnectorResources(independentConnector.connectorId)).map((resource) => resource.displayName), ["Engineering Team"]);
 ok("disabled resource blocks connector activity", await db.connectorAllowsResource("slack", "T-independent", "channel", "C-engineering") === false);
 ok("missing connector blocks activity", await db.connectorAllowsResource("slack", "T-missing", "channel", "C-engineering") === false);
