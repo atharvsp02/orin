@@ -94,7 +94,7 @@ Only a decision that is `rejected` and not superseded can block. Delivery is con
 
 ### Slack
 
-`bot/src/slack.ts` is a Bolt app. `/why [repo] <question>` returns a cited answer; a brain reaction records the reacted message as a decision; `@Orin` mentions answer in-thread. A workspace gets its own isolated memory on install and can be linked to a GitHub org's memory with `/orin link` (mints a one-time code) then `@orinbot link CODE` on GitHub (consumed by someone with write access).
+`bot/src/slack.ts` is a Bolt app. It indexes new and edited messages from public and private channels where Orin is a member, removes deleted messages, and synchronizes channel membership before making content searchable. Channel membership changes update access immediately, and failed access synchronization hides the channel until it recovers. A new Slack-only workspace bootstraps its current human Slack administrator as the first Orin owner. `/why [repo:owner/name] <question>` and `@Orin` use the permission-aware answer path for active workspace members. Automatic warnings are private to the authorized requester, and recording with a brain reaction requires content administration permission. A workspace gets its own isolated memory on install and can be linked to a GitHub org's memory with `/orin link` then `@orinbot link CODE` on GitHub.
 
 ### Linear
 
@@ -108,7 +108,7 @@ For CI, `bot/action/action.yml` is a composite **GitHub Action** ("Orin Prefligh
 
 ### The Dashboard
 
-`web/` is a Next.js 16 app (React 19, Tailwind 4, Radix, framer-motion) with a signed-in, provider-neutral workspace. Members get permission-aware **Search** and **Ask Orin** with source citations and saved conversations. Owners and admins get **People**, **Groups**, **Feature access**, **Connectors**, content policies, sync health, resource controls, and an **Audit log**. Google Drive is the first full document connector, including shared drives, incremental sync, encrypted OAuth credentials, source ACL ingestion, and include or exclude policies. GitHub-compatible workspaces retain **Catches**, **Decisions**, **Rules**, **Docs**, **Knowledge graph**, **Keys**, and **Settings**. Planned connectors are labeled honestly and do not expose setup actions. The `/v1/*` API is proxied through Next so cookies stay first-party, and authenticated responses are not cached.
+`web/` is a Next.js 16 app (React 19, Tailwind 4, Radix, framer-motion) with a signed-in, provider-neutral workspace. Members get permission-aware **Search** and **Ask Orin** with source citations and saved conversations. Owners and admins get **People**, **Groups**, **Feature access**, **Connectors**, content policies, sync and access health, resource controls, and an **Audit log**. Google Drive contributes files and source ACLs through incremental synchronization. Slack contributes new channel messages through event-driven ingestion with channel membership ACLs. GitHub-compatible workspaces retain **Catches**, **Decisions**, **Rules**, **Docs**, **Knowledge graph**, **Keys**, and **Settings**. Planned connectors are labeled honestly and do not expose setup actions. The `/v1/*` API is proxied through Next so cookies stay first-party, and authenticated responses are not cached.
 
 ---
 

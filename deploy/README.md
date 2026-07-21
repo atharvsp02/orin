@@ -24,8 +24,9 @@ Secrets live only in `~/codeguard/bot/.env` (chmod 600, git-ignored) and never i
 ## GitHub App
 - App ID `4220734`, public (`github.com/apps/orinbot`). Webhook URL `…/api/github/webhooks`.
 - Private key: `~/codeguard/bot/github-app.pem` on the VM (loaded via `GITHUB_PRIVATE_KEY_PATH`).
-- Permissions: Pull requests R/W, Issues R/W, Checks R/W, Contents R, Metadata R.
+- Permissions: Pull requests R/W, Issues R/W, Checks R/W, Contents R, Metadata R, Organization members R, and Email addresses R.
 - Events: Pull request, Issues, Issue comment (installation events are automatic).
+- Organization members R is required to prove organization ownership before workspace bootstrap. Email addresses R is required to merge a verified GitHub identity with an invited workspace member.
 
 ## MCP adapter
 - Config for Cursor / Claude Desktop / any MCP client: [`mcp-client-config.example.json`](mcp-client-config.example.json)
@@ -36,16 +37,19 @@ Secrets live only in `~/codeguard/bot/.env` (chmod 600, git-ignored) and never i
 - Paste [`slack-app-manifest.json`](slack-app-manifest.json) at **api.slack.com/apps → App Manifest (JSON)** → Save.
 - Install via `https://orin-bot.duckdns.org/slack/install`.
 - App ID `A0BF7VA9TJN`. Secrets (signing/client/state) are in the VM `.env`.
-- **Self-serve:** every new workspace is auto-provisioned its own isolated memory on install.
+- **Self-serve:** every new workspace is auto-provisioned its own isolated memory on install. If Slack reports the installer as a current workspace administrator or owner and returns an email address, that installer becomes the first Orin owner. A reinstall can recover an ownerless Slack-only workspace, but never grants membership in a linked or shared workspace.
 - **Commands:** `/why [repo:owner/name] <question>` · `/orin link|status|repos|unlink|help` ·
   react `:brain:` on a message to record it.
+- **Permission-aware search:** subscribe to `message.channels`, `message.groups`, `member_joined_channel`, and `member_left_channel`. Grant `channels:read`, `channels:history`, `groups:read`, `groups:history`, `users:read`, and `users:read.email`. Reinstall the app after changing scopes.
+- Orin indexes new and edited messages only in channels where the app is present. Deleted messages are removed. Channel ACL synchronization fails closed.
+- The Slack process refreshes indexed channel membership every 15 minutes. Search hides Slack content when its channel ACL is more than 30 minutes old.
+- `/why`, `@Orin`, status, and repository listing require an active Orin workspace member linked by Slack email. Ask responses are private. Brain-reaction recording requires content administration permission.
 
 ## Linking a Slack workspace to a GitHub org's memory (cross-platform)
 1. In Slack: `/orin link` → Orin replies (ephemeral) with a one-time code (15 min, single-use,
    bound to that workspace).
-2. On GitHub: someone with **write access** comments `@orin link <CODE>` on any issue/PR in the
-   org → Orin links the workspace to that installation's memory.
-Security: minting is ephemeral + workspace-bound; consuming is write-access-gated; a used/leaked
+2. On GitHub: the personal installation owner or an active organization owner comments `@orin link <CODE>` on an issue or PR in the target installation.
+Security: minting is ephemeral + workspace-bound; consuming requires proven installation ownership; a used/leaked
 code grants nothing. `/orin unlink` reverts the workspace to a fresh memory of its own.
 
 ## Linear adapter (multi-workspace OAuth; pending credentials)
@@ -72,9 +76,11 @@ code grants nothing. `/orin unlink` reverts the workspace to a fresh memory of i
 1. Back up Postgres and verify restore access.
 2. Deploy the bot first. Startup applies additive schema changes before serving requests.
 3. Confirm queue startup, `/v1/me`, and one workspace overview.
-4. Deploy the web app with `ORIN_API_ORIGIN` pointing at the bot.
-5. Run a Drive sync in a non-production workspace and verify ACL-filtered search with owner and viewer accounts.
-6. Check connector sync and authorization events in the audit log.
+4. Review existing workspace owners and admins once. Older deployments may contain memberships created before ownership proof was enforced.
+5. Deploy the web app with `ORIN_API_ORIGIN` pointing at the bot.
+6. Run a Drive sync in a non-production workspace and verify ACL-filtered search with owner and viewer accounts.
+7. Reinstall Slack in a non-production workspace, send a channel message, and verify that a channel member can search it while a non-member cannot.
+8. Check connector sync and authorization events in the audit log.
 
 Rollback the application to the previous bot and web builds if verification fails. The schema additions are backward compatible and should remain in place during application rollback. Do not drop new tables during an incident.
 
