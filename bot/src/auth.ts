@@ -96,6 +96,21 @@ export function requestOrigin(req: IncomingMessage): string {
   return `${proto}://${host}`;
 }
 
+export function originsMatch(origin: string, expected: string): boolean {
+  try {
+    return new URL(origin).origin === new URL(expected).origin;
+  } catch {
+    return false;
+  }
+}
+
+export function hasTrustedMutationOrigin(req: IncomingMessage): boolean {
+  const method = req.method ?? "GET";
+  if (["GET", "HEAD", "OPTIONS"].includes(method)) return true;
+  const origin = String(req.headers.origin ?? "");
+  return Boolean(origin) && originsMatch(origin, requestOrigin(req));
+}
+
 const oauthConfigured = () => Boolean(config.oauth.clientId && config.oauth.clientSecret);
 
 /** GET /v1/auth/github — start the sign-in flow. */

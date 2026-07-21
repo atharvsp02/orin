@@ -7,6 +7,7 @@ process.env.GITHUB_PRIVATE_KEY ??= "dummy";
 process.env.GITHUB_WEBHOOK_SECRET ??= "dummy";
 
 const { dashboardPermission, isDashboardEntityId, parseDashboardPath } = await import("../dist/dash.js");
+const { originsMatch } = await import("../dist/auth.js");
 
 let passed = 0;
 const test = (name, fn) => {
@@ -81,6 +82,13 @@ test("maps administrative mutations to management permissions", () => {
   assert.equal(dashboardPermission("docs", "POST"), "content.manage");
   assert.equal(dashboardPermission("people", "GET"), "people.manage");
   assert.equal(dashboardPermission("audit", "GET"), "audit.read");
+});
+
+test("compares mutation origins exactly", () => {
+  assert.equal(originsMatch("https://orin.example", "https://orin.example/dashboard"), true);
+  assert.equal(originsMatch("https://evil.example", "https://orin.example"), false);
+  assert.equal(originsMatch("https://orin.example.evil.test", "https://orin.example"), false);
+  assert.equal(originsMatch("not a url", "https://orin.example"), false);
 });
 
 console.log(`${passed} dashboard route checks passed`);

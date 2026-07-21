@@ -6,7 +6,7 @@ import { config } from "./config.js";
 import * as db from "./db.js";
 import * as enterprise from "./enterprise-db.js";
 import * as cognee from "./cognee.js";
-import { authenticatedUser, send } from "./auth.js";
+import { authenticatedUser, hasTrustedMutationOrigin, send } from "./auth.js";
 import { installationOctokit } from "./github.js";
 import { listRules, rulesNodeset } from "./pipeline.js";
 import * as llm from "./llm.js";
@@ -14,6 +14,7 @@ import { ONTOLOGY_KEY } from "./ontology.js";
 import type { TenantCredentials } from "./cognee.js";
 import type { DeliveryMode } from "./types.js";
 import { handleWorkspaceAdmin } from "./admin.js";
+import { handleWorkspaceKnowledge } from "./knowledge-api.js";
 
 const cog = { baseUrl: config.cogneeBaseUrl };
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -88,6 +89,11 @@ export async function handleDash(req: IncomingMessage, res: ServerResponse, path
   const target = parseDashboardPath(pathname);
   if (!target) return false;
 
+  if (!hasTrustedMutationOrigin(req)) {
+    send(res, 403, { error: "untrusted request origin" });
+    return true;
+  }
+
   const auth = await authenticatedUser(req);
   if (!auth) {
     send(res, 401, { error: "not signed in" });
@@ -129,6 +135,14 @@ export async function handleDash(req: IncomingMessage, res: ServerResponse, path
     res,
     workspaceId: currentWorkspace.workspaceId,
     actorUserId: auth.user.userId,
+    resource,
+    sub,
+  })) return true;
+  if (await handleWorkspaceKnowledge({
+    req,
+    res,
+    workspaceId: currentWorkspace.workspaceId,
+    userId: auth.user.userId,
     resource,
     sub,
   })) return true;

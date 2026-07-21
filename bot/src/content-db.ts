@@ -623,13 +623,17 @@ export async function listAuthorizedChatMessages(workspaceId: string, userId: st
   );
   const messages = [];
   for (const row of rows) {
-    const itemIds = Array.isArray(row.item_ids) ? row.item_ids.map(String) : [];
+    const itemIds: string[] = Array.isArray(row.item_ids) ? row.item_ids.map(String) : [];
+    const authorized = await getAuthorizedItemsByIds({ workspaceId, userId, itemIds });
+    const byItemId = new Map(authorized.map((item) => [item.itemId, item]));
+    const citations = itemIds.map((itemId) => byItemId.get(itemId)).filter((item) => item !== undefined);
+    const accessChanged = itemIds.length > 0 && citations.length !== itemIds.length;
     messages.push({
       messageId: String(row.message_id),
       role: String(row.role) as "user" | "assistant",
-      content: String(row.content),
+      content: accessChanged ? "This answer is unavailable because your source access changed." : String(row.content),
       createdAt: String(row.created_at),
-      citations: await getAuthorizedItemsByIds({ workspaceId, userId, itemIds }),
+      citations: accessChanged ? [] : citations,
     });
   }
   return messages;

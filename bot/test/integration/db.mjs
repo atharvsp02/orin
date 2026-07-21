@@ -331,7 +331,9 @@ const exchange = await contentDb.createChatExchange({
 ok("chat exchange creates a user-owned thread", (await contentDb.listChatThreads(workspace.workspaceId, viewerMembership.userId))[0].threadId === exchange.threadId);
 ok("authorized chat citation renders", (await contentDb.listAuthorizedChatMessages(workspace.workspaceId, viewerMembership.userId, exchange.threadId))[1].citations.length === 1);
 await enterprise.replaceGroupMembers(workspace.workspaceId, rolloutGroup.groupId, []);
-ok("historical chat citation disappears after ACL revocation", (await contentDb.listAuthorizedChatMessages(workspace.workspaceId, viewerMembership.userId, exchange.threadId))[1].citations.length === 0);
+const revokedChat = (await contentDb.listAuthorizedChatMessages(workspace.workspaceId, viewerMembership.userId, exchange.threadId))[1];
+ok("historical chat citation disappears after ACL revocation", revokedChat.citations.length === 0);
+eq("historical answer is redacted after ACL revocation", revokedChat.content, "This answer is unavailable because your source access changed.");
 ok("another user cannot read the chat thread", (await contentDb.listAuthorizedChatMessages(workspace.workspaceId, ownerUser.userId, exchange.threadId)).length === 0);
 ok("deleted content disappears from search", await contentDb.markContentDeleted(workspace.workspaceId, driveConnector.connectorId, "workspace-roadmap"));
 ok("deleted content is no longer returned", !(await contentDb.authorizedSearch({ workspaceId: workspace.workspaceId, userId: ownerUser.userId, query: "permission-aware" })).some((item) => item.itemId === workspaceContent.itemId));
