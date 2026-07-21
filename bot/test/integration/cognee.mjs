@@ -178,7 +178,7 @@ await db.linkTenant("linear", "L-linked", INST);
 const linkedLinear = await tenantMod.resolveTenant({ provider: "linear", externalId: "L-linked" });
 ok(
   "linked Linear workspace resolves the same isolated memory",
-  linkedLinear?.installationId === INST && linkedLinear?.datasetName === DS,
+  linkedLinear?.installationId === INST && linkedLinear?.datasetName === DS && linkedLinear.workspaceId === linkedSlack.workspaceId,
 );
 ok("unknown provider connector cannot resolve", (await tenantMod.resolveTenant({ provider: "gitlab", externalId: "G-unlinked" })) === null);
 const standaloneRef = { provider: "slack", externalId: "T-standalone" };
@@ -196,6 +196,15 @@ await tenantMod.linkTenant(standaloneRef, INST);
 const relinkedSlack = await tenantMod.resolveTenant(standaloneRef);
 ok("Slack workspace can be relinked to existing memory", relinkedSlack?.installationId === INST);
 await db.deleteInstallation(standalone.installationId);
+const standaloneLinear = await tenantMod.provisionAndLink(
+  { provider: "linear", externalId: "L-standalone" },
+  "linear:Standalone",
+);
+ok(
+  "standalone Linear workspace provisions isolated memory",
+  standaloneLinear.installationId !== INST && standaloneLinear.inst.githubAccount === "linear:Standalone",
+);
+await db.deleteInstallation(standaloneLinear.installationId);
 ok("primitives.ask over tenant", (await prim.ask(tenant, "why redis")) === "Because redis added ops burden.");
 // matchRules (listRules via CODING_RULES + grounding gate)
 // needs >=2 shared >=3-char terms with a rule; "add new deps" overlaps "Do not add new deps"
