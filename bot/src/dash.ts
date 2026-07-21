@@ -1,16 +1,19 @@
 // Dashboard API: session-cookie auth with legacy installation and workspace routes.
 import { createHash, randomBytes } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import type { WorkspacePermission } from "./access.js";
 import { config } from "./config.js";
 import * as db from "./db.js";
+import * as enterprise from "./enterprise-db.js";
 import * as cognee from "./cognee.js";
-import { sessionFrom, send } from "./auth.js";
+import { authenticatedUser, send } from "./auth.js";
 import { installationOctokit } from "./github.js";
 import { listRules, rulesNodeset } from "./pipeline.js";
 import * as llm from "./llm.js";
 import { ONTOLOGY_KEY } from "./ontology.js";
 import type { TenantCredentials } from "./cognee.js";
 import type { DeliveryMode } from "./types.js";
+import { handleWorkspaceAdmin } from "./admin.js";
 
 const cog = { baseUrl: config.cogneeBaseUrl };
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -63,13 +66,30 @@ export function parseDashboardPath(pathname: string): DashboardTarget | null {
   };
 }
 
+export function dashboardPermission(resource: string, method = "GET"): WorkspacePermission {
+  if (resource === "connectors" || resource === "resources") {
+    return method === "GET" ? "connectors.read" : "connectors.manage";
+  }
+  if (resource === "rules" || resource === "docs") {
+    return method === "GET" ? "search.use" : "content.manage";
+  }
+  if (["decisions", "graph", "graphdata"].includes(resource)) return "search.use";
+  if (resource === "keys" || resource === "settings") return "settings.manage";
+  if (resource === "people" || resource === "groups") return "people.manage";
+  if (resource === "policies") return "policies.manage";
+  if (resource === "audit") return "audit.read";
+  if (resource === "chat") return "chat.use";
+  if (resource === "search") return "search.use";
+  return "workspace.read";
+}
+
 /** Router for dashboard API routes. Returns true when the request was handled. */
 export async function handleDash(req: IncomingMessage, res: ServerResponse, pathname: string): Promise<boolean> {
   const target = parseDashboardPath(pathname);
   if (!target) return false;
 
-  const session = sessionFrom(req);
-  if (!session) {
+  const auth = await authenticatedUser(req);
+  if (!auth) {
     send(res, 401, { error: "not signed in" });
     return true;
   }
@@ -80,9 +100,41 @@ export async function handleDash(req: IncomingMessage, res: ServerResponse, path
     send(res, 404, { error: "unknown workspace" });
     return true;
   }
-  const inst = target.kind === "installation" ? target.installationId : workspace?.legacyInstallationId;
-  if (inst === undefined || !session.ids.includes(inst)) {
+  const currentWorkspace = workspace ?? (
+    target.kind === "installation" ? await db.getWorkspaceByInstallation(target.installationId) : null
+  );
+  if (!currentWorkspace) {
+    send(res, 404, { error: "unknown workspace" });
+    return true;
+  }
+  const permission = dashboardPermission(target.resource, req.method ?? "GET");
+  const allowed = await enterprise.userCan(auth.user.userId, currentWorkspace.workspaceId, permission);
+  if (!allowed) {
+    await enterprise.recordAuditEvent({
+      workspaceId: currentWorkspace.workspaceId,
+      actorUserId: auth.user.userId,
+      action: "authorization.denied",
+      targetType: "dashboard_resource",
+      targetId: target.resource,
+      outcome: "denied",
+      details: { method: req.method ?? "GET", permission },
+    });
     send(res, 403, { error: `no access to this ${target.kind}` });
+    return true;
+  }
+  const resource = target.resource;
+  const sub = target.sub;
+  if (await handleWorkspaceAdmin({
+    req,
+    res,
+    workspaceId: currentWorkspace.workspaceId,
+    actorUserId: auth.user.userId,
+    resource,
+    sub,
+  })) return true;
+  const inst = currentWorkspace.legacyInstallationId;
+  if (inst === undefined) {
+    send(res, 409, { error: "this resource requires a GitHub-compatible workspace" });
     return true;
   }
   const installation = await db.getInstallation(inst);
@@ -90,10 +142,6 @@ export async function handleDash(req: IncomingMessage, res: ServerResponse, path
     send(res, 404, { error: "unknown installation" });
     return true;
   }
-
-  const resource = target.resource;
-  const sub = target.sub;
-  const currentWorkspace = workspace ?? await db.getWorkspaceByInstallation(inst);
 
   if ((resource === "connectors" || resource === "resources") && req.method === "PUT" && sub) {
     if (!isDashboardEntityId(sub)) {

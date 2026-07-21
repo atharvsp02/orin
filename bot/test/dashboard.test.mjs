@@ -6,7 +6,7 @@ process.env.GITHUB_APP_ID ??= "1";
 process.env.GITHUB_PRIVATE_KEY ??= "dummy";
 process.env.GITHUB_WEBHOOK_SECRET ??= "dummy";
 
-const { isDashboardEntityId, parseDashboardPath } = await import("../dist/dash.js");
+const { dashboardPermission, isDashboardEntityId, parseDashboardPath } = await import("../dist/dash.js");
 
 let passed = 0;
 const test = (name, fn) => {
@@ -67,6 +67,20 @@ test("validates dashboard entity ids", () => {
   assert.equal(isDashboardEntityId("123e4567-e89b-12d3-a456-426614174000"), true);
   assert.equal(isDashboardEntityId(""), false);
   assert.equal(isDashboardEntityId("not-a-uuid"), false);
+});
+
+test("maps member resources to feature permissions", () => {
+  assert.equal(dashboardPermission("overview", "GET"), "workspace.read");
+  assert.equal(dashboardPermission("search", "POST"), "search.use");
+  assert.equal(dashboardPermission("chat", "POST"), "chat.use");
+  assert.equal(dashboardPermission("connectors", "GET"), "connectors.read");
+});
+
+test("maps administrative mutations to management permissions", () => {
+  assert.equal(dashboardPermission("connectors", "PUT"), "connectors.manage");
+  assert.equal(dashboardPermission("docs", "POST"), "content.manage");
+  assert.equal(dashboardPermission("people", "GET"), "people.manage");
+  assert.equal(dashboardPermission("audit", "GET"), "audit.read");
 });
 
 console.log(`${passed} dashboard route checks passed`);

@@ -7,6 +7,7 @@ process.env.GITHUB_WEBHOOK_SECRET ??= "dummy";
 
 const BOT = new URL("../../dist/", import.meta.url).href;
 const db = await import(`${BOT}db.js`);
+const enterprise = await import(`${BOT}enterprise-db.js`);
 const { Pool } = await import("pg");
 const sql = new Pool({ connectionString: process.env.DATABASE_URL });
 
@@ -41,6 +42,113 @@ ok(
   "schema migration backfills the GitHub connector",
   githubConnector?.workspaceId === workspace?.workspaceId && githubConnector.capabilities.length === 5,
 );
+
+// --- provider-neutral identity, membership, groups, grants, and audit ---
+const ownerUser = await enterprise.upsertUserIdentity({
+  provider: "github",
+  externalId: "101",
+  handle: "owner",
+  displayName: "Workspace Owner",
+  email: "owner@example.com",
+  avatarUrl: "https://example.com/owner.png",
+});
+const ownerAlias = await enterprise.upsertUserIdentity({
+  provider: "email",
+  externalId: "owner@example.com",
+  displayName: "Workspace Owner",
+  email: "OWNER@example.com",
+});
+ok("identity aliases merge by normalized email", ownerAlias.userId === ownerUser.userId);
+await enterprise.addUserIdentity(ownerUser.userId, {
+  provider: "github_login",
+  externalId: "owner",
+  handle: "owner",
+});
+ok("identity lookup resolves the same user", (await enterprise.getUserByIdentity("github_login", "owner"))?.userId === ownerUser.userId);
+const ownerMembership = await enterprise.bootstrapWorkspaceMembership(ownerUser.userId, workspace.workspaceId);
+ok("first workspace member becomes owner", ownerMembership.role === "owner");
+const adminUser = await enterprise.upsertUserIdentity({
+  provider: "github",
+  externalId: "102",
+  handle: "admin",
+  displayName: "Workspace Admin",
+  email: "admin@example.com",
+});
+const adminMembership = await enterprise.bootstrapWorkspaceMembership(adminUser.userId, workspace.workspaceId);
+ok("later GitHub administrator becomes admin", adminMembership.role === "admin");
+const viewerMembership = await enterprise.inviteWorkspaceMember({
+  workspaceId: workspace.workspaceId,
+  email: "viewer@example.com",
+  displayName: "Workspace Viewer",
+  role: "viewer",
+});
+ok("email invitation creates viewer membership", viewerMembership.role === "viewer");
+eq("active owner count", await enterprise.countActiveOwners(workspace.workspaceId), 1);
+ok("viewer receives default search access", await enterprise.userCan(viewerMembership.userId, workspace.workspaceId, "search.use"));
+ok("viewer has no default chat access", !(await enterprise.userCan(viewerMembership.userId, workspace.workspaceId, "chat.use")));
+
+const rolloutGroup = await enterprise.createGroup({
+  workspaceId: workspace.workspaceId,
+  displayName: "AI rollout",
+  externalId: "drive-group:ai-rollout@example.com",
+});
+await enterprise.replaceGroupMembers(workspace.workspaceId, rolloutGroup.groupId, [viewerMembership.userId]);
+eq("group membership is replaceable", await enterprise.listGroupMemberIds(workspace.workspaceId, rolloutGroup.groupId), [viewerMembership.userId]);
+eq("group reports its member count", (await enterprise.listGroups(workspace.workspaceId))[0].memberCount, 1);
+await enterprise.upsertPermissionGrant({
+  workspaceId: workspace.workspaceId,
+  principalType: "group",
+  principalId: rolloutGroup.groupId,
+  permission: "chat.use",
+  effect: "allow",
+  conditions: { connectorProvider: "slack" },
+});
+ok(
+  "conditional group grant enables matching connector",
+  await enterprise.userCan(viewerMembership.userId, workspace.workspaceId, "chat.use", { connectorProvider: "slack" }),
+);
+ok(
+  "conditional group grant does not enable another connector",
+  !(await enterprise.userCan(viewerMembership.userId, workspace.workspaceId, "chat.use", { connectorProvider: "github" })),
+);
+const denyGrant = await enterprise.upsertPermissionGrant({
+  workspaceId: workspace.workspaceId,
+  principalType: "user",
+  principalId: viewerMembership.userId,
+  permission: "search.use",
+  effect: "deny",
+});
+ok("user deny overrides viewer search role", !(await enterprise.userCan(viewerMembership.userId, workspace.workspaceId, "search.use")));
+ok("permission grants remain workspace scoped", (await enterprise.listPermissionGrants(workspace.workspaceId)).length === 2);
+ok("permission grant can be deleted", await enterprise.deletePermissionGrant(workspace.workspaceId, denyGrant.grantId));
+ok("deleting deny restores viewer search", await enterprise.userCan(viewerMembership.userId, workspace.workspaceId, "search.use"));
+const principals = await enterprise.userContentPrincipals(viewerMembership.userId, workspace.workspaceId);
+ok("content principals include normalized email", principals.has("email:viewer@example.com"));
+ok("content principals include internal group", principals.has(`group:${rolloutGroup.groupId}`));
+ok("content principals include external group", principals.has("external_group:drive-group:ai-rollout@example.com"));
+const audit = await enterprise.recordAuditEvent({
+  workspaceId: workspace.workspaceId,
+  actorUserId: ownerUser.userId,
+  action: "membership.invited",
+  targetType: "user",
+  targetId: viewerMembership.userId,
+  requestId: "req-1",
+  details: { role: "viewer" },
+});
+ok("audit event is appendable", audit.action === "membership.invited");
+eq("audit events remain workspace scoped", (await enterprise.listAuditEvents(workspace.workspaceId)).map((event) => event.eventId), [audit.eventId]);
+await enterprise.updateWorkspaceMember({
+  workspaceId: workspace.workspaceId,
+  userId: viewerMembership.userId,
+  status: "suspended",
+});
+ok("suspended member loses product access", !(await enterprise.userCan(viewerMembership.userId, workspace.workspaceId, "search.use")));
+await enterprise.updateWorkspaceMember({
+  workspaceId: workspace.workspaceId,
+  userId: viewerMembership.userId,
+  status: "active",
+});
+eq("user workspace list is membership based", (await enterprise.listUserWorkspaces(viewerMembership.userId)).map((item) => item.workspaceId), [workspace.workspaceId]);
 
 // --- tenant_config defaults ---
 const cfg = await db.getTenantConfig(INST);

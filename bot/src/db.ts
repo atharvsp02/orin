@@ -13,7 +13,7 @@ import {
 import { decrypt, encrypt } from "./crypto.js";
 import type { DecisionRecord, Installation, TenantConfig } from "./types.js";
 
-const pool = new Pool({ connectionString: config.databaseUrl });
+export const pool = new Pool({ connectionString: config.databaseUrl });
 const SYNTHETIC_INSTALLATION_FLOOR = 1_000_000_000_000;
 
 export async function initSchema(): Promise<void> {
@@ -148,6 +148,93 @@ export async function initSchema(): Promise<void> {
       updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
       UNIQUE (connector_id, kind, external_id)
     );
+    CREATE TABLE IF NOT EXISTS users (
+      user_id       UUID PRIMARY KEY,
+      display_name  TEXT NOT NULL,
+      primary_email TEXT NOT NULL DEFAULT '',
+      avatar_url    TEXT NOT NULL DEFAULT '',
+      status        TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
+      created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS users_primary_email_unique
+      ON users (lower(primary_email)) WHERE primary_email <> '';
+    CREATE TABLE IF NOT EXISTS user_identities (
+      provider      TEXT NOT NULL,
+      external_id   TEXT NOT NULL,
+      user_id       UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+      handle        TEXT NOT NULL DEFAULT '',
+      email         TEXT NOT NULL DEFAULT '',
+      created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (provider, external_id)
+    );
+    CREATE INDEX IF NOT EXISTS user_identities_user_idx ON user_identities (user_id);
+    CREATE TABLE IF NOT EXISTS workspace_memberships (
+      workspace_id UUID NOT NULL REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
+      user_id      UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+      role         TEXT NOT NULL CHECK (role IN ('owner', 'admin', 'member', 'viewer')),
+      status       TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'suspended')),
+      created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (workspace_id, user_id)
+    );
+    CREATE INDEX IF NOT EXISTS workspace_memberships_user_idx
+      ON workspace_memberships (user_id, status);
+    CREATE TABLE IF NOT EXISTS workspace_groups (
+      group_id     UUID PRIMARY KEY,
+      workspace_id UUID NOT NULL REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
+      display_name TEXT NOT NULL,
+      external_id  TEXT,
+      created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE (group_id, workspace_id),
+      UNIQUE (workspace_id, display_name)
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS workspace_groups_external_unique
+      ON workspace_groups (workspace_id, external_id) WHERE external_id IS NOT NULL;
+    CREATE TABLE IF NOT EXISTS workspace_group_members (
+      workspace_id UUID NOT NULL,
+      group_id     UUID NOT NULL,
+      user_id      UUID NOT NULL,
+      created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (group_id, user_id),
+      FOREIGN KEY (group_id, workspace_id)
+        REFERENCES workspace_groups(group_id, workspace_id) ON DELETE CASCADE,
+      FOREIGN KEY (workspace_id, user_id)
+        REFERENCES workspace_memberships(workspace_id, user_id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS workspace_group_members_user_idx
+      ON workspace_group_members (workspace_id, user_id);
+    CREATE TABLE IF NOT EXISTS permission_grants (
+      grant_id      UUID PRIMARY KEY,
+      workspace_id  UUID NOT NULL REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
+      principal_type TEXT NOT NULL CHECK (principal_type IN ('role', 'user', 'group')),
+      principal_id  TEXT NOT NULL,
+      permission    TEXT NOT NULL,
+      effect        TEXT NOT NULL CHECK (effect IN ('allow', 'deny')),
+      conditions    JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE (workspace_id, principal_type, principal_id, permission, conditions)
+    );
+    CREATE INDEX IF NOT EXISTS permission_grants_workspace_idx
+      ON permission_grants (workspace_id, principal_type, principal_id);
+    CREATE TABLE IF NOT EXISTS audit_events (
+      event_id      UUID PRIMARY KEY,
+      workspace_id  UUID NOT NULL REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
+      actor_user_id UUID REFERENCES users(user_id) ON DELETE SET NULL,
+      action        TEXT NOT NULL,
+      target_type   TEXT NOT NULL,
+      target_id     TEXT NOT NULL,
+      outcome       TEXT NOT NULL DEFAULT 'success' CHECK (outcome IN ('success', 'denied', 'failure')),
+      request_id    TEXT NOT NULL DEFAULT '',
+      ip_hash       TEXT NOT NULL DEFAULT '',
+      details       JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS audit_events_workspace_time_idx
+      ON audit_events (workspace_id, created_at DESC);
     ALTER TABLE preflight_keys ADD COLUMN IF NOT EXISTS label TEXT NOT NULL DEFAULT '';
     ALTER TABLE deliveries ADD COLUMN IF NOT EXISTS error_text TEXT;
     INSERT INTO workspaces

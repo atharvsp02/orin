@@ -3,14 +3,17 @@
 // THIS App the user can access, and that list (in a signed cookie) is all they can see.
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { can, WORKSPACE_PERMISSIONS } from "./access.js";
 import { config } from "./config.js";
 import * as db from "./db.js";
+import * as enterprise from "./enterprise-db.js";
 
 const COOKIE = "orin_session";
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const key = () => createHash("sha256").update(`${config.secret}:session`).digest();
 
 export interface Session {
+  userId?: string;
   login: string;
   avatar: string;
   ids: number[]; // installation ids this user administers
@@ -130,7 +133,10 @@ export async function handleAuthCallback(req: IncomingMessage, res: ServerRespon
 
   const gh = { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "User-Agent": "orin-bot" };
   const user = (await (await fetch("https://api.github.com/user", { headers: gh })).json()) as {
+    id?: number;
     login?: string;
+    name?: string;
+    email?: string;
     avatar_url?: string;
   };
   const insts = (await (await fetch("https://api.github.com/user/installations?per_page=100", { headers: gh })).json()) as {
@@ -141,8 +147,29 @@ export async function handleAuthCallback(req: IncomingMessage, res: ServerRespon
     .filter((i) => String(i.app_id) === String(config.github.appId))
     .map((i) => i.id);
 
-  if (!user.login) return send(res, 502, { error: "github user lookup failed" });
-  const session: Session = { login: user.login, avatar: user.avatar_url ?? "", ids, exp: Date.now() + SESSION_TTL_MS };
+  if (!user.login || !user.id) return send(res, 502, { error: "github user lookup failed" });
+  const orinUser = await enterprise.upsertUserIdentity({
+    provider: "github",
+    externalId: String(user.id),
+    handle: user.login,
+    displayName: user.name?.trim() || user.login,
+    email: user.email,
+    avatarUrl: user.avatar_url,
+  });
+  await enterprise.addUserIdentity(orinUser.userId, {
+    provider: "github_login",
+    externalId: user.login.toLowerCase(),
+    handle: user.login,
+    email: user.email,
+  });
+  await bootstrapSessionMemberships(ids, orinUser.userId);
+  const session: Session = {
+    userId: orinUser.userId,
+    login: user.login,
+    avatar: user.avatar_url ?? "",
+    ids,
+    exp: Date.now() + SESSION_TTL_MS,
+  };
   res.setHeader("Set-Cookie", [
     `${COOKIE}=${encodeSession(session)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_TTL_MS / 1000}`,
     `${NONCE_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`,
@@ -157,12 +184,38 @@ export function handleLogout(res: ServerResponse): void {
   res.writeHead(302, { Location: "/", "Cache-Control": "private, no-store, max-age=0" }).end();
 }
 
+async function bootstrapSessionMemberships(ids: number[], userId: string): Promise<void> {
+  for (const installationId of ids) {
+    const workspace = await db.getWorkspaceByInstallation(installationId);
+    if (workspace) await enterprise.bootstrapWorkspaceMembership(userId, workspace.workspaceId);
+  }
+}
+
+export async function authenticatedUser(req: IncomingMessage): Promise<{
+  session: Session;
+  user: enterprise.OrinUser;
+} | null> {
+  const session = sessionFrom(req);
+  if (!session) return null;
+  let user = session.userId ? await enterprise.getUser(session.userId) : null;
+  user ??= await enterprise.getUserByIdentity("github_login", session.login.toLowerCase());
+  user ??= await enterprise.upsertUserIdentity({
+    provider: "github_login",
+    externalId: session.login.toLowerCase(),
+    handle: session.login,
+    displayName: session.login,
+    avatarUrl: session.avatar,
+  });
+  await bootstrapSessionMemberships(session.ids, user.userId);
+  return { session, user };
+}
+
 /** GET /v1/me — who am I + which installations I can see (enriched from our DB). */
 export async function handleMe(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const s = sessionFrom(req);
-  if (!s) return send(res, 401, { error: "not signed in" });
+  const auth = await authenticatedUser(req);
+  if (!auth) return send(res, 401, { error: "not signed in" });
+  const { session: s, user } = auth;
   const installations = [];
-  const workspaces = [];
   for (const id of s.ids) {
     const inst = await db.getInstallation(id);
     if (inst) {
@@ -172,22 +225,34 @@ export async function handleMe(req: IncomingMessage, res: ServerResponse): Promi
         account: inst.githubAccount,
         decisions,
       });
-      const workspace = await db.getWorkspaceByInstallation(id);
-      if (workspace) {
-        const connectors = await db.listConnectors(workspace.workspaceId);
-        workspaces.push({
-          workspaceId: workspace.workspaceId,
-          displayName: workspace.displayName,
-          decisions,
-          connectors: connectors.map(({ provider, displayName, status, capabilities }) => ({
-            provider,
-            displayName,
-            status,
-            capabilities,
-          })),
-        });
-      }
     }
   }
-  send(res, 200, { login: s.login, avatar: s.avatar, workspaces, installations });
+  const workspaces = await Promise.all((await enterprise.listUserWorkspaces(user.userId)).map(async (workspace) => {
+    const connectors = await db.listConnectors(workspace.workspaceId);
+    const access = await enterprise.getWorkspaceAccess(user.userId, workspace.workspaceId);
+    return {
+      workspaceId: workspace.workspaceId,
+      displayName: workspace.displayName,
+      decisions: workspace.decisions,
+      role: workspace.role,
+      permissions: access
+        ? WORKSPACE_PERMISSIONS.filter((permission) => can(access.membership.role, permission, access.grants))
+        : [],
+      connectors: connectors.map(({ provider, displayName, status, capabilities }) => ({
+        provider,
+        displayName,
+        status,
+        capabilities,
+      })),
+    };
+  }));
+  send(res, 200, {
+    userId: user.userId,
+    login: s.login,
+    displayName: user.displayName,
+    email: user.primaryEmail,
+    avatar: user.avatarUrl || s.avatar,
+    workspaces,
+    installations,
+  });
 }
