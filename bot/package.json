@@ -13,7 +13,7 @@
     "linear": "node dist/linear.js",
     "dev": "node --watch src/index.ts",
     "typecheck": "tsc --noEmit",
-    "test": "tsc && node test/patch.test.mjs && node test/commands.test.mjs && node test/pipeline.test.mjs && node test/queues.test.mjs",
+    "test": "tsc && node test/connectors.test.mjs && node test/patch.test.mjs && node test/commands.test.mjs && node test/pipeline.test.mjs && node test/queues.test.mjs",
     "test:integration": "tsc && node test/integration/db.mjs && node test/integration/cognee.mjs"
   },
   "dependencies": {
