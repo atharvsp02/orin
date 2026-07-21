@@ -28,7 +28,7 @@ const installationStore = {
     if (!id) throw new Error("Slack installation has no team/enterprise id");
     await db.storeSlackInstall(id, installation);
     // Self-serve: a new workspace gets its own isolated brain immediately (no-op when already linked).
-    await provisionAndLink({ platform: "slack", externalId: id }, `slack:${installation.team?.name ?? id}`).catch((e) =>
+    await provisionAndLink({ provider: "slack", externalId: id }, `slack:${installation.team?.name ?? id}`).catch((e) =>
       console.error("slack auto-provision failed:", (e as Error).message),
     );
   },
@@ -43,7 +43,7 @@ const installationStore = {
 };
 
 const tenantForTeam = (teamId?: string): Promise<Tenant | null> =>
-  resolveTenant({ platform: "slack", externalId: teamId ?? "" });
+  resolveTenant({ provider: "slack", externalId: teamId ?? "" });
 
 function buildApp(): InstanceType<typeof App> {
   const app = new App({
@@ -159,7 +159,7 @@ function registerHandlers(app: InstanceType<typeof App>): void {
         if (!(await requireAdmin())) break;
         // Detach from the current memory and provision a fresh, empty one for this workspace.
         await db.unlinkTenant("slack", teamId);
-        await provisionAndLink({ platform: "slack", externalId: teamId }, `slack:${teamId}`);
+        await provisionAndLink({ provider: "slack", externalId: teamId }, `slack:${teamId}`);
         await ephemeral("🧹 Unlinked. This workspace now has its own fresh, empty memory.");
         break;
       }

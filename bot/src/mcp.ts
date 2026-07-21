@@ -24,14 +24,14 @@ export interface McpContext {
 export async function contextFromToken(token: string): Promise<McpContext | null> {
   const map = await db.lookupPreflightKey(sha256(token));
   if (!map) return null;
-  const tenant = await resolveTenant({ platform: "github", externalId: String(map.installationId) });
+  const tenant = await resolveTenant({ provider: "github", externalId: String(map.installationId) });
   return tenant ? { tenant, repo: map.repo } : null;
 }
 
 /** Dev/demo fallback: the single configured installation, unscoped. */
 export async function defaultContext(): Promise<McpContext | null> {
   if (config.defaultInstallationId == null) return null;
-  const tenant = await resolveTenant({ platform: "github", externalId: String(config.defaultInstallationId) });
+  const tenant = await resolveTenant({ provider: "github", externalId: String(config.defaultInstallationId) });
   return tenant ? { tenant, repo: "" } : null;
 }
 

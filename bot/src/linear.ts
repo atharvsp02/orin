@@ -61,9 +61,9 @@ async function clientForOrg(orgId?: string): Promise<Linear | null> {
 // Self-serve: an unknown Linear org gets its own isolated brain on first contact.
 const linearTenant = async (orgId?: string): Promise<Tenant | null> => {
   if (!orgId) return null;
-  const existing = await resolveTenant({ platform: "linear", externalId: orgId });
+  const existing = await resolveTenant({ provider: "linear", externalId: orgId });
   if (existing) return existing;
-  return provisionAndLink({ platform: "linear", externalId: orgId }, `linear:${orgId}`).catch((e) => {
+  return provisionAndLink({ provider: "linear", externalId: orgId }, `linear:${orgId}`).catch((e) => {
     console.error("linear auto-provision failed:", (e as Error).message);
     return null;
   });
@@ -201,7 +201,7 @@ async function handleOAuthCallback(req: IncomingMessage, res: ServerResponse, se
   // Identify the org this token belongs to, store encrypted, and give it its own brain.
   const org = await clientFor(access_token).organization;
   await db.storeLinearInstall(org.id, { accessToken: access_token, orgName: org.name } satisfies LinearInstall);
-  await provisionAndLink({ platform: "linear", externalId: org.id }, `linear:${org.name}`).catch((e) =>
+  await provisionAndLink({ provider: "linear", externalId: org.id }, `linear:${org.name}`).catch((e) =>
     console.error("linear auto-provision failed:", (e as Error).message),
   );
   html(res, 200, `<h2>✅ Orin installed for ${esc(org.name)}</h2><p>Your workspace has its own isolated decision memory. Create an issue (or @mention Orin) to try it.</p>`);

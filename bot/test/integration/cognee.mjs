@@ -129,25 +129,38 @@ const inst = await db.getInstallation(INST);
 // pipeline.ask (GRAPH_COMPLETION → firstAnswer)
 ok("pipeline.ask returns cited answer", (await pipeline.ask(inst, creds, "why did we drop redis")) === "Because redis added ops burden.");
 // primitives.ask via resolved tenant
-const tenant = await tenantMod.resolveTenant({ platform: "github", externalId: String(INST) });
+const tenant = await tenantMod.resolveTenant({ provider: "github", externalId: String(INST) });
 ok("resolveTenant(github) resolves", tenant?.installationId === INST && tenant?.datasetName === DS);
+ok("resolved tenant exposes its workspace", tenant?.workspaceId === tenant?.workspace.workspaceId);
+ok("resolved tenant exposes its connector", tenant?.connector.provider === "github");
 ok(
   "unlinked Slack workspace cannot resolve",
-  (await tenantMod.resolveTenant({ platform: "slack", externalId: "T-unlinked" })) === null,
+  (await tenantMod.resolveTenant({ provider: "slack", externalId: "T-unlinked" })) === null,
 );
 await db.linkTenant("slack", "T-linked", INST);
-const linkedSlack = await tenantMod.resolveTenant({ platform: "slack", externalId: "T-linked" });
+const linkedSlack = await tenantMod.resolveTenant({ provider: "slack", externalId: "T-linked" });
 ok(
   "linked Slack workspace resolves the same isolated memory",
-  linkedSlack?.installationId === INST && linkedSlack?.datasetName === DS,
+  linkedSlack?.installationId === INST && linkedSlack?.datasetName === DS && linkedSlack.connector.provider === "slack",
 );
+await db.upsertConnector({
+  workspaceId: linkedSlack.workspaceId,
+  provider: "slack",
+  externalId: "T-linked",
+  displayName: "Disabled Slack",
+  status: "disabled",
+  capabilities: ["query"],
+});
+ok("disabled connector cannot resolve", (await tenantMod.resolveTenant({ provider: "slack", externalId: "T-linked" })) === null);
+await db.linkTenant("slack", "T-linked", INST);
 await db.linkTenant("linear", "L-linked", INST);
-const linkedLinear = await tenantMod.resolveTenant({ platform: "linear", externalId: "L-linked" });
+const linkedLinear = await tenantMod.resolveTenant({ provider: "linear", externalId: "L-linked" });
 ok(
   "linked Linear workspace resolves the same isolated memory",
   linkedLinear?.installationId === INST && linkedLinear?.datasetName === DS,
 );
-const standaloneRef = { platform: "slack", externalId: "T-standalone" };
+ok("unknown provider connector cannot resolve", (await tenantMod.resolveTenant({ provider: "gitlab", externalId: "G-unlinked" })) === null);
+const standaloneRef = { provider: "slack", externalId: "T-standalone" };
 const registrationsBefore = seen.filter((request) => request.path === "/api/v1/auth/register").length;
 const standalone = await tenantMod.provisionAndLink(standaloneRef, "slack:Standalone");
 ok(
