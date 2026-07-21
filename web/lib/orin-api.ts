@@ -87,6 +87,8 @@ export interface Overview {
     kind: string;
     displayName: string;
     enabled: boolean;
+    aclStatus?: "current" | "stale" | "failed";
+    aclSyncedAt?: string;
   }>;
   metrics: Metrics;
   recent: Catch[];
@@ -107,6 +109,7 @@ export interface ConnectorSync {
   itemsDeleted: number;
   errorText: string;
   startedAt: string;
+  heartbeatAt?: string;
   finishedAt?: string;
 }
 

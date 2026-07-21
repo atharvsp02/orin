@@ -13,10 +13,18 @@ export default defineConfig({
   projects: [
     { name: "chromium", use: { ...devices["Desktop Chrome"] } },
   ],
-  webServer: {
-    command: "npm run dev -- --hostname 127.0.0.1 --port 3100",
-    url: "http://127.0.0.1:3100/dashboard",
-    reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
-  },
+  webServer: [
+    {
+      command: "node e2e/proxy-api.mjs",
+      url: "http://127.0.0.1:3199/health",
+      reuseExistingServer: !process.env.CI,
+      timeout: 30_000,
+    },
+    {
+      command: "ORIN_API_ORIGIN=http://127.0.0.1:3199 npm run dev -- --hostname 127.0.0.1 --port 3100",
+      url: "http://127.0.0.1:3100/dashboard",
+      reuseExistingServer: !process.env.CI,
+      timeout: 120_000,
+    },
+  ],
 })

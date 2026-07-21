@@ -276,3 +276,29 @@ test("hides management actions from a viewer", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Sync now" })).toHaveCount(0)
   await expect(page.getByText("Google Drive content policy", { exact: true })).toHaveCount(0)
 })
+
+test("proxies API requests through a bounded allowlisted route", async ({ request }) => {
+  const response = await request.post("/v1/proxy-test?mode=e2e", {
+    headers: { origin: "http://127.0.0.1:3100" },
+    data: { query: "roadmap" },
+  })
+  expect(response.status()).toBe(200)
+  expect(response.headers()["cache-control"]).toBe("private, no-store, max-age=0")
+  expect(response.headers()["x-ratelimit-remaining"]).toBe("7")
+  expect(await response.json()).toMatchObject({
+    method: "POST",
+    url: "/v1/proxy-test?mode=e2e",
+    body: "{\"query\":\"roadmap\"}",
+    origin: "http://127.0.0.1:3100",
+    forwardedHost: "127.0.0.1:3100",
+  })
+
+  const redirect = await request.get("/v1/proxy-redirect", { maxRedirects: 0 })
+  expect(redirect.status()).toBe(302)
+  expect(redirect.headers().location).toBe("/dashboard?proxied=1")
+  const cookies = (await request.storageState()).cookies.filter((cookie) => cookie.name.startsWith("proxy_"))
+  expect(cookies.map((cookie) => cookie.name).sort()).toEqual(["proxy_a", "proxy_b"])
+
+  const oversized = await request.post("/v1/proxy-test", { data: "x".repeat(3 * 1024 * 1024 + 1) })
+  expect(oversized.status()).toBe(413)
+})

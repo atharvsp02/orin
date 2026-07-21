@@ -104,15 +104,19 @@ export function DashboardShell({ me }: { me: Me }) {
   const workspace = me.workspaces.find((item) => item.workspaceId === workspaceId) ?? me.workspaces[0]
   const workspaceName = workspace?.displayName ?? ""
   const allowed = (permission: WorkspacePermission) => workspace?.permissions.includes(permission) ?? false
+  const canSearch = allowed("search.use")
   const hasAdmin = allowed("people.manage") || allowed("policies.manage") || allowed("audit.read")
 
   const load = useCallback(async () => {
     setOverview(null)
     setDecisions(null)
-    const [o, d] = await Promise.all([api.overview(workspaceId), api.decisions(workspaceId)])
+    const [o, d] = await Promise.all([
+      api.overview(workspaceId),
+      canSearch ? api.decisions(workspaceId) : Promise.resolve({ decisions: [] }),
+    ])
     setOverview(o)
     setDecisions(d.decisions)
-  }, [workspaceId])
+  }, [workspaceId, canSearch])
 
   useEffect(() => {
     localStorage.setItem("orin.workspace", workspaceId)
@@ -153,8 +157,8 @@ export function DashboardShell({ me }: { me: Me }) {
                   Add GitHub connector
                 </a>
               </DropdownMenuItem>
-              <DropdownMenuItem asChild className="text-xs">
-                <a href="/v1/auth/github">Refresh workspaces</a>
+              <DropdownMenuItem className="text-xs" onSelect={() => window.location.assign("/v1/auth/github")}>
+                Refresh workspaces
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -175,14 +179,14 @@ export function DashboardShell({ me }: { me: Me }) {
         <div className="px-3 space-y-0.5">
           {allowed("search.use") && <NavItem icon={Search} label="Search" active={view === "search"} onClick={() => setView("search")} />}
           {allowed("chat.use") && <NavItem icon={MessageCircle} label="Ask Orin" active={view === "chat"} onClick={() => setView("chat")} />}
-          {workspace?.hasGitHubCompatibility && <NavItem icon={Inbox} label="Catches" badge={catchBadge || undefined} active={view === "catches"} onClick={() => setView("catches")} />}
-          {workspace?.hasGitHubCompatibility && <NavItem icon={CircleUser} label="Decisions" active={view === "decisions"} onClick={() => setView("decisions")} />}
+          {workspace?.hasGitHubCompatibility && allowed("search.use") && <NavItem icon={Inbox} label="Catches" badge={catchBadge || undefined} active={view === "catches"} onClick={() => setView("catches")} />}
+          {workspace?.hasGitHubCompatibility && allowed("search.use") && <NavItem icon={CircleUser} label="Decisions" active={view === "decisions"} onClick={() => setView("decisions")} />}
         </div>
 
         <div className="mt-5 px-3">
           <div className="px-2 py-1 text-[0.625rem] text-zinc-500 font-medium uppercase tracking-wider">Workspace</div>
           <div className="space-y-0.5 mt-1">
-            <NavItem icon={Layers} label="Resources" active={view === "repos"} onClick={() => setView("repos")} />
+            {allowed("connectors.read") && <NavItem icon={Layers} label="Resources" active={view === "repos"} onClick={() => setView("repos")} />}
             {workspace?.hasGitHubCompatibility && allowed("content.manage") && <NavItem icon={BookOpen} label="Rules" active={view === "rules"} onClick={() => setView("rules")} />}
             {workspace?.hasGitHubCompatibility && allowed("content.manage") && <NavItem icon={Upload} label="Docs" active={view === "docs"} onClick={() => setView("docs")} />}
             {workspace?.hasGitHubCompatibility && allowed("search.use") && <NavItem icon={LayoutGrid} label="Knowledge graph" active={view === "graph"} onClick={() => setView("graph")} />}
@@ -1649,7 +1653,10 @@ function ConnectorsView({
                   <div key={resource.resourceId} className="px-5 py-3.5 flex items-center gap-4">
                     <div className="min-w-0 flex-1">
                       <div className="text-zinc-200 text-xs truncate">{resource.displayName}</div>
-                      <div className="text-zinc-600 text-[0.625rem] mt-1">{connector?.provider ?? "connector"} · {resource.kind}</div>
+                      <div className="text-zinc-600 text-[0.625rem] mt-1">
+                        {connector?.provider ?? "connector"} · {resource.kind}
+                        {resource.aclStatus && resource.aclStatus !== "current" && <span className="text-red-400"> · access {resource.aclStatus}</span>}
+                      </div>
                     </div>
                     {canManage ? <button onClick={() => setResourceEnabled(resource.resourceId, !resource.enabled)} disabled={busy === resource.resourceId} className="text-xs px-3 py-1.5 rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800 transition-colors disabled:opacity-40">{busy === resource.resourceId ? "Saving" : resource.enabled ? "Disable" : "Enable"}</button> : <span className={`text-[0.625rem] ${resource.enabled ? "text-emerald-400" : "text-zinc-600"}`}>{resource.enabled ? "included" : "excluded"}</span>}
                   </div>
