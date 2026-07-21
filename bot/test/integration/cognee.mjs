@@ -153,6 +153,27 @@ await db.upsertConnector({
 });
 ok("disabled connector cannot resolve", (await tenantMod.resolveTenant({ provider: "slack", externalId: "T-linked" })) === null);
 await db.linkTenant("slack", "T-linked", INST);
+await db.upsertConnector({
+  workspaceId: linkedSlack.workspaceId,
+  provider: "slack",
+  externalId: "T-linked",
+  displayName: "Query-only Slack",
+  capabilities: ["query"],
+});
+const queryOnlySlack = await tenantMod.resolveTenant({ provider: "slack", externalId: "T-linked" });
+ok("query-only connector still resolves", queryOnlySlack?.connector.capabilities.join(",") === "query");
+const deniedWarning = await prim.warn(queryOnlySlack, "add redis cache");
+ok("connector without warn capability stays silent", deniedWarning.matches === false && deniedWarning.decisionId === null);
+const decisionsBeforeDeniedRecord = await db.countDecisions(INST);
+await prim.ingest(queryOnlySlack, {
+  kind: "doc",
+  number: 991,
+  title: "Denied record",
+  body: "This must not be recorded",
+  url: "",
+});
+ok("connector without record capability writes nothing", (await db.countDecisions(INST)) === decisionsBeforeDeniedRecord);
+await db.linkTenant("slack", "T-linked", INST);
 await db.linkTenant("linear", "L-linked", INST);
 const linkedLinear = await tenantMod.resolveTenant({ provider: "linear", externalId: "L-linked" });
 ok(

@@ -1,6 +1,7 @@
 // The three platform-neutral verbs every adapter (GitHub, MCP, Slack, Linear) maps onto.
 // Thin wrappers over the decision core in pipeline.ts, keyed by a resolved Tenant.
 import * as pipeline from "./pipeline.js";
+import { connectorSupports } from "./connectors.js";
 import type { Tenant } from "./tenant.js";
 import type { Judgment } from "./llm.js";
 import type { DecisionSource } from "./types.js";
@@ -8,6 +9,7 @@ import type { DecisionSource } from "./types.js";
 /** Cited recall over the tenant's decision memory (→ ask_decision / /why).
  *  Recall is installation-wide by construction — the Cognee dataset is per-installation, not per-repo. */
 export async function ask(t: Tenant, query: string): Promise<string> {
+  if (!connectorSupports(t.connector, "query")) return "";
   return pipeline.ask(t.inst, t.creds, query);
 }
 
@@ -15,6 +17,7 @@ export async function ask(t: Tenant, query: string): Promise<string> {
  *  Pass `repo` to scope the deterministic pass to one repo (a repo-scoped key must not enforce
  *  against another repo's decisions); omit for installation-wide. */
 export async function warn(t: Tenant, text: string, repo?: string): Promise<Judgment> {
+  if (!connectorSupports(t.connector, "warn")) return { matches: false, decisionId: null, comment: "" };
   return pipeline.evaluatePr(t.inst, t.cfg, t.creds, text, repo);
 }
 
@@ -31,6 +34,7 @@ export interface NeutralItem {
 
 /** Record a decision from a platform-neutral item (→ record_decision / reaction-to-ingest). */
 export async function ingest(t: Tenant, item: NeutralItem): Promise<void> {
+  if (!connectorSupports(t.connector, "record")) return;
   await pipeline.ingestItem(
     t.inst,
     t.cfg,
