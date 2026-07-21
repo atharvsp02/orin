@@ -44,17 +44,17 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { api, timeAgo, type Me, type Overview, type Decision, type KeyRow, type Settings, type GraphData } from "@/lib/orin-api"
 
-type View = "catches" | "decisions" | "repos" | "rules" | "docs" | "graph" | "integrations" | "keys" | "settings"
+type View = "catches" | "decisions" | "repos" | "rules" | "docs" | "graph" | "connectors" | "keys" | "settings"
 
 const GITHUB_APP_URL = "https://github.com/apps/orinbot"
 
 export function DashboardShell({ me }: { me: Me }) {
-  const [inst, setInst] = useState<number>(() => {
+  const [workspaceId, setWorkspaceId] = useState<string>(() => {
     if (typeof window !== "undefined") {
-      const saved = Number(localStorage.getItem("orin.inst"))
-      if (me.installations.some((i) => i.installationId === saved)) return saved
+      const saved = localStorage.getItem("orin.workspace")
+      if (saved && me.workspaces.some((workspace) => workspace.workspaceId === saved)) return saved
     }
-    return me.installations[0].installationId
+    return me.workspaces[0].workspaceId
   })
   const [view, setView] = useState<View>("catches")
   const [query, setQuery] = useState("")
@@ -62,22 +62,22 @@ export function DashboardShell({ me }: { me: Me }) {
   const [decisions, setDecisions] = useState<Decision[] | null>(null)
   const [selectedCatch, setSelectedCatch] = useState<number>(0)
   const [selectedDecision, setSelectedDecision] = useState<string | null>(null)
-  const [selectedRepo, setSelectedRepo] = useState<string | null>(null)
+  const [selectedResource, setSelectedResource] = useState<string | null>(null)
 
-  const account = me.installations.find((i) => i.installationId === inst)?.account ?? ""
+  const workspaceName = me.workspaces.find((workspace) => workspace.workspaceId === workspaceId)?.displayName ?? ""
 
   const load = useCallback(async () => {
     setOverview(null)
     setDecisions(null)
-    const [o, d] = await Promise.all([api.overview(inst), api.decisions(inst)])
+    const [o, d] = await Promise.all([api.overview(workspaceId), api.decisions(workspaceId)])
     setOverview(o)
     setDecisions(d.decisions)
-  }, [inst])
+  }, [workspaceId])
 
   useEffect(() => {
-    localStorage.setItem("orin.inst", String(inst))
+    localStorage.setItem("orin.workspace", workspaceId)
     load().catch(() => {})
-  }, [inst, load])
+  }, [workspaceId, load])
 
   const catchBadge = overview?.recent.filter((r) => r.state === "posted").length ?? 0
 
@@ -90,25 +90,24 @@ export function DashboardShell({ me }: { me: Me }) {
             <DropdownMenuTrigger asChild>
               <button className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-zinc-800/50 transition-colors">
                 <CirclePower className="w-5 h-5 text-white" />
-                <span className="text-white font-semibold text-sm truncate">{account || "Orin"}</span>
+                <span className="text-white font-semibold text-sm truncate">{workspaceName || "Orin"}</span>
                 <ChevronDown className="w-3.5 h-3.5 text-zinc-500 ml-auto" />
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="bg-zinc-900 border-zinc-800 text-zinc-200">
-              {me.installations.map((i) => (
-                <DropdownMenuItem key={i.installationId} onClick={() => setInst(i.installationId)} className="text-xs">
-                  {i.account}
-                  <span className="ml-auto text-zinc-500">{i.decisions}</span>
+              {me.workspaces.map((workspace) => (
+                <DropdownMenuItem key={workspace.workspaceId} onClick={() => setWorkspaceId(workspace.workspaceId)} className="text-xs">
+                  {workspace.displayName}
+                  <span className="ml-auto text-zinc-500">{workspace.decisions}</span>
                 </DropdownMenuItem>
               ))}
               <DropdownMenuItem asChild className="text-xs">
                 <a href={GITHUB_APP_URL} target="_blank" rel="noreferrer">
-                  Install on another account…
+                  Add GitHub connector
                 </a>
               </DropdownMenuItem>
               <DropdownMenuItem asChild className="text-xs">
-                {/* sessions snapshot the installation list; a silent OAuth round-trip refreshes it */}
-                <a href="/v1/auth/github">Refresh installations</a>
+                <a href="/v1/auth/github">Refresh workspaces</a>
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -134,11 +133,11 @@ export function DashboardShell({ me }: { me: Me }) {
         <div className="mt-5 px-3">
           <div className="px-2 py-1 text-[0.625rem] text-zinc-500 font-medium uppercase tracking-wider">Workspace</div>
           <div className="space-y-0.5 mt-1">
-            <NavItem icon={Layers} label="Repos" active={view === "repos"} onClick={() => setView("repos")} />
+            <NavItem icon={Layers} label="Resources" active={view === "repos"} onClick={() => setView("repos")} />
             <NavItem icon={BookOpen} label="Rules" active={view === "rules"} onClick={() => setView("rules")} />
             <NavItem icon={Upload} label="Docs" active={view === "docs"} onClick={() => setView("docs")} />
             <NavItem icon={LayoutGrid} label="Knowledge graph" active={view === "graph"} onClick={() => setView("graph")} />
-            <NavItem icon={Users} label="Integrations" active={view === "integrations"} onClick={() => setView("integrations")} />
+            <NavItem icon={Users} label="Connectors" active={view === "connectors"} onClick={() => setView("connectors")} />
             <NavItem icon={KeyRound} label="Keys" active={view === "keys"} onClick={() => setView("keys")} />
             <NavItem icon={SettingsIcon} label="Settings" active={view === "settings"} onClick={() => setView("settings")} />
           </div>
@@ -155,7 +154,7 @@ export function DashboardShell({ me }: { me: Me }) {
                   label={r.split("/")[1] ?? r}
                   color={["text-blue-400", "text-orange-400", "text-emerald-400", "text-purple-400"][i]}
                   onClick={() => {
-                    setSelectedRepo(r)
+                    setSelectedResource(`github:${r}`)
                     setView("repos")
                   }}
                 />
@@ -164,16 +163,16 @@ export function DashboardShell({ me }: { me: Me }) {
           </div>
         )}
 
-        {overview && overview.links.length > 0 && (
+        {overview && overview.connectors.some((connector) => connector.provider !== "github") && (
           <div className="mt-5 px-3">
-            <div className="px-2 py-1 text-[0.625rem] text-zinc-500 font-medium uppercase tracking-wider">Linked workspaces</div>
+            <div className="px-2 py-1 text-[0.625rem] text-zinc-500 font-medium uppercase tracking-wider">Connectors</div>
             <div className="space-y-0.5 mt-1">
-              {overview.links.map((l) => (
+              {overview.connectors.filter((connector) => connector.provider !== "github").map((connector) => (
                 <NavItem
-                  key={`${l.platform}:${l.externalId}`}
-                  icon={l.platform === "slack" ? SlackIcon : Network}
-                  label={`${l.platform === "slack" ? "Slack" : "Linear"} workspace`}
-                  onClick={() => setView("integrations")}
+                  key={connector.connectorId}
+                  icon={connector.provider === "slack" ? SlackIcon : Network}
+                  label={connector.displayName || connector.provider}
+                  onClick={() => setView("connectors")}
                 />
               ))}
             </div>
@@ -215,14 +214,14 @@ export function DashboardShell({ me }: { me: Me }) {
         <DecisionsView decisions={decisions} query={query} repoFilter={null} selected={selectedDecision} onSelect={setSelectedDecision} />
       )}
       {view === "repos" && (
-        <ReposView overview={overview} decisions={decisions} selectedRepo={selectedRepo} onSelectRepo={setSelectedRepo} query={query} />
+        <ResourcesView overview={overview} decisions={decisions} selectedResource={selectedResource} onSelectResource={setSelectedResource} query={query} />
       )}
-      {view === "rules" && <RulesView inst={inst} overview={overview} />}
-      {view === "docs" && <DocsView inst={inst} overview={overview} />}
-      {view === "graph" && <GraphView inst={inst} account={account} />}
-      {view === "integrations" && <IntegrationsView inst={inst} overview={overview} />}
-      {view === "keys" && <KeysView inst={inst} overview={overview} />}
-      {view === "settings" && <SettingsView inst={inst} />}
+      {view === "rules" && <RulesView workspaceId={workspaceId} overview={overview} />}
+      {view === "docs" && <DocsView workspaceId={workspaceId} overview={overview} />}
+      {view === "graph" && <GraphView workspaceId={workspaceId} workspaceName={workspaceName} />}
+      {view === "connectors" && <ConnectorsView workspaceId={workspaceId} overview={overview} onChange={load} />}
+      {view === "keys" && <KeysView workspaceId={workspaceId} overview={overview} />}
+      {view === "settings" && <SettingsView workspaceId={workspaceId} />}
     </div>
   )
 }
@@ -405,7 +404,7 @@ const CatchesRail = () => (
   <>
     <RailSection title="What a catch is">
       <RailP>
-        Orin checks every PR and issue against this org&apos;s recorded decisions. A <b>catch</b> is a match: the check
+        Orin checks every PR and issue against this workspace&apos;s recorded decisions. A <b>catch</b> is a match: the check
         fails (or warns) with a citation to the original decision.
       </RailP>
     </RailSection>
@@ -479,7 +478,7 @@ const ReposRail = () => (
     </RailSection>
     <RailSection title="Add or remove">
       <RailP>
-        Manage repo access from the GitHub App settings (Integrations → <b>Manage repos</b>). New repos backfill
+        Manage repo access from the GitHub App settings under <b>Connectors</b>. New repos backfill
         automatically; removals stop new checks.
       </RailP>
     </RailSection>
@@ -495,7 +494,7 @@ const RulesRail = () => (
   <>
     <RailSection title="Two scopes">
       <RailP>
-        <b>Org-wide</b> rules apply to every connected repo. <b>Repo</b> rules apply only there. A PR is checked against
+        <b>Workspace-wide</b> rules apply to every connected repo. <b>Repo</b> rules apply only there. A PR is checked against
         both sets, never another repo&apos;s.
       </RailP>
     </RailSection>
@@ -541,7 +540,7 @@ const DocsRail = () => (
     </RailSection>
     <RailSection title="Repo attribution">
       <RailP>
-        Scoping a doc to a repo steers retrieval and citations toward it. <b>Org-wide</b> fits standards and
+        Scoping a doc to a repo steers retrieval and citations toward it. <b>Workspace-wide</b> fits standards and
         cross-cutting ADRs.
       </RailP>
     </RailSection>
@@ -552,7 +551,7 @@ const GraphRail = () => (
   <>
     <RailSection title="What you are seeing">
       <RailP>
-        Cognee&apos;s knowledge graph of this org&apos;s memory: decisions, entities they touch, and the reasoning
+        Cognee&apos;s knowledge graph of this workspace&apos;s memory: decisions, entities they touch, and the reasoning
         edges between them, grounded by Orin&apos;s decision ontology.
       </RailP>
     </RailSection>
@@ -568,25 +567,25 @@ const GraphRail = () => (
   </>
 )
 
-const IntegrationsRail = () => (
+const ConnectorsRail = () => (
   <>
-    <RailSection title="Isolation model">
+    <RailSection title="Workspace model">
       <RailP>
-        Every install (GitHub org, Slack workspace, Linear org) gets its <b>own isolated memory</b>. Nothing is shared
-        until an admin explicitly links it.
+        The workspace owns the memory. GitHub, Slack, Linear, and future tools are connectors that can add decisions,
+        ask questions, or deliver warnings according to their capabilities.
       </RailP>
     </RailSection>
-    <RailSection title="Link Slack to this org">
+    <RailSection title="Connect existing memory">
       <RailSteps
         steps={[
           <>
-            In Slack: <Cmd>/orin link</Cmd> (workspace admins) returns a one-time code.
+            In Slack: <Cmd>/orin link</Cmd> returns a one-time code to a workspace admin.
           </>,
           <>
-            On GitHub: comment <Cmd>@orinbot link CODE</Cmd> on any issue here (write access required).
+            In a connected GitHub resource: comment <Cmd>@orinbot link CODE</Cmd> with write access.
           </>,
           <>
-            Slack&apos;s <Cmd>/why</Cmd> now answers from this org&apos;s memory.
+            Slack joins this workspace and <Cmd>/why</Cmd> reads the same memory.
           </>,
         ]}
       />
@@ -602,7 +601,7 @@ const KeysRail = () => (
     <RailSection title="What keys unlock">
       <RailP>
         A key authenticates the <b>pre-flight API</b>, the <b>GitHub Action</b>, and <b>MCP clients</b> (Cursor, Claude
-        Code, the CLI) against this org&apos;s memory.
+        Code, the CLI) against this workspace&apos;s memory.
       </RailP>
     </RailSection>
     <RailSection title="Scope and storage">
@@ -615,7 +614,7 @@ const KeysRail = () => (
       <RailSteps
         steps={[
           <>Mint a key for the repo your agent or CI works in.</>,
-          <>Paste the MCP snippet from Integrations with your key.</>,
+          <>Paste the MCP snippet from Connectors with your key.</>,
           <>
             In CI: the pre-flight exits non-zero when a change re-proposes a rejected decision.
           </>,
@@ -990,61 +989,113 @@ function DecisionsView({
   )
 }
 
-/* ── Repos ──────────────────────────────────────────────────────────── */
-
-function ReposView({
+function ResourcesView({
   overview,
   decisions,
-  selectedRepo,
-  onSelectRepo,
+  selectedResource,
+  onSelectResource,
   query,
 }: {
   overview: Overview | null
   decisions: Decision[] | null
-  selectedRepo: string | null
-  onSelectRepo: (r: string) => void
+  selectedResource: string | null
+  onSelectResource: (resource: string) => void
   query: string
 }) {
   const [selDecision, setSelDecision] = useState<string | null>(null)
   if (!overview || !decisions) return <Loading />
-  const repos = overview.installedRepos.length > 0 ? overview.installedRepos : overview.repos
-  const current = selectedRepo && repos.includes(selectedRepo) ? selectedRepo : repos[0]
+  const connectorById = new Map(overview.connectors.map((connector) => [connector.connectorId, connector]))
+  const resources = overview.resources.map((resource) => ({
+    key: `resource:${resource.resourceId}`,
+    externalId: resource.externalId,
+    displayName: resource.displayName,
+    kind: resource.kind,
+    provider: connectorById.get(resource.connectorId)?.provider ?? "connector",
+    enabled: resource.enabled,
+    connectorId: resource.connectorId,
+  }))
+  const knownGithubRepos = new Set(resources.filter((resource) => resource.provider === "github" && resource.kind === "repository").map((resource) => resource.externalId))
+  const githubConnector = overview.connectors.find((connector) => connector.provider === "github")
+  for (const repo of overview.installedRepos.length > 0 ? overview.installedRepos : overview.repos) {
+    if (knownGithubRepos.has(repo)) continue
+    resources.push({
+      key: `github:${repo}`,
+      externalId: repo,
+      displayName: repo,
+      kind: "repository",
+      provider: "github",
+      enabled: true,
+      connectorId: githubConnector?.connectorId ?? "",
+    })
+  }
+  const current = resources.find((resource) => resource.key === selectedResource || `github:${resource.externalId}` === selectedResource) ?? resources[0]
 
-  if (repos.length === 0)
+  if (!current)
     return (
       <div className="flex-1 bg-zinc-950">
         <EmptyState
           icon={Layers}
-          title="No repos connected"
-          hint="Install Orin on a repository; its closed PRs and issues become decision memory."
-          cta={{ label: "Install on GitHub", href: GITHUB_APP_URL }}
+          title="No resources connected"
+          hint="Connect a source under Connectors. Repositories, channels, teams, and future resource types will appear here."
         />
       </div>
     )
 
-  const decisionCount = (r: string) => decisions.filter((d) => d.repo === r).length
-  const currentDecisions = decisions.filter((d) => d.repo === current)
+  const decisionCount = (resource: typeof current) => decisions.filter((decision) => decision.repo === resource.externalId).length
+  const currentDecisions = decisions.filter((decision) => decision.repo === current.externalId)
+  const currentConnector = overview.connectors.find((connector) => connector.connectorId === current.connectorId)
+  const resourceList = (
+    <ListPanel title="Connected resources">
+      {resources.map((resource) => (
+        <ListItem
+          key={resource.key}
+          title={resource.displayName}
+          subtitle={resource.provider === "github" && resource.kind === "repository"
+            ? `${decisionCount(resource)} decision${decisionCount(resource) === 1 ? "" : "s"} recorded`
+            : `${resource.provider} · ${resource.kind}`}
+          status={resource.enabled ? "accepted" : "reverted"}
+          active={resource.key === current.key}
+          onClick={() => onSelectResource(resource.key)}
+        />
+      ))}
+    </ListPanel>
+  )
+
+  if (current.provider !== "github" || current.kind !== "repository") {
+    return (
+      <>
+        {resourceList}
+        <FullPanel
+          title={current.displayName}
+          subtitle={`${current.provider} ${current.kind} connected to this workspace.`}
+          rail={<ConnectorsRail />}
+        >
+          <div className={`${card} divide-y divide-zinc-800/50`}>
+            <div className="px-5 py-4 flex items-center justify-between gap-4">
+              <span className="text-zinc-500 text-xs">Status</span>
+              <span className={current.enabled ? "text-emerald-400 text-xs" : "text-amber-400 text-xs"}>
+                {current.enabled ? "enabled" : "disabled"}
+              </span>
+            </div>
+            <div className="px-5 py-4 flex items-center justify-between gap-4">
+              <span className="text-zinc-500 text-xs">Capabilities</span>
+              <span className="text-zinc-300 text-xs">{currentConnector?.capabilities.join(" · ") || "none"}</span>
+            </div>
+          </div>
+        </FullPanel>
+      </>
+    )
+  }
 
   return (
     <>
-      <ListPanel title="Connected repos">
-        {repos.map((r) => (
-          <ListItem
-            key={r}
-            title={r}
-            subtitle={`${decisionCount(r)} decision${decisionCount(r) === 1 ? "" : "s"} recorded`}
-            status={decisionCount(r) > 0 ? "accepted" : "repo"}
-            active={r === current}
-            onClick={() => onSelectRepo(r)}
-          />
-        ))}
-      </ListPanel>
+      {resourceList}
       {currentDecisions.length === 0 ? (
         <div className="flex-1 h-full bg-zinc-950 flex overflow-hidden">
           <div className="flex-1 overflow-auto">
           <div className="max-w-3xl mx-auto w-full px-8 py-10">
             <div className="flex items-center gap-1.5 text-xs mb-6">
-              <span className="text-zinc-500">{current}</span>
+              <span className="text-zinc-500">{current.displayName}</span>
               <span className="text-zinc-600">›</span>
               <span className="text-emerald-400">Decision memory</span>
             </div>
@@ -1052,7 +1103,7 @@ function ReposView({
               <EmptyState
                 icon={FileText}
                 title="Connected, no decisions yet"
-                hint={`Orin is watching ${current} but hasn't found decision-rich closed threads. It learns the moment a PR or issue closes with a real decision in it, and checks every new PR either way.`}
+                hint={`Orin is watching ${current.displayName} but hasn't found decision-rich closed threads. It learns the moment a PR or issue closes with a real decision in it, and checks every new PR either way.`}
               />
             </div>
           </div>
@@ -1062,7 +1113,7 @@ function ReposView({
           </HelpRail>
         </div>
       ) : (
-        <DecisionsView decisions={decisions} query={query} repoFilter={current ?? null} selected={selDecision} onSelect={setSelDecision} />
+        <DecisionsView decisions={decisions} query={query} repoFilter={current.externalId} selected={selDecision} onSelect={setSelDecision} />
       )}
     </>
   )
@@ -1070,7 +1121,7 @@ function ReposView({
 
 /* ── Knowledge graph ────────────────────────────────────────────────── */
 
-function GraphView({ inst, account }: { inst: number; account: string }) {
+function GraphView({ workspaceId, workspaceName }: { workspaceId: string; workspaceName: string }) {
   const [data, setData] = useState<GraphData | null>(null)
   const [status, setStatus] = useState<"loading" | "ok" | "empty" | "error">("loading")
 
@@ -1079,7 +1130,7 @@ function GraphView({ inst, account }: { inst: number; account: string }) {
     setStatus("loading")
     setData(null)
     api
-      .graphData(inst)
+      .graphData(workspaceId)
       .then((d) => {
         if (!alive) return
         if (!d.nodes.length) setStatus("empty")
@@ -1092,12 +1143,12 @@ function GraphView({ inst, account }: { inst: number; account: string }) {
     return () => {
       alive = false
     }
-  }, [inst])
+  }, [workspaceId])
 
   return (
     <FullPanel
       title="Knowledge graph"
-      subtitle={`${account}'s decision memory: every decision, the entities Cognee extracted from it, and how they connect. Shared entities pull related decisions together.`}
+      subtitle={`${workspaceName}'s decision memory: every decision, the entities Cognee extracted from it, and how they connect. Shared entities pull related decisions together.`}
       rail={<GraphRail />}
     >
       {status === "loading" && <div className="text-zinc-600 text-xs">Building graph…</div>}
@@ -1335,8 +1386,6 @@ function ForceGraph({ data }: { data: GraphData }) {
   )
 }
 
-/* ── Integrations ───────────────────────────────────────────────────── */
-
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)
   return (
@@ -1354,43 +1403,92 @@ function CopyButton({ text }: { text: string }) {
   )
 }
 
-function IntegrationsView({ inst, overview }: { inst: number; overview: Overview | null }) {
+function ConnectorsView({
+  workspaceId,
+  overview,
+  onChange,
+}: {
+  workspaceId: string
+  overview: Overview | null
+  onChange: () => Promise<void>
+}) {
+  const [busy, setBusy] = useState<string | null>(null)
   if (!overview) return <Loading />
-  const has = (p: string) => overview.links.some((l) => l.platform === p)
+  const connectorFor = (provider: string) => overview.connectors.find((connector) => connector.provider === provider)
+  const github = connectorFor("github")
+  const slack = connectorFor("slack")
+  const linear = connectorFor("linear")
   const rows = [
     {
       Icon: SiGithub,
-      name: "GitHub App",
-      desc: `Required check + @orinbot commands. Connected to ${overview.installedRepos.length} repo${overview.installedRepos.length === 1 ? "" : "s"}.`,
-      linked: true,
+      name: "GitHub",
+      desc: github
+        ? `${github.displayName}. Reads decisions and checks changes across ${overview.installedRepos.length} repo${overview.installedRepos.length === 1 ? "" : "s"}.`
+        : "Capture decisions from pull requests and issues, then check new changes against them.",
+      connector: github,
       href: GITHUB_APP_URL,
-      action: "Manage repos",
+      action: github ? "Manage" : "Connect GitHub",
     },
     {
       Icon: SlackIcon,
       name: "Slack",
-      desc: "/why in channels, 🧠 reactions record decisions. Link it to this org's memory with /orin link.",
-      linked: has("slack"),
+      desc: slack
+        ? `${slack.displayName}. Answers questions in channels and records decisions from reactions.`
+        : "Ask questions in channels and record decisions from the conversations where they happen.",
+      connector: slack,
       href: "https://orin-bot.duckdns.org/slack/install",
-      action: has("slack") ? "Linked" : "Add to Slack",
+      action: slack ? "Connected" : "Connect Slack",
     },
     {
       Icon: SiLinear,
       name: "Linear",
-      desc: "Agent sessions in issues plus collision warnings on issue create.",
-      linked: has("linear"),
+      desc: linear
+        ? `${linear.displayName}. Answers in issues and warns when planned work conflicts with memory.`
+        : "Bring decision context into issues and warn when planned work repeats a rejected idea.",
+      connector: linear,
       href: "https://orin-bot.duckdns.org/linear/install",
-      action: has("linear") ? "Linked" : "Add to Linear",
+      action: linear ? "Connected" : "Connect Linear",
     },
   ]
+  for (const connector of overview.connectors.filter((item) => !["github", "slack", "linear"].includes(item.provider))) {
+    rows.push({
+      Icon: Network,
+      name: connector.provider.charAt(0).toUpperCase() + connector.provider.slice(1),
+      desc: `${connector.displayName}. This connector shares the selected workspace memory.`,
+      connector,
+      href: "",
+      action: "Connected",
+    })
+  }
+
+  const setConnectorEnabled = async (connectorId: string, enabled: boolean) => {
+    setBusy(connectorId)
+    try {
+      await api.setConnectorEnabled(workspaceId, connectorId, enabled)
+      await onChange()
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const setResourceEnabled = async (resourceId: string, enabled: boolean) => {
+    setBusy(resourceId)
+    try {
+      await api.setResourceEnabled(workspaceId, resourceId, enabled)
+      await onChange()
+    } finally {
+      setBusy(null)
+    }
+  }
 
   const mcpJson = `{\n  "mcpServers": {\n    "orin": {\n      "url": "https://orin-bot.duckdns.org/mcp",\n      "headers": { "Authorization": "Bearer <your orin_ key>" }\n    }\n  }\n}`
 
   return (
-    <FullPanel title="Integrations" subtitle="One memory, every surface. Each workspace install is an isolated tenant; nothing is shared until you link it." rail={<IntegrationsRail />}>
+    <FullPanel title="Connectors" subtitle="One workspace memory with switchable sources. Connect only the tools your team uses." rail={<ConnectorsRail />}>
       <div className="space-y-3">
-        {rows.map((r) => (
-          <div key={r.name} className={`${card} p-5 flex items-center justify-between gap-6`}>
+        {rows.map((r) => {
+          const connector = r.connector
+          return <div key={r.name} className={`${card} p-5 flex items-center justify-between gap-6`}>
             <div className="flex items-start gap-3.5 min-w-0">
               <div className="w-9 h-9 rounded-lg bg-zinc-800/80 border border-zinc-700/50 flex items-center justify-center shrink-0">
                 <r.Icon className="w-[1.125rem] h-[1.125rem] text-white" />
@@ -1398,25 +1496,67 @@ function IntegrationsView({ inst, overview }: { inst: number; overview: Overview
               <div className="min-w-0">
                 <div className="text-white text-sm font-medium flex items-center gap-2">
                   {r.name}
-                  {r.linked && (
-                    <span className="flex items-center gap-1 text-[0.625rem] text-emerald-400 font-normal">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> connected
+                  {connector && (
+                    <span className={`flex items-center gap-1 text-[0.625rem] font-normal ${connector.status === "active" ? "text-emerald-400" : "text-amber-400"}`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${connector.status === "active" ? "bg-emerald-500" : "bg-amber-500"}`} /> {connector.status}
                     </span>
                   )}
                 </div>
                 <div className="text-zinc-500 text-xs mt-1 leading-relaxed">{r.desc}</div>
+                {connector && connector.capabilities.length > 0 && (
+                  <div className="text-zinc-600 text-[0.625rem] mt-1.5">{connector.capabilities.join(" · ")}</div>
+                )}
               </div>
             </div>
-            <a
-              href={r.href}
-              target="_blank"
-              rel="noreferrer"
-              className="shrink-0 text-xs px-3.5 py-2 rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800 transition-colors"
-            >
-              {r.action}
-            </a>
+            {connector ? (
+              <button
+                onClick={() => setConnectorEnabled(connector.connectorId, connector.status !== "active")}
+                disabled={busy === connector.connectorId}
+                className="shrink-0 text-xs px-3.5 py-2 rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800 transition-colors disabled:opacity-40"
+              >
+                {busy === connector.connectorId ? "Saving" : connector.status === "active" ? "Disable" : "Enable"}
+              </button>
+            ) : r.href ? (
+              <a
+                href={r.href}
+                target="_blank"
+                rel="noreferrer"
+                className="shrink-0 text-xs px-3.5 py-2 rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800 transition-colors"
+              >
+                {r.action}
+              </a>
+            ) : null}
           </div>
-        ))}
+        })}
+
+        {overview.resources.length > 0 && (
+          <div className={`${card} overflow-hidden`}>
+            <div className="px-5 py-4 border-b border-zinc-800/50">
+              <div className="text-white text-sm font-medium">Resources</div>
+              <div className="text-zinc-500 text-xs mt-1">Choose which connected repositories, channels, or teams Orin can use.</div>
+            </div>
+            <div className="divide-y divide-zinc-800/50">
+              {overview.resources.map((resource) => {
+                const connector = overview.connectors.find((item) => item.connectorId === resource.connectorId)
+                return (
+                  <div key={resource.resourceId} className="px-5 py-3.5 flex items-center gap-4">
+                    <div className="min-w-0 flex-1">
+                      <div className="text-zinc-200 text-xs truncate">{resource.displayName}</div>
+                      <div className="text-zinc-600 text-[0.625rem] mt-1">{connector?.provider ?? "connector"} · {resource.kind}</div>
+                    </div>
+                    <button
+                      onClick={() => setResourceEnabled(resource.resourceId, !resource.enabled)}
+                      disabled={busy === resource.resourceId}
+                      className="text-xs px-3 py-1.5 rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800 transition-colors disabled:opacity-40"
+                    >
+                      {busy === resource.resourceId ? "Saving" : resource.enabled ? "Disable" : "Enable"}
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
 
         {/* MCP: syntax-colored config, same treatment as the landing page */}
         <div className={`${card} p-5`}>
@@ -1475,12 +1615,11 @@ function IntegrationsView({ inst, overview }: { inst: number; overview: Overview
         </div>
 
         <div className={`${card} p-5`}>
-          <div className="text-white text-sm font-medium mb-1.5">Cross-platform linking</div>
+          <div className="text-white text-sm font-medium mb-1.5">Shared workspace memory</div>
           <p className="text-zinc-500 text-xs leading-relaxed">
-            To make Slack answer from this org&apos;s GitHub memory: in Slack run{" "}
-            <span className="text-zinc-300 font-mono">/orin link</span>, then have someone with write access comment{" "}
-            <span className="text-zinc-300 font-mono">@orinbot link CODE</span> on any issue or PR in this org. Codes are
-            single-use and expire in 15 minutes.
+            Each connector can start with isolated memory or join this workspace. Today, Slack can join by running{" "}
+            <span className="text-zinc-300 font-mono">/orin link</span> and verifying the one-time code from a connected
+            GitHub resource. Codes expire in 15 minutes.
           </p>
         </div>
       </div>
@@ -1490,7 +1629,7 @@ function IntegrationsView({ inst, overview }: { inst: number; overview: Overview
 
 /* ── Keys ───────────────────────────────────────────────────────────── */
 
-function KeysView({ inst, overview }: { inst: number; overview: Overview | null }) {
+function KeysView({ workspaceId, overview }: { workspaceId: string; overview: Overview | null }) {
   const [keys, setKeys] = useState<KeyRow[] | null>(null)
   const [repo, setRepo] = useState("")
   const [label, setLabel] = useState("")
@@ -1498,7 +1637,7 @@ function KeysView({ inst, overview }: { inst: number; overview: Overview | null 
   const [open, setOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const refresh = useCallback(() => api.keys(inst).then((r) => setKeys(r.keys)).catch(() => setKeys([])), [inst])
+  const refresh = useCallback(() => api.keys(workspaceId).then((r) => setKeys(r.keys)).catch(() => setKeys([])), [workspaceId])
   useEffect(() => {
     refresh()
   }, [refresh])
@@ -1506,7 +1645,7 @@ function KeysView({ inst, overview }: { inst: number; overview: Overview | null 
   const mint = async () => {
     setError(null)
     try {
-      const r = await api.mintKey(inst, repo.trim(), label.trim())
+      const r = await api.mintKey(workspaceId, repo.trim(), label.trim())
       setMinted(r.key)
       refresh()
     } catch (e) {
@@ -1601,7 +1740,7 @@ function KeysView({ inst, overview }: { inst: number; overview: Overview | null 
           <EmptyState
             icon={KeyRound}
             title="No keys yet"
-            hint="Mint a key to let CI or your IDE agents query this org's memory. Each key is scoped to a single repo."
+            hint="Mint a key to let CI or your IDE agents query this workspace's memory. Each key is scoped to a single repo."
           />
         </div>
       ) : (
@@ -1634,7 +1773,7 @@ function KeysView({ inst, overview }: { inst: number; overview: Overview | null 
                   <td className="px-5 py-3 text-right">
                     {!k.revokedAt && (
                       <button
-                        onClick={() => api.revokeKey(inst, k.keyHash).then(refresh)}
+                        onClick={() => api.revokeKey(workspaceId, k.keyHash).then(refresh)}
                         className="text-red-400/80 hover:text-red-300 text-[0.6875rem]"
                       >
                         Revoke
@@ -1653,14 +1792,14 @@ function KeysView({ inst, overview }: { inst: number; overview: Overview | null 
 
 /* ── Settings ───────────────────────────────────────────────────────── */
 
-function SettingsView({ inst }: { inst: number }) {
+function SettingsView({ workspaceId }: { workspaceId: string }) {
   const [s, setS] = useState<Settings | null>(null)
   const [saved, setSaved] = useState(false)
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    api.settings(inst).then(setS).catch(() => {})
-  }, [inst])
+    api.settings(workspaceId).then(setS).catch(() => {})
+  }, [workspaceId])
 
   if (!s) return <Loading />
 
@@ -1668,7 +1807,7 @@ function SettingsView({ inst }: { inst: number }) {
     setSaving(true)
     setSaved(false)
     try {
-      const next = await api.saveSettings(inst, s)
+      const next = await api.saveSettings(workspaceId, s)
       setS(next)
       setSaved(true)
     } finally {
@@ -1689,7 +1828,7 @@ function SettingsView({ inst }: { inst: number }) {
   return (
     <FullPanel
       title="Settings"
-      subtitle="How Orin delivers and judges catches for this installation."
+      subtitle="How Orin delivers and judges catches for this workspace."
       rail={<SettingsRail />}
       action={
         <div className="flex items-center gap-3">
@@ -1754,7 +1893,7 @@ function SettingsView({ inst }: { inst: number }) {
           <Textarea
             value={s.customInstructions}
             onChange={(e) => setS({ ...s, customInstructions: e.target.value })}
-            placeholder="Extra guidance for Orin's judgment, e.g. what counts as a decision in this org."
+            placeholder="Extra guidance for Orin's judgment, e.g. what counts as a decision in this workspace."
             className="bg-zinc-950 border-zinc-800 text-zinc-200 text-xs min-h-20"
           />
         </div>
@@ -1766,8 +1905,8 @@ function SettingsView({ inst }: { inst: number }) {
 
 /* ── Rules ──────────────────────────────────────────────────────────── */
 
-function RulesView({ inst, overview }: { inst: number; overview: Overview | null }) {
-  const [scope, setScope] = useState<string>("") // '' = org-wide
+function RulesView({ workspaceId, overview }: { workspaceId: string; overview: Overview | null }) {
+  const [scope, setScope] = useState<string>("") // '' = workspace-wide
   const [rules, setRules] = useState<string[] | null>(null)
   const [text, setText] = useState("")
   const [busy, setBusy] = useState(false)
@@ -1775,8 +1914,8 @@ function RulesView({ inst, overview }: { inst: number; overview: Overview | null
   const [error, setError] = useState<string | null>(null)
 
   const refresh = useCallback(
-    () => api.rules(inst, scope || undefined).then((r) => setRules(r.rules)).catch(() => setRules([])),
-    [inst, scope],
+    () => api.rules(workspaceId, scope || undefined).then((r) => setRules(r.rules)).catch(() => setRules([])),
+    [workspaceId, scope],
   )
   useEffect(() => {
     setRules(null)
@@ -1788,7 +1927,7 @@ function RulesView({ inst, overview }: { inst: number; overview: Overview | null
     setError(null)
     setAdded(null)
     try {
-      const r = await api.addRule(inst, text.trim(), scope || undefined)
+      const r = await api.addRule(workspaceId, text.trim(), scope || undefined)
       setAdded(r.rules)
       if (r.rules.length > 0) setText("")
       setTimeout(refresh, 4000) // indexing runs in the background; refresh shortly after
@@ -1802,15 +1941,15 @@ function RulesView({ inst, overview }: { inst: number; overview: Overview | null
   return (
     <FullPanel
       title="Rules"
-      subtitle="Standing constraints Orin enforces alongside decision memory. Org-wide rules apply to every repo; repo rules apply only there. @orinbot rule on GitHub seeds that repo's scope."
+      subtitle="Standing constraints Orin enforces alongside decision memory. Workspace-wide rules apply to every repo; repo rules apply only there. @orinbot rule on GitHub seeds that repo's scope."
       rail={<RulesRail />}
       action={
-        <Select value={scope || "__org__"} onValueChange={(v) => setScope(v === "__org__" ? "" : v)}>
+        <Select value={scope || "__workspace__"} onValueChange={(v) => setScope(v === "__workspace__" ? "" : v)}>
           <SelectTrigger className="w-52 bg-zinc-950 border-zinc-800 text-zinc-200 text-xs h-8">
             <SelectValue />
           </SelectTrigger>
           <SelectContent className="bg-zinc-900 border-zinc-800 text-zinc-200">
-            <SelectItem value="__org__">Org-wide (all repos)</SelectItem>
+            <SelectItem value="__workspace__">Workspace-wide (all repos)</SelectItem>
             {(overview?.installedRepos ?? []).map((r) => (
               <SelectItem key={r} value={r}>
                 {r}
@@ -1870,7 +2009,7 @@ function RulesView({ inst, overview }: { inst: number; overview: Overview | null
         <div className={`${card} p-8`}>
           <EmptyState
             icon={BookOpen}
-            title={scope ? `No rules for ${scope} yet` : "No org-wide rules yet"}
+            title={scope ? `No rules for ${scope} yet` : "No workspace-wide rules yet"}
             hint="Rules you add here (or via @orinbot rule on GitHub) appear on catches when a PR touches them. Newly added rules can take a minute to index."
           />
         </div>
@@ -1890,17 +2029,17 @@ function RulesView({ inst, overview }: { inst: number; overview: Overview | null
 
 /* ── Docs ───────────────────────────────────────────────────────────── */
 
-function DocsView({ inst, overview }: { inst: number; overview: Overview | null }) {
+function DocsView({ workspaceId, overview }: { workspaceId: string; overview: Overview | null }) {
   const [title, setTitle] = useState("")
   const [content, setContent] = useState("")
-  const [repo, setRepo] = useState<string>("") // '' = org-wide
+  const [repo, setRepo] = useState<string>("") // '' = workspace-wide
   const [extract, setExtract] = useState(true)
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<{ filename: string; rules: string[] } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [docs, setDocs] = useState<Array<{ filename: string; title: string; repo: string; createdAt: string }> | null>(null)
 
-  const refreshDocs = useCallback(() => api.docs(inst).then((r) => setDocs(r.docs)).catch(() => setDocs([])), [inst])
+  const refreshDocs = useCallback(() => api.docs(workspaceId).then((r) => setDocs(r.docs)).catch(() => setDocs([])), [workspaceId])
   useEffect(() => {
     refreshDocs()
   }, [refreshDocs])
@@ -1918,7 +2057,7 @@ function DocsView({ inst, overview }: { inst: number; overview: Overview | null 
     setError(null)
     setResult(null)
     try {
-      const r = await api.uploadDoc(inst, title.trim(), content.trim(), extract, repo || undefined)
+      const r = await api.uploadDoc(workspaceId, title.trim(), content.trim(), extract, repo || undefined)
       setResult({ filename: r.filename, rules: r.rules })
       setTitle("")
       setContent("")
@@ -1956,12 +2095,12 @@ function DocsView({ inst, overview }: { inst: number; overview: Overview | null 
               Choose .md / .txt file
               <input type="file" accept=".md,.txt,.markdown" className="hidden" onChange={(e) => onFile(e.target.files?.[0] ?? null)} />
             </label>
-            <Select value={repo || "__org__"} onValueChange={(v) => setRepo(v === "__org__" ? "" : v)}>
+            <Select value={repo || "__workspace__"} onValueChange={(v) => setRepo(v === "__workspace__" ? "" : v)}>
               <SelectTrigger className="w-48 bg-zinc-950 border-zinc-800 text-zinc-200 text-xs h-8">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent className="bg-zinc-900 border-zinc-800 text-zinc-200">
-                <SelectItem value="__org__">Org-wide</SelectItem>
+                <SelectItem value="__workspace__">Workspace-wide</SelectItem>
                 {(overview?.installedRepos ?? []).map((r) => (
                   <SelectItem key={r} value={r}>
                     {r}
@@ -2013,7 +2152,7 @@ function DocsView({ inst, overview }: { inst: number; overview: Overview | null 
             <div key={d.filename} className="px-5 py-3.5 flex items-center gap-3">
               <FileText className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
               <span className="text-zinc-300 text-xs flex-1 truncate">{d.title}</span>
-              <span className="text-[0.625rem] px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400">{d.repo || "org-wide"}</span>
+              <span className="text-[0.625rem] px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400">{d.repo || "workspace-wide"}</span>
               <span className="text-zinc-600 text-[0.625rem]">{new Date(d.createdAt).toLocaleDateString()}</span>
             </div>
           ))}

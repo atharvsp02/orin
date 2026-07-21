@@ -4,7 +4,25 @@
 export interface Me {
   login: string;
   avatar: string;
+  workspaces: WorkspaceSummary[];
   installations: Array<{ installationId: number; account: string; decisions: number }>;
+}
+
+export type ConnectorCapability = "ingest" | "query" | "record" | "warn" | "deliver";
+export type ConnectorStatus = "active" | "disabled" | "error";
+
+export interface ConnectorSummary {
+  provider: string;
+  displayName: string;
+  status: ConnectorStatus;
+  capabilities: ConnectorCapability[];
+}
+
+export interface WorkspaceSummary {
+  workspaceId: string;
+  displayName: string;
+  decisions: number;
+  connectors: ConnectorSummary[];
 }
 
 export interface Metrics {
@@ -41,6 +59,16 @@ export interface GraphData {
 
 export interface Overview {
   account: string;
+  workspace: { workspaceId: string; displayName: string } | null;
+  connectors: Array<ConnectorSummary & { connectorId: string }>;
+  resources: Array<{
+    resourceId: string;
+    connectorId: string;
+    externalId: string;
+    kind: string;
+    displayName: string;
+    enabled: boolean;
+  }>;
   metrics: Metrics;
   recent: Catch[];
   repos: string[]; // repos that already have recorded decisions
@@ -103,31 +131,45 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   me: () => req<Me>("/v1/me"),
-  overview: (inst: number) => req<Overview>(`/v1/dash/${inst}/overview`),
-  decisions: (inst: number) => req<{ decisions: Decision[] }>(`/v1/dash/${inst}/decisions`),
-  keys: (inst: number) => req<{ keys: KeyRow[] }>(`/v1/dash/${inst}/keys`),
-  mintKey: (inst: number, repo: string, label: string) =>
-    req<{ key: string; repo: string }>(`/v1/dash/${inst}/keys`, { method: "POST", body: JSON.stringify({ repo, label }) }),
-  revokeKey: (inst: number, keyHash: string) =>
-    req<{ revoked: boolean }>(`/v1/dash/${inst}/keys/${keyHash}`, { method: "DELETE" }),
-  settings: (inst: number) => req<Settings>(`/v1/dash/${inst}/settings`),
-  saveSettings: (inst: number, patch: Partial<Settings>) =>
-    req<Settings>(`/v1/dash/${inst}/settings`, { method: "PUT", body: JSON.stringify(patch) }),
-  graphUrl: (inst: number) => `/v1/dash/${inst}/graph`,
-  graphData: (inst: number) => req<GraphData>(`/v1/dash/${inst}/graphdata`),
-  rules: (inst: number, repo?: string) =>
-    req<{ rules: string[] }>(`/v1/dash/${inst}/rules${repo ? `?repo=${encodeURIComponent(repo)}` : ""}`),
-  addRule: (inst: number, text: string, repo?: string) =>
-    req<{ rules: string[]; indexing: boolean }>(`/v1/dash/${inst}/rules`, { method: "POST", body: JSON.stringify({ text, repo }) }),
-  docs: (inst: number) => req<{ docs: Array<{ filename: string; title: string; repo: string; createdAt: string }> }>(`/v1/dash/${inst}/docs`),
-  uploadDoc: (inst: number, title: string, content: string, extractRules: boolean, repo?: string) =>
-    req<{ accepted: boolean; filename: string; rules: string[] }>(`/v1/dash/${inst}/docs`, {
+  overview: (workspaceId: string) => req<Overview>(workspacePath(workspaceId, "overview")),
+  decisions: (workspaceId: string) => req<{ decisions: Decision[] }>(workspacePath(workspaceId, "decisions")),
+  keys: (workspaceId: string) => req<{ keys: KeyRow[] }>(workspacePath(workspaceId, "keys")),
+  mintKey: (workspaceId: string, repo: string, label: string) =>
+    req<{ key: string; repo: string }>(workspacePath(workspaceId, "keys"), { method: "POST", body: JSON.stringify({ repo, label }) }),
+  revokeKey: (workspaceId: string, keyHash: string) =>
+    req<{ revoked: boolean }>(`${workspacePath(workspaceId, "keys")}/${keyHash}`, { method: "DELETE" }),
+  settings: (workspaceId: string) => req<Settings>(workspacePath(workspaceId, "settings")),
+  saveSettings: (workspaceId: string, patch: Partial<Settings>) =>
+    req<Settings>(workspacePath(workspaceId, "settings"), { method: "PUT", body: JSON.stringify(patch) }),
+  graphUrl: (workspaceId: string) => workspacePath(workspaceId, "graph"),
+  graphData: (workspaceId: string) => req<GraphData>(workspacePath(workspaceId, "graphdata")),
+  rules: (workspaceId: string, repo?: string) =>
+    req<{ rules: string[] }>(`${workspacePath(workspaceId, "rules")}${repo ? `?repo=${encodeURIComponent(repo)}` : ""}`),
+  addRule: (workspaceId: string, text: string, repo?: string) =>
+    req<{ rules: string[]; indexing: boolean }>(workspacePath(workspaceId, "rules"), { method: "POST", body: JSON.stringify({ text, repo }) }),
+  docs: (workspaceId: string) => req<{ docs: Array<{ filename: string; title: string; repo: string; createdAt: string }> }>(workspacePath(workspaceId, "docs")),
+  uploadDoc: (workspaceId: string, title: string, content: string, extractRules: boolean, repo?: string) =>
+    req<{ accepted: boolean; filename: string; rules: string[] }>(workspacePath(workspaceId, "docs"), {
       method: "POST",
       body: JSON.stringify({ title, content, extractRules, repo }),
+    }),
+  setConnectorEnabled: (workspaceId: string, connectorId: string, enabled: boolean) =>
+    req<ConnectorSummary>(`${workspacePath(workspaceId, "connectors")}/${connectorId}`, {
+      method: "PUT",
+      body: JSON.stringify({ enabled }),
+    }),
+  setResourceEnabled: (workspaceId: string, resourceId: string, enabled: boolean) =>
+    req<{ enabled: boolean }>(`${workspacePath(workspaceId, "resources")}/${resourceId}`, {
+      method: "PUT",
+      body: JSON.stringify({ enabled }),
     }),
   signInUrl: "/v1/auth/github",
   logoutUrl: "/v1/auth/logout",
 };
+
+function workspacePath(workspaceId: string, resource: string): string {
+  return `/v1/workspaces/${encodeURIComponent(workspaceId)}/${resource}`;
+}
 
 export function timeAgo(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime();
