@@ -14,6 +14,8 @@ port 8787). Shared core for every adapter: **Postgres + Cognee 1.2.2 (DeepSeek +
 | `/mcp` | MCP server (IDE agents / CI) | 8788 | `orin-mcp` |
 | `/slack/*` | Slack app (events, commands, OAuth) | 3001 | `orin-slack` |
 | `/linear` | Linear adapter (planned) | 3002 | `orin-linear` |
+| `/v1/connectors/google-drive/*` | Google Drive OAuth | 3000 | `orin-bot` |
+| `/v1/workspaces/*` | Workspace search, chat, admin, connector, and audit APIs | 3000 | `orin-bot` |
 | - | Cognee engine (internal) | 8000 | `orin-cognee` |
 
 Each adapter runs from a wrapper script (`~/codeguard/start-*.sh`) under pm2 (`pm2 save`d).
@@ -54,6 +56,41 @@ code grants nothing. `/orin unlink` reverts the workspace to a fresh memory of i
   (optional `LINEAR_ACCESS_TOKEN` as single-workspace dev fallback; `LINEAR_ACTOR=app` default).
 - **Self-serve:** any org installs at `https://orin-bot.duckdns.org/linear/install` → OAuth consent →
   per-org token stored encrypted → its own isolated memory auto-provisioned.
+
+## Google Drive connector
+
+- Configure `GOOGLE_DRIVE_CLIENT_ID` and `GOOGLE_DRIVE_CLIENT_SECRET` in the bot environment.
+- Register `https://orin-seven.vercel.app/v1/connectors/google-drive/callback` as an authorized redirect URI.
+- Use a Web application OAuth client and enable the Google Drive API.
+- Orin requests read-only Drive access plus basic OpenID profile scopes.
+- Credentials are encrypted with `ORIN_SECRET`. Disconnect removes credentials and disables the connector.
+- The connector scheduler queues active Drive connectors every 15 minutes. Manual sync is available in the dashboard.
+- A failed sync marks restricted ACLs stale and sets the connector to error, so search and chat fail closed.
+
+## Deployment order
+
+1. Back up Postgres and verify restore access.
+2. Deploy the bot first. Startup applies additive schema changes before serving requests.
+3. Confirm queue startup, `/v1/me`, and one workspace overview.
+4. Deploy the web app with `ORIN_API_ORIGIN` pointing at the bot.
+5. Run a Drive sync in a non-production workspace and verify ACL-filtered search with owner and viewer accounts.
+6. Check connector sync and authorization events in the audit log.
+
+Rollback the application to the previous bot and web builds if verification fails. The schema additions are backward compatible and should remain in place during application rollback. Do not drop new tables during an incident.
+
+## Verification commands
+
+```bash
+npm --prefix bot test
+DATABASE_URL=postgres://... npm --prefix bot run test:integration
+npm --prefix web run lint
+npm --prefix web run typecheck
+npm --prefix web run build
+npm --prefix web exec -- playwright install chromium
+npm --prefix web run test:e2e
+```
+
+Next is intentionally pinned at `16.0.10`. The current npm audit reports advisories that require a newer Next release. Treat the framework upgrade as a separate reviewed change before exposing a self-hosted web process directly to untrusted traffic.
 
 ## Add a new adapter route (Caddy)
 `/etc/caddy/Caddyfile` on rey3 - add a `handle /x* { reverse_proxy localhost:PORT }` block inside the

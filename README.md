@@ -11,9 +11,9 @@
 
 > A team rejects an idea for a good reason. Months later the person who knew the reason has moved on, the same idea comes back in a new PR, and nobody remembers why you said no. Orin is the memory that does. It reads your repo's closed issues and PRs into a self-hosted Cognee knowledge graph, then catches re-proposals on new PRs and issues with a citation to the original decision, and answers "why did we do X?" from GitHub, Slack, Linear, your IDE, and CI.
 
-Orin is **one shared memory reachable from six surfaces**: a **GitHub App**, a **Slack** app, a **Linear** agent, an **MCP** server for your IDE, a **CI** pre-flight, and a **dashboard**. It is not a GitHub bot with some integrations bolted on; every surface reads and writes the same per-tenant knowledge graph.
+Orin is a provider-neutral workspace with connected sources and delivery surfaces. GitHub, Slack, Linear, Google Drive, MCP, CI, and the dashboard all resolve through the same workspace boundary. Teams can start with the tools they use and add another connector without changing who owns the memory.
 
-GitHub is where the memory is formed. Install the App on a repo and it backfills every closed issue and PR, extracts the real decisions (what was proposed, what was decided, and the reasoning), and grounds them in a [Cognee](https://github.com/topoteretes/cognee) knowledge graph using a decision ontology. From then on, that same memory works everywhere your team does: it fails a merge-blocking check on a re-proposing PR with the exact prior decision cited, answers `/why` in Slack with evidence, acts as an `@Orin` agent in Linear, gates a change in Cursor or Claude Code over MCP before a PR even exists, and blocks a CI job before review. One decision, recorded once, enforced on every surface.
+GitHub remains the deepest decision workflow. It backfills closed issues and pull requests, extracts what was decided and why, and grounds those decisions in a [Cognee](https://github.com/topoteretes/cognee) knowledge graph. Google Drive contributes source-authorized documents to the permission-aware content index. Search and Ask Orin combine only the evidence each member may access. The same workspace can then answer `/why` in Slack, respond in Linear, gate a change over MCP, or stop a repeated proposal in CI. One workspace, flexible sources, permission-safe answers.
 
 The engine is **self-hosted Cognee OSS** (the open-source `cognee/cognee`, not the hosted Cogwit product), running on your own LLM, vector, and graph config, with hard multi-tenant isolation so each install has its own private graph. Built for the Cognee hackathon, Open Source track.
 
@@ -50,11 +50,11 @@ Orin is four parts working as one memory:
 
 1. **A GitHub App (`bot/`).** A webhook backend (Node + TypeScript) that provisions an isolated Cognee tenant on install, backfills the repo's history, catches re-proposals on new PRs and issues, and runs the `@orinbot` command set. Heavy work runs on a Postgres-backed queue so webhook acks stay fast.
 
-2. **Three adapters on the same memory.** A **Slack** app (`/why`, a brain reaction to record a decision, `@Orin` mentions), a **Linear** agent (in-issue sessions and collision warnings on issue creation), and an **MCP server** (three tools for Cursor, Claude Code, or any MCP client). Each install is an isolated tenant; Slack and Linear can be linked to a GitHub org's memory with a one-time code.
+2. **Switchable connectors and adapters.** Google Drive provides read-only document ingestion with source ACLs. Slack, Linear, and MCP expose the shared decision memory where teams already work. GitHub-compatible workflows can remain enabled without being the workspace identity model.
 
 3. **A self-hosted Cognee engine (`engine/`).** The open-source `cognee/cognee` REST engine with backend access control on, so every tenant's decisions live in a separate, key-scoped graph. Orin drives the full Cognee lifecycle: `remember` (ontology-grounded ingest), `recall` (cited graph completion), `improve` (maintainer feedback reweights the graph), and `forget` (on uninstall).
 
-4. **A dashboard (`web/`).** A Next.js app (landing page plus signed-in dashboard) where you see every catch with its citation, browse recorded decisions, explore the knowledge graph, manage org and repo-scoped rules, upload docs into memory, mint repo-scoped keys, and tune delivery, all read live from the tenant's real data.
+4. **A permission-aware workspace (`web/`).** A Next.js app where members search and chat across their authorized sources. Owners and admins manage people, roles, groups, feature grants, connectors, source scope, sync health, and audit events. The existing GitHub catches, decisions, rules, docs, graph, keys, and settings remain available in GitHub-compatible workspaces.
 
 Put together: a maintainer rejects an idea and closes the thread the way they always do; a minute later it is a decision in Orin's graph; weeks later someone re-proposes it and Orin catches it before anyone wastes a review, citing the original; and the same decision answers `/why` in Slack and `check_rejected` in an IDE. One decision, recorded once, enforced everywhere.
 
@@ -108,7 +108,7 @@ For CI, `bot/action/action.yml` is a composite **GitHub Action** ("Orin Prefligh
 
 ### The Dashboard
 
-`web/` is a Next.js 16 app (React 19, Tailwind 4, Radix, framer-motion) with a Linear-style landing page and a signed-in dashboard. Sign-in is GitHub OAuth against the App's client credentials, held in an HMAC-signed session cookie (the GitHub token is never stored). The dashboard mirrors the product: **Catches** (each with its citation and evidence), **Decisions** (outcome, reasoning, supersession, source), **Repos**, **Rules** (org-wide or per-repo scope), **Docs** (upload ADRs and postmortems straight into memory), a **Knowledge graph** (a self-contained force graph built from the tenant's real decisions and the entities Cognee extracted), **Integrations** (install links and the MCP snippet), **Keys** (mint and revoke repo-scoped keys), and **Settings** (delivery mode, grounding threshold, semantic cutoff). Every number is read live from the tenant's data; empty states are honest and never fabricated. The `/v1/*` API is proxied through Next so cookies stay first-party on any origin, and all authenticated responses are `no-store` so a CDN never serves one user's data to another.
+`web/` is a Next.js 16 app (React 19, Tailwind 4, Radix, framer-motion) with a signed-in, provider-neutral workspace. Members get permission-aware **Search** and **Ask Orin** with source citations and saved conversations. Owners and admins get **People**, **Groups**, **Feature access**, **Connectors**, content policies, sync health, resource controls, and an **Audit log**. Google Drive is the first full document connector, including shared drives, incremental sync, encrypted OAuth credentials, source ACL ingestion, and include or exclude policies. GitHub-compatible workspaces retain **Catches**, **Decisions**, **Rules**, **Docs**, **Knowledge graph**, **Keys**, and **Settings**. Planned connectors are labeled honestly and do not expose setup actions. The `/v1/*` API is proxied through Next so cookies stay first-party, and authenticated responses are not cached.
 
 ---
 
@@ -187,7 +187,10 @@ orin/  (repo folder: codegaurd)
 │   │   ├── slack.ts / linear.ts  the two chat/PM adapters (Bolt / Linear SDK)
 │   │   ├── mcp.ts                MCP server: why / check_rejected / record_decision
 │   │   ├── preflight.ts          CI pre-flight, metrics, graph endpoints
-│   │   ├── auth.ts / dash.ts     dashboard OAuth session + /v1/dash API
+│   │   ├── auth.ts / dash.ts     dashboard OAuth session + workspace API
+│   │   ├── access.ts / admin.ts  roles, grants, people, groups, and audit routes
+│   │   ├── content-db.ts         permission-aware content, ACLs, search, chat, and sync runs
+│   │   ├── google-drive.ts       Drive OAuth, crawl, permissions, and incremental sync
 │   │   ├── tenant.ts             cross-platform tenant resolution + linking
 │   │   ├── db.ts                 Postgres schema, decisions, config, keys, links, docs
 │   │   └── delivery.ts           check / review / comment delivery strategies
@@ -196,7 +199,8 @@ orin/  (repo folder: codegaurd)
 │
 ├── web/                          Next.js 16 landing + dashboard (React 19, Tailwind 4, Radix)
 │   ├── app/dashboard/            session gate, connect hub, the shell
-│   ├── components/               dashboard-shell (all views + force graph), landing sections
+│   ├── components/               workspace, administration, connector, and landing views
+│   ├── e2e/                      Playwright permission and workflow coverage
 │   └── lib/orin-api.ts           typed client for /v1/*
 │
 ├── engine/                       self-hosted cognee/cognee (docker compose + env template)
@@ -213,7 +217,8 @@ orin/  (repo folder: codegaurd)
 Each folder is its own npm project. You need Node 20+, Docker (for the engine), and Postgres.
 
 ```bash
-git clone <repo-url> && cd codegaurd
+git clone <repo-url>
+cd orin
 
 # 1. engine - self-hosted Cognee OSS (needs a PAID LLM key; free Gemini caps too low for cognify)
 cd engine && cp .env.example .env    # fill in the LLM key
@@ -229,11 +234,14 @@ npm run build && npm run mcp:http    # MCP server (streamable HTTP)
 npm run slack                        # Slack Bolt app
 npm run linear                       # Linear OAuth app
 
-# 3. web - dashboard + landing
-cd ../web && npm install && npm run dev   # http://localhost:3000
+# 3. web, in another terminal
+cd web
+npm install
+ORIN_API_ORIGIN=http://127.0.0.1:3000 npm run dev -- --port 3100
+# open http://localhost:3100
 ```
 
-Register the GitHub App with the webhook URL `<public-origin>/api/github/webhooks`, add the OAuth callback `<public-origin>/v1/auth/callback` for dashboard sign-in, and install it on a repo to trigger the backfill.
+For local dashboard OAuth, set `WEB_ORIGIN=http://localhost:3100` in `bot/.env`. Register `http://localhost:3100/v1/auth/callback` as the GitHub callback. For Google Drive, also register `http://localhost:3100/v1/connectors/google-drive/callback` in the Google OAuth client.
 
 ---
 
@@ -250,11 +258,13 @@ GITHUB_PRIVATE_KEY_PATH=./github-app.pem    # (or GITHUB_PRIVATE_KEY inline)
 GITHUB_WEBHOOK_SECRET=...
 GITHUB_OAUTH_CLIENT_ID=...                  # dashboard sign-in (auth routes 404 until set)
 GITHUB_OAUTH_CLIENT_SECRET=...
+GOOGLE_DRIVE_CLIENT_ID=...                # optional Google Drive connector
+GOOGLE_DRIVE_CLIENT_SECRET=...
 DEEPSEEK_API_KEY=...                        # the bot's own extraction/judgment LLM
-WEB_ORIGIN=https://orin-bot.duckdns.org     # default origin for OAuth redirects
+WEB_ORIGIN=http://localhost:3100             # browser origin for OAuth redirects
 ```
 
-**web** needs no env to run: it defaults `ORIN_API_ORIGIN` to the live bot and proxies `/v1/*`. On Vercel, set the project Root Directory to `web` and register that domain's `/v1/auth/callback` in the GitHub App.
+Set `ORIN_API_ORIGIN=http://127.0.0.1:3000` for local web development. On Vercel, set the project Root Directory to `web`, point `ORIN_API_ORIGIN` at the deployed backend, and register the production GitHub and Google Drive callback URLs.
 
 **engine/.env**: a paid LLM key plus `ENABLE_BACKEND_ACCESS_CONTROL=true`; embeddings default to local `fastembed`.
 
@@ -282,6 +292,9 @@ WEB_ORIGIN=https://orin-bot.duckdns.org     # default origin for OAuth redirects
 | Decisions at rest | Per-tenant Cognee keys are encrypted with `ORIN_SECRET`; the graph lives only on the self-hosted engine. |
 | Webhook forgery | Webhooks verified with the App's signing secret (`verifyAndReceive`) before any work is queued. |
 | Dashboard sign-in | GitHub OAuth; the token is used once to read installations then discarded. Session is an HMAC-signed cookie (HttpOnly, Secure, SameSite=Lax); CSRF state is bound to a per-browser nonce. |
+| Workspace access | Active membership, role defaults, group grants, user grants, and explicit denies are evaluated for each API operation. Deny takes precedence. |
+| Source permissions | Restricted content must have a current source ACL that matches the user. Stale, failed, or empty ACLs fail closed. Connector, resource, and feature conditions are filtered before results reach the model. |
+| Google credentials | OAuth state is signed and bound to the user and workspace. Refresh tokens are encrypted at rest, use read-only scopes, and are removed on disconnect. |
 | Cross-user cache leak | All authenticated `/v1/*` responses send `Cache-Control: private, no-store` + `Vary: Cookie`, so a CDN never serves one user's data to another. |
 | Cross-tenant access | Every `/v1/dash/:inst/*` route checks the signed-in user administers that installation; `@orinbot override` is guarded against citing a decision from another repo/thread. |
 | Command abuse | Write access required for mutations, admin for `forget`; keys are repo-scoped and stored as SHA-256 hashes (plaintext shown once at mint). |
