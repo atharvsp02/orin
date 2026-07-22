@@ -157,7 +157,7 @@ export function DashboardShell({ me }: { me: Me }) {
                   Add GitHub connector
                 </a>
               </DropdownMenuItem>
-              <DropdownMenuItem className="text-xs" onSelect={() => window.location.assign("/v1/auth/github")}>
+              <DropdownMenuItem className="text-xs" onSelect={() => window.location.assign(api.signInUrls[me.provider ?? "github"])}>
                 Refresh workspaces
               </DropdownMenuItem>
             </DropdownMenuContent>

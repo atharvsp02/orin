@@ -3,12 +3,19 @@
 
 export interface Me {
   userId: string;
+  provider?: "github" | "slack" | "linear";
   login: string;
   displayName: string;
   email: string;
   avatar: string;
   workspaces: WorkspaceSummary[];
   installations: Array<{ installationId: number; account: string; decisions: number }>;
+}
+
+export interface AuthProviders {
+  github: boolean;
+  slack: boolean;
+  linear: boolean;
 }
 
 export type ConnectorCapability = "ingest" | "query" | "record" | "warn" | "deliver";
@@ -252,6 +259,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   me: () => req<Me>("/v1/me"),
+  authProviders: () => req<{ providers: AuthProviders }>("/v1/auth/providers"),
   overview: (workspaceId: string) => req<Overview>(workspacePath(workspaceId, "overview")),
   decisions: (workspaceId: string) => req<{ decisions: Decision[] }>(workspacePath(workspaceId, "decisions")),
   keys: (workspaceId: string) => req<{ keys: KeyRow[] }>(workspacePath(workspaceId, "keys")),
@@ -340,7 +348,11 @@ export const api = {
   disconnectGoogleDrive: (workspaceId: string, connectorId: string) =>
     req<{ disconnected: boolean }>(`${workspacePath(workspaceId, "disconnects")}/${connectorId}`, { method: "DELETE" }),
   googleDriveConnectUrl: (workspaceId: string) => `/v1/connectors/google-drive/start?workspaceId=${encodeURIComponent(workspaceId)}`,
-  signInUrl: "/v1/auth/github",
+  signInUrls: {
+    github: "/v1/auth/github",
+    slack: "/v1/auth/slack",
+    linear: "/v1/auth/linear",
+  },
   logoutUrl: "/v1/auth/logout",
 };
 

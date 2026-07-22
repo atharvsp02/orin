@@ -93,6 +93,7 @@ const people = [
 function me(permissions = allPermissions) {
   return {
     userId: "user-1",
+    provider: "github",
     login: "asha",
     displayName: "Asha Owner",
     email: "asha@example.com",
@@ -109,6 +110,23 @@ function me(permissions = allPermissions) {
     }],
   }
 }
+
+test("offers every configured dashboard identity provider", async ({ page }) => {
+  await page.route("**/v1/**", async (route) => {
+    const path = new URL(route.request().url()).pathname
+    if (path === "/v1/me") return json(route, { error: "not signed in" }, 401)
+    if (path === "/v1/auth/providers") {
+      return json(route, { providers: { github: true, slack: true, linear: true } })
+    }
+    return json(route, { error: "not found" }, 404)
+  })
+
+  await page.goto("/dashboard")
+
+  await expect(page.getByRole("link", { name: "Continue with GitHub" })).toHaveAttribute("href", "/v1/auth/github")
+  await expect(page.getByRole("link", { name: "Continue with Slack" })).toHaveAttribute("href", "/v1/auth/slack")
+  await expect(page.getByRole("link", { name: "Continue with Linear" })).toHaveAttribute("href", "/v1/auth/linear")
+})
 
 async function json(route: Route, body: unknown, status = 200) {
   await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) })

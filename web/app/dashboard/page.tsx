@@ -4,15 +4,15 @@ import { useEffect, useState } from "react"
 import Link from "next/link"
 import { CirclePower, ExternalLink, RefreshCw, LogOut } from "lucide-react"
 import { SiGithub, SiLinear } from "@icons-pack/react-simple-icons"
-import { Slack } from "lucide-react"
-import { api, ApiError, type Me } from "@/lib/orin-api"
+import { FaSlack } from "react-icons/fa"
+import { api, ApiError, type AuthProviders, type Me } from "@/lib/orin-api"
 import { DashboardShell } from "@/components/dashboard-shell"
 
 const GITHUB_APP_URL = "https://github.com/apps/orinbot"
-const REFRESH_URL = "/v1/auth/github"
 
 export default function DashboardPage() {
   const [me, setMe] = useState<Me | null>(null)
+  const [providers, setProviders] = useState<AuthProviders | null>(null)
   const [state, setState] = useState<"loading" | "signedout" | "ready" | "error">("loading")
 
   // The dashboard reads best ~10% larger. Scaling the root font-size scales every rem-based
@@ -31,7 +31,18 @@ export default function DashboardPage() {
         setMe(m)
         setState("ready")
       })
-      .catch((e) => setState(e instanceof ApiError && e.status === 401 ? "signedout" : "error"))
+      .catch(async (e) => {
+        if (!(e instanceof ApiError) || e.status !== 401) {
+          setState("error")
+          return
+        }
+        try {
+          setProviders((await api.authProviders()).providers)
+        } catch {
+          setProviders({ github: true, slack: false, linear: false })
+        }
+        setState("signedout")
+      })
   }, [])
 
   if (state === "loading") {
@@ -58,16 +69,22 @@ export default function DashboardPage() {
         <CirclePower className="w-8 h-8 text-white mb-6" />
         <h1 className="text-white text-2xl font-medium mb-2">Sign in to Orin</h1>
         <p className="text-zinc-500 text-sm mb-8 max-w-sm text-center">
-          GitHub currently verifies dashboard access. Your workspace can connect GitHub, Slack, Linear, or any
-          combination of them.
+          Use an identity your organization already trusts. Workspace permissions are checked separately after sign-in.
         </p>
-        <a
-          href={api.signInUrl}
-          className="flex items-center gap-2.5 px-5 py-2.5 bg-white text-zinc-900 font-medium rounded-lg hover:bg-zinc-100 transition-colors text-sm"
-        >
-          <SiGithub className="w-4 h-4" />
-          Continue with GitHub
-        </a>
+        <div className="flex w-full max-w-xs flex-col gap-3">
+          {providers?.github && (
+            <SignInLink href={api.signInUrls.github} label="Continue with GitHub" icon={<SiGithub className="w-4 h-4" />} />
+          )}
+          {providers?.slack && (
+            <SignInLink href={api.signInUrls.slack} label="Continue with Slack" icon={<FaSlack className="w-4 h-4" />} />
+          )}
+          {providers?.linear && (
+            <SignInLink href={api.signInUrls.linear} label="Continue with Linear" icon={<SiLinear className="w-4 h-4" />} />
+          )}
+          {providers && !providers.github && !providers.slack && !providers.linear && (
+            <p className="text-center text-xs text-zinc-500">No sign-in provider is configured.</p>
+          )}
+        </div>
         <Link href="/" className="mt-6 text-zinc-500 hover:text-zinc-300 text-xs transition-colors">
           Back to home
         </Link>
@@ -83,6 +100,7 @@ export default function DashboardPage() {
 /* ── Connect hub: the dashboard for a signed-in user with nothing connected yet ── */
 
 function ConnectHub({ me }: { me: Me }) {
+  const refreshUrl = api.signInUrls[me.provider ?? "github"]
   const cards = [
     {
       Icon: SiGithub,
@@ -93,7 +111,7 @@ function ConnectHub({ me }: { me: Me }) {
       action: "Connect GitHub",
     },
     {
-      Icon: Slack,
+      Icon: FaSlack,
       name: "Slack",
       what: "Ask questions in channels and record decisions from the conversations where they happen.",
       how: "Install it for standalone workspace memory, or link it later to an existing Orin workspace.",
@@ -136,11 +154,11 @@ function ConnectHub({ me }: { me: Me }) {
           when your team wants the same answers everywhere.
         </p>
         <a
-          href={REFRESH_URL}
+          href={refreshUrl}
           className="inline-flex items-center gap-2 text-xs text-zinc-400 hover:text-zinc-200 transition-colors mb-10"
         >
           <RefreshCw className="w-3.5 h-3.5" />
-          Connected GitHub? Refresh workspaces
+          Refresh workspace access
         </a>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -168,14 +186,26 @@ function ConnectHub({ me }: { me: Me }) {
         </div>
 
         <p className="text-zinc-600 text-xs mt-8">
-          Slack and Linear start working after installation. Connected GitHub workspaces appear here after you{" "}
-          <a href={REFRESH_URL} className="text-zinc-400 hover:text-zinc-200 underline underline-offset-2">
+          Connectors start working after installation. New workspace memberships appear here after you{" "}
+          <a href={refreshUrl} className="text-zinc-400 hover:text-zinc-200 underline underline-offset-2">
             refresh access
           </a>{" "}
           to open your workspace.
         </p>
       </div>
     </div>
+  )
+}
+
+function SignInLink({ href, label, icon }: { href: string; label: string; icon: React.ReactNode }) {
+  return (
+    <a
+      href={href}
+      className="flex w-full items-center justify-center gap-2.5 rounded-lg border border-zinc-700 bg-zinc-900 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-zinc-800"
+    >
+      {icon}
+      {label}
+    </a>
   )
 }
 
