@@ -65,4 +65,3 @@ test("returns short and empty content unchanged", () => {
 });
 
 console.log(`${passed} content policy checks passed`);
-

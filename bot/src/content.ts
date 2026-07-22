@@ -18,7 +18,6 @@ export interface ContentPolicy {
   values: string[];
   enabled: boolean;
 }
-
 export interface ContentPolicyTarget {
   provider: string;
   resourceId: string;
@@ -56,4 +55,3 @@ export function searchSnippet(body: string, query: string, maxLength = 280): str
   const excerpt = clean.slice(start, start + bounded).trim();
   return `${start > 0 ? "…" : ""}${excerpt}${start + bounded < clean.length ? "…" : ""}`;
 }
-
