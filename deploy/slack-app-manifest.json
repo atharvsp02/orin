@@ -28,9 +28,15 @@
   },
   "oauth_config": {
     "redirect_urls": [
-      "https://orin-bot.duckdns.org/slack/oauth_redirect"
+      "https://orin-bot.duckdns.org/slack/oauth_redirect",
+      "https://orin-seven.vercel.app/v1/auth/slack/callback"
     ],
     "scopes": {
+      "user": [
+        "openid",
+        "profile",
+        "email"
+      ],
       "bot": [
         "commands",
         "chat:write",

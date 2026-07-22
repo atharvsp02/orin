@@ -271,6 +271,37 @@ export async function bootstrapWorkspaceMembership(userId: string, workspaceId: 
   }
 }
 
+export async function claimUnownedWorkspace(userId: string, workspaceId: string): Promise<WorkspaceMembership | null> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const workspace = await client.query(`SELECT 1 FROM workspaces WHERE workspace_id = $1 FOR UPDATE`, [workspaceId]);
+    if (workspace.rowCount !== 1) throw new Error("workspace not found");
+    const activeMembers = await client.query(
+      `SELECT count(*)::int AS count FROM workspace_memberships WHERE workspace_id = $1 AND status = 'active'`,
+      [workspaceId],
+    );
+    if (Number(activeMembers.rows[0]?.count ?? 0) !== 0) {
+      await client.query("COMMIT");
+      return null;
+    }
+    const { rows } = await client.query(
+      `INSERT INTO workspace_memberships (workspace_id, user_id, role)
+       SELECT $1, user_id, 'owner' FROM users WHERE user_id = $2 AND status = 'active'
+       ON CONFLICT (workspace_id, user_id) DO NOTHING
+       RETURNING *, status AS membership_status`,
+      [workspaceId, userId],
+    );
+    await client.query("COMMIT");
+    return rows[0] ? membershipFromRow(rows[0]) : null;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function listUserWorkspaces(userId: string): Promise<Array<{
   workspaceId: string;
   displayName: string;

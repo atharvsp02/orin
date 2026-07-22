@@ -4,12 +4,22 @@ process.env.ORIN_SECRET ??= "integration-secret-please-rotate-000000000000";
 process.env.GITHUB_APP_ID ??= "1";
 process.env.GITHUB_PRIVATE_KEY ??= "dummy";
 process.env.GITHUB_WEBHOOK_SECRET ??= "dummy";
+process.env.GITHUB_OAUTH_CLIENT_ID = "github-integration-client";
+process.env.GITHUB_OAUTH_CLIENT_SECRET = "github-integration-secret";
+process.env.SLACK_CLIENT_ID = "slack-integration-client";
+process.env.SLACK_CLIENT_SECRET = "slack-integration-secret";
+process.env.LINEAR_CLIENT_ID = "linear-integration-client";
+process.env.LINEAR_CLIENT_SECRET = "linear-integration-secret";
+delete process.env.WEB_ORIGIN;
 
 const BOT = new URL("../../dist/", import.meta.url).href;
 const db = await import(`${BOT}db.js`);
 const enterprise = await import(`${BOT}enterprise-db.js`);
 const contentDb = await import(`${BOT}content-db.js`);
 const slack = await import(`${BOT}slack.js`);
+const auth = await import(`${BOT}auth.js`);
+const { createHash } = await import("node:crypto");
+const { exportJWK, generateKeyPair, SignJWT } = await import("jose");
 const { Pool } = await import("pg");
 const sql = new Pool({ connectionString: process.env.DATABASE_URL });
 
@@ -19,6 +29,32 @@ const ok = (name, cond, extra = "") => {
   console.log(`  ${cond ? "PASS" : "FAIL"} ${name}${cond ? "" : `  ${extra}`}`);
 };
 const eq = (name, got, want) => ok(name, JSON.stringify(got) === JSON.stringify(want), `got=${JSON.stringify(got)} want=${JSON.stringify(want)}`);
+
+class MockResponse {
+  headers = new Map();
+  status = 0;
+  body = "";
+
+  setHeader(name, value) {
+    this.headers.set(name.toLowerCase(), value);
+  }
+
+  writeHead(status, headers = {}) {
+    this.status = status;
+    for (const [name, value] of Object.entries(headers)) this.setHeader(name, value);
+    return this;
+  }
+
+  end(body = "") {
+    this.body = String(body);
+    return this;
+  }
+}
+
+const responseSessionCookie = (response) => {
+  const cookies = response.headers.get("set-cookie");
+  return (Array.isArray(cookies) ? cookies : [cookies]).find((cookie) => cookie?.startsWith("orin_session="))?.split(";")[0] ?? "";
+};
 
 await db.initSchema();
 console.log("schema: initialized");
@@ -131,6 +167,207 @@ await enterprise.upsertUserIdentity({
   reactivate: false,
 });
 eq("directory synchronization cannot reactivate a disabled user", (await enterprise.getUser(inactiveDirectoryUser.userId))?.status, "inactive");
+const claimWorkspace = await db.createWorkspace({
+  displayName: "Unclaimed provider workspace",
+  datasetName: "claim-workspace",
+  cogneeApiKey: "claim-key",
+});
+ok(
+  "an inactive identity cannot claim an unowned workspace",
+  (await enterprise.claimUnownedWorkspace(inactiveDirectoryUser.userId, claimWorkspace.workspaceId)) === null,
+);
+const claimUser = await enterprise.upsertUserIdentity({
+  provider: "linear_user",
+  externalId: "claim-org:claim-owner",
+  displayName: "Claim Owner",
+  email: "claim-owner@example.com",
+});
+const claimedMembership = await enterprise.claimUnownedWorkspace(claimUser.userId, claimWorkspace.workspaceId);
+ok("a verified provider administrator can atomically claim an unowned workspace", claimedMembership?.role === "owner");
+const secondClaimUser = await enterprise.upsertUserIdentity({
+  provider: "linear_user",
+  externalId: "claim-org:second-admin",
+  displayName: "Second Admin",
+  email: "second-admin@example.com",
+});
+ok(
+  "a second provider administrator cannot claim an owned workspace",
+  (await enterprise.claimUnownedWorkspace(secondClaimUser.userId, claimWorkspace.workspaceId)) === null,
+);
+eq("workspace claim creates exactly one active owner", await enterprise.countActiveOwners(claimWorkspace.workspaceId), 1);
+await db.deleteWorkspace(claimWorkspace.workspaceId);
+
+const SLACK_AUTH_INSTALLATION = 8_100_000_000_001;
+await db.upsertInstallation({
+  installationId: SLACK_AUTH_INSTALLATION,
+  githubAccount: "slack:Authentication Test",
+  datasetName: "slack-authentication-test",
+  cogneeApiKey: "slack-auth-key",
+});
+await db.linkTenant("slack", "T-auth", SLACK_AUTH_INSTALLATION);
+await db.storeSlackInstall("T-auth", { bot: { token: "xoxb-auth-test" } });
+const slackAuthWorkspace = await db.getWorkspaceByInstallation(SLACK_AUTH_INSTALLATION);
+const { privateKey: slackPrivateKey, publicKey: slackPublicKey } = await generateKeyPair("RS256");
+const slackPublicJwk = await exportJWK(slackPublicKey);
+slackPublicJwk.alg = "RS256";
+slackPublicJwk.kid = "slack-integration-key";
+slackPublicJwk.use = "sig";
+let slackNonce = "slack-browser-nonce";
+let slackIdToken = await new SignJWT({ nonce: slackNonce })
+  .setProtectedHeader({ alg: "RS256", kid: slackPublicJwk.kid })
+  .setIssuer("https://slack.com")
+  .setAudience("slack-integration-client")
+  .setIssuedAt()
+  .setExpirationTime("5m")
+  .sign(slackPrivateKey);
+const originalFetch = globalThis.fetch;
+const authFetchCalls = [];
+globalThis.fetch = async (input, init) => {
+  const url = input instanceof Request ? input.url : String(input);
+  authFetchCalls.push({ url, init });
+  if (url === "https://slack.com/openid/connect/keys") return Response.json({ keys: [slackPublicJwk] });
+  if (url === "https://slack.com/api/openid.connect.token") {
+    return Response.json({ ok: true, access_token: "xoxp-dashboard-test", id_token: slackIdToken });
+  }
+  if (url === "https://slack.com/api/openid.connect.userInfo") {
+    return Response.json({
+      ok: true,
+      email_verified: true,
+      email: "slack-owner@example.com",
+      name: "Slack Owner",
+      picture: "https://example.com/slack-owner.png",
+      "https://slack.com/team_id": "T-auth",
+      "https://slack.com/user_id": "U-auth-owner",
+    });
+  }
+  if (url.startsWith("https://slack.com/api/users.info")) {
+    return Response.json({
+      ok: true,
+      user: {
+        id: "U-auth-owner",
+        is_admin: true,
+        profile: { email: "slack-owner@example.com" },
+      },
+    });
+  }
+  throw new Error(`unexpected authentication request: ${url}`);
+};
+try {
+  const slackState = auth.mintOAuthState("slack", slackNonce);
+  const slackResponse = new MockResponse();
+  await auth.handleSlackAuthCallback({
+    url: `/v1/auth/slack/callback?code=slack-code&state=${encodeURIComponent(slackState)}`,
+    headers: { host: "127.0.0.1:3000", cookie: `orin_oauth_slack=${slackNonce}` },
+  }, slackResponse);
+  eq("Slack callback redirects to the dashboard", slackResponse.status, 302);
+  const slackSessionCookie = responseSessionCookie(slackResponse);
+  ok("Slack callback creates a signed dashboard session", Boolean(slackSessionCookie));
+  const slackSession = auth.sessionFrom({ headers: { cookie: slackSessionCookie } });
+  eq("Slack session records its identity provider", slackSession?.provider, "slack");
+  const slackAuthUser = await enterprise.getUserByIdentity("slack_user", "T-auth:U-auth-owner");
+  const slackAccess = slackAuthUser && slackAuthWorkspace
+    ? await enterprise.getWorkspaceAccess(slackAuthUser.userId, slackAuthWorkspace.workspaceId)
+    : null;
+  eq("verified Slack administrator claims an unowned Slack workspace", slackAccess?.membership.role, "owner");
+  const meResponse = new MockResponse();
+  await auth.handleMe({ headers: { cookie: slackSessionCookie } }, meResponse);
+  const slackMe = JSON.parse(meResponse.body);
+  ok("Slack session can read only its claimed workspace", meResponse.status === 200 && slackMe.provider === "slack" && slackMe.workspaces.length === 1);
+  ok("Slack dashboard access token is not persisted in the install", !JSON.stringify(await db.fetchSlackInstall("T-auth")).includes("xoxp-dashboard-test"));
+
+  if (slackAuthUser) await sql.query(`UPDATE users SET status = 'inactive' WHERE user_id = $1`, [slackAuthUser.userId]);
+  slackNonce = "slack-suspended-nonce";
+  slackIdToken = await new SignJWT({ nonce: slackNonce })
+    .setProtectedHeader({ alg: "RS256", kid: slackPublicJwk.kid })
+    .setIssuer("https://slack.com")
+    .setAudience("slack-integration-client")
+    .setIssuedAt()
+    .setExpirationTime("5m")
+    .sign(slackPrivateKey);
+  const suspendedState = auth.mintOAuthState("slack", slackNonce);
+  const suspendedResponse = new MockResponse();
+  await auth.handleSlackAuthCallback({
+    url: `/v1/auth/slack/callback?code=slack-code&state=${encodeURIComponent(suspendedState)}`,
+    headers: { host: "127.0.0.1:3000", cookie: `orin_oauth_slack=${slackNonce}` },
+  }, suspendedResponse);
+  eq("Slack sign-in cannot reactivate a suspended user", suspendedResponse.status, 403);
+} finally {
+  globalThis.fetch = originalFetch;
+}
+ok("Slack callback used token, userinfo, signing key, and admin verification endpoints", [
+  "https://slack.com/api/openid.connect.token",
+  "https://slack.com/api/openid.connect.userInfo",
+  "https://slack.com/openid/connect/keys",
+].every((url) => authFetchCalls.some((call) => call.url === url)) && authFetchCalls.some((call) => call.url.startsWith("https://slack.com/api/users.info")));
+await db.deleteSlackInstall("T-auth");
+await db.deleteInstallation(SLACK_AUTH_INSTALLATION);
+
+const LINEAR_AUTH_INSTALLATION = 8_100_000_000_002;
+await db.upsertInstallation({
+  installationId: LINEAR_AUTH_INSTALLATION,
+  githubAccount: "linear:Authentication Test",
+  datasetName: "linear-authentication-test",
+  cogneeApiKey: "linear-auth-key",
+});
+await db.linkTenant("linear", "L-auth", LINEAR_AUTH_INSTALLATION);
+await db.storeLinearInstall("L-auth", { accessToken: "linear-app-install-token" });
+const linearAuthWorkspace = await db.getWorkspaceByInstallation(LINEAR_AUTH_INSTALLATION);
+const linearStartResponse = new MockResponse();
+auth.handleLinearAuthStart({ headers: { host: "127.0.0.1:3000" } }, linearStartResponse);
+const linearAuthorize = new URL(linearStartResponse.headers.get("location"));
+const linearState = linearAuthorize.searchParams.get("state") ?? "";
+const linearNonceCookie = linearStartResponse.headers.get("set-cookie").split(";")[0];
+let linearVerifier = "";
+globalThis.fetch = async (input, init) => {
+  const url = input instanceof Request ? input.url : String(input);
+  if (url === "https://api.linear.app/oauth/token") {
+    const body = new URLSearchParams(String(init?.body ?? ""));
+    linearVerifier = body.get("code_verifier") ?? "";
+    return Response.json({ access_token: "linear-dashboard-test" });
+  }
+  if (url === "https://api.linear.app/graphql") {
+    return Response.json({
+      data: {
+        viewer: {
+          id: "linear-owner",
+          name: "Linear Owner",
+          email: "linear-owner@example.com",
+          avatarUrl: "https://example.com/linear-owner.png",
+          active: true,
+          app: false,
+          admin: true,
+          owner: true,
+          organization: { id: "L-auth", name: "Linear Authentication Test" },
+        },
+      },
+    });
+  }
+  throw new Error(`unexpected authentication request: ${url}`);
+};
+try {
+  const linearResponse = new MockResponse();
+  await auth.handleLinearAuthCallback({
+    url: `/v1/auth/linear/callback?code=linear-code&state=${encodeURIComponent(linearState)}`,
+    headers: { host: "127.0.0.1:3000", cookie: linearNonceCookie },
+  }, linearResponse);
+  eq("Linear callback redirects to the dashboard", linearResponse.status, 302);
+  const linearSessionCookie = responseSessionCookie(linearResponse);
+  const linearSession = auth.sessionFrom({ headers: { cookie: linearSessionCookie } });
+  eq("Linear session records its identity provider", linearSession?.provider, "linear");
+  const linearAuthUser = await enterprise.getUserByIdentity("linear_user", "L-auth:linear-owner");
+  const linearAccess = linearAuthUser && linearAuthWorkspace
+    ? await enterprise.getWorkspaceAccess(linearAuthUser.userId, linearAuthWorkspace.workspaceId)
+    : null;
+  eq("verified Linear owner claims an unowned Linear workspace", linearAccess?.membership.role, "owner");
+  ok("Linear dashboard access token is not persisted in the install", !JSON.stringify(await db.fetchLinearInstall("L-auth")).includes("linear-dashboard-test"));
+} finally {
+  globalThis.fetch = originalFetch;
+}
+ok("Linear callback exchanges a PKCE verifier", /^[A-Za-z0-9_-]{43}$/.test(linearVerifier));
+const expectedLinearChallenge = createHash("sha256").update(linearVerifier).digest("base64url");
+eq("Linear PKCE challenge matches the callback verifier", linearAuthorize.searchParams.get("code_challenge"), expectedLinearChallenge);
+await db.deleteLinearInstall("L-auth");
+await db.deleteInstallation(LINEAR_AUTH_INSTALLATION);
 eq("active owner count", await enterprise.countActiveOwners(workspace.workspaceId), 1);
 eq(
   "the last active owner cannot be suspended",

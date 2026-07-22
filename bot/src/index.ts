@@ -7,7 +7,18 @@ import * as cognee from "./cognee.js";
 import { startQueue } from "./worker.js";
 import { QUEUE, safeJobError } from "./queues.js";
 import { handlePreflight, handleIssueKey, handleMetrics, handleGraph } from "./preflight.js";
-import { handleAuthStart, handleAuthCallback, handleLogout, handleMe, send } from "./auth.js";
+import {
+  handleAuthCallback,
+  handleAuthProviders,
+  handleAuthStart,
+  handleLinearAuthCallback,
+  handleLinearAuthStart,
+  handleLogout,
+  handleMe,
+  handleSlackAuthCallback,
+  handleSlackAuthStart,
+  send,
+} from "./auth.js";
 import { handleDash } from "./dash.js";
 import { forgetTenant } from "./lifecycle.js";
 import { DECISION_OWL, ONTOLOGY_KEY, ONTOLOGY_FILENAME } from "./ontology.js";
@@ -166,14 +177,34 @@ async function main() {
       handleAuthStart(req, res);
       return;
     }
-    if (req.method === "GET" && pathname === "/v1/auth/callback") {
+    if (req.method === "GET" && (pathname === "/v1/auth/callback" || pathname === "/v1/auth/github/callback")) {
       void handleAuthCallback(req, res).catch((e) => {
         failRequest(res, "auth callback failed", e);
       });
       return;
     }
+    if (req.method === "GET" && pathname === "/v1/auth/slack") {
+      handleSlackAuthStart(req, res);
+      return;
+    }
+    if (req.method === "GET" && pathname === "/v1/auth/slack/callback") {
+      void handleSlackAuthCallback(req, res).catch((error) => failRequest(res, "Slack auth callback failed", error));
+      return;
+    }
+    if (req.method === "GET" && pathname === "/v1/auth/linear") {
+      handleLinearAuthStart(req, res);
+      return;
+    }
+    if (req.method === "GET" && pathname === "/v1/auth/linear/callback") {
+      void handleLinearAuthCallback(req, res).catch((error) => failRequest(res, "Linear auth callback failed", error));
+      return;
+    }
+    if (req.method === "GET" && pathname === "/v1/auth/providers") {
+      handleAuthProviders(res);
+      return;
+    }
     if (pathname === "/v1/auth/logout") {
-      handleLogout(res);
+      handleLogout(req, res);
       return;
     }
     if (req.method === "GET" && pathname === "/v1/me") {

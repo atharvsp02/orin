@@ -36,6 +36,14 @@ export const config = {
     clientId: process.env.GITHUB_OAUTH_CLIENT_ID,
     clientSecret: process.env.GITHUB_OAUTH_CLIENT_SECRET,
   },
+  slackAuth: {
+    clientId: process.env.SLACK_CLIENT_ID,
+    clientSecret: process.env.SLACK_CLIENT_SECRET,
+  },
+  linearAuth: {
+    clientId: process.env.LINEAR_CLIENT_ID,
+    clientSecret: process.env.LINEAR_CLIENT_SECRET,
+  },
   googleDrive: {
     clientId: process.env.GOOGLE_DRIVE_CLIENT_ID,
     clientSecret: process.env.GOOGLE_DRIVE_CLIENT_SECRET,

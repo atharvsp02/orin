@@ -1,8 +1,6 @@
-// Dashboard sign-in: GitHub OAuth (the App's own OAuth credentials), no passwords.
-// GitHub is the source of truth for authorization: after login we ask which installations of
-// THIS App the user can access, and that list (in a signed cookie) is all they can see.
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { createRemoteJWKSet, customFetch, jwtVerify } from "jose";
 import { can, canPotentially, WORKSPACE_PERMISSIONS } from "./access.js";
 import { config } from "./config.js";
 import * as db from "./db.js";
@@ -11,12 +9,18 @@ import * as enterprise from "./enterprise-db.js";
 const COOKIE = "orin_session";
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const key = () => createHash("sha256").update(`${config.secret}:session`).digest();
+const slackJwks = createRemoteJWKSet(new URL("https://slack.com/openid/connect/keys"), {
+  [customFetch]: (...args) => fetch(...args),
+});
+
+export type AuthProvider = "github" | "slack" | "linear";
 
 export interface Session {
   userId?: string;
+  provider?: AuthProvider;
   login: string;
   avatar: string;
-  ids: number[]; // installation ids this user administers
+  ids: number[];
   exp: number;
 }
 
@@ -38,6 +42,25 @@ interface GitHubInstallation {
 interface GitHubOrganizationMembership {
   state?: string;
   role?: string;
+}
+
+export interface SlackOpenIdIdentity {
+  teamId: string;
+  userId: string;
+  name: string;
+  email: string;
+  picture: string;
+}
+
+export interface LinearViewerIdentity {
+  organizationId: string;
+  organizationName: string;
+  userId: string;
+  name: string;
+  email: string;
+  avatarUrl: string;
+  admin: boolean;
+  owner: boolean;
 }
 
 export async function fetchGitHubInstallations(
@@ -97,15 +120,26 @@ export function sessionFrom(req: IncomingMessage): Session | null {
   if (expected.length !== got.length || !timingSafeEqual(expected, got)) return null;
   try {
     const s = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as Session;
-    if (!s.exp || Date.now() > s.exp) return null;
+    if (!s.exp || Date.now() > s.exp || !Array.isArray(s.ids) || typeof s.login !== "string" || typeof s.avatar !== "string") return null;
+    if (s.provider && !["github", "slack", "linear"].includes(s.provider)) return null;
     return s;
   } catch {
     return null;
   }
 }
 
-function setCookie(res: ServerResponse, value: string, maxAgeSec: number): void {
-  res.setHeader("Set-Cookie", `${COOKIE}=${value}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAgeSec}`);
+function cookieHeader(
+  req: IncomingMessage,
+  name: string,
+  value: string,
+  maxAgeSec: number,
+): string {
+  const secure = requestOrigin(req).startsWith("https://") ? "; Secure" : "";
+  return `${name}=${value}; Path=/; HttpOnly${secure}; SameSite=Lax; Max-Age=${maxAgeSec}`;
+}
+
+function setCookie(req: IncomingMessage, res: ServerResponse, value: string, maxAgeSec: number): void {
+  res.setHeader("Set-Cookie", cookieHeader(req, COOKIE, value, maxAgeSec));
 }
 
 export function send(res: ServerResponse, status: number, body: unknown): void {
@@ -122,24 +156,44 @@ export function send(res: ServerResponse, status: number, body: unknown): void {
 // CSRF state bound to THIS browser: a nonce lives in a short-lived cookie AND inside the signed
 // state. The callback only accepts a state whose nonce matches the cookie, so an attacker cannot
 // log a victim into the attacker's account by handing them a foreign callback URL (login CSRF).
-const NONCE_COOKIE = "orin_oauth";
-const mintState = (nonce: string) => {
-  const ts = String(Date.now());
-  return `${ts}.${nonce}.${sign(`${ts}.${nonce}`)}`;
+const nonceCookie = (provider: AuthProvider) => `orin_oauth_${provider}`;
+
+export const mintOAuthState = (provider: AuthProvider, nonce: string, now = Date.now()) => {
+  const ts = String(now);
+  return `${ts}.${provider}.${nonce}.${sign(`${ts}.${provider}.${nonce}`)}`;
 };
-const checkState = (req: IncomingMessage, state: string): boolean => {
-  const [ts, nonce, mac] = state.split(".");
-  if (!ts || !nonce || !mac) return false;
-  const a = Buffer.from(sign(`${ts}.${nonce}`));
+
+export const checkOAuthState = (
+  req: IncomingMessage,
+  state: string,
+  provider: AuthProvider,
+  now = Date.now(),
+): boolean => {
+  const [ts, stateProvider, nonce, mac] = state.split(".");
+  if (!ts || stateProvider !== provider || !nonce || !mac) return false;
+  const a = Buffer.from(sign(`${ts}.${provider}.${nonce}`));
   const b = Buffer.from(mac);
   if (a.length !== b.length || !timingSafeEqual(a, b)) return false;
-  if (Date.now() - Number(ts) >= 15 * 60_000) return false;
-  const m = (req.headers.cookie ?? "").match(new RegExp(`(?:^|;\\s*)${NONCE_COOKIE}=([^;]+)`));
+  const issuedAt = Number(ts);
+  if (!Number.isFinite(issuedAt) || issuedAt > now || now - issuedAt >= 15 * 60_000) return false;
+  const m = (req.headers.cookie ?? "").match(new RegExp(`(?:^|;\\s*)${nonceCookie(provider)}=([^;]+)`));
   const cookieNonce = m?.[1] ?? "";
   const cn = Buffer.from(cookieNonce);
   const n = Buffer.from(nonce);
   return cn.length === n.length && cn.length > 0 && timingSafeEqual(cn, n);
 };
+
+function oauthStateNonce(state: string): string {
+  return state.split(".")[2] ?? "";
+}
+
+function linearCodeVerifier(nonce: string): string {
+  return sign(`linear-pkce.${nonce}`);
+}
+
+function linearCodeChallenge(nonce: string): string {
+  return b64u(createHash("sha256").update(linearCodeVerifier(nonce)).digest());
+}
 
 // Origin that served the request, used to build the OAuth redirect_uri and callback.
 export function requestOrigin(req: IncomingMessage): string {
@@ -169,27 +223,135 @@ export function hasTrustedMutationOrigin(req: IncomingMessage): boolean {
   return Boolean(origin) && originsMatch(origin, requestOrigin(req));
 }
 
-const oauthConfigured = () => Boolean(config.oauth.clientId && config.oauth.clientSecret);
+function recordValue(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
 
-/** GET /v1/auth/github — start the sign-in flow. */
-export function handleAuthStart(req: IncomingMessage, res: ServerResponse): void {
-  if (!oauthConfigured()) return send(res, 404, { error: "sign-in not configured" });
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+export function normalizeSlackOpenIdIdentity(value: unknown): SlackOpenIdIdentity | null {
+  const profile = recordValue(value);
+  if (!profile || profile.ok !== true || profile.email_verified !== true) return null;
+  const teamId = stringValue(profile["https://slack.com/team_id"]);
+  const userId = stringValue(profile["https://slack.com/user_id"]);
+  const email = stringValue(profile.email).toLowerCase();
+  const name = stringValue(profile.name) || stringValue(profile.preferred_username) || email.split("@")[0];
+  if (!teamId || !userId || !email.includes("@")) return null;
+  return { teamId, userId, email, name, picture: stringValue(profile.picture) };
+}
+
+export function normalizeLinearViewerIdentity(value: unknown): LinearViewerIdentity | null {
+  const response = recordValue(value);
+  const data = recordValue(response?.data);
+  const viewer = recordValue(data?.viewer);
+  const organization = recordValue(viewer?.organization);
+  const organizationId = stringValue(organization?.id);
+  const userId = stringValue(viewer?.id);
+  const email = stringValue(viewer?.email).toLowerCase();
+  const name = stringValue(viewer?.name) || stringValue(viewer?.displayName) || email.split("@")[0];
+  if (!organizationId || !userId || !email.includes("@") || viewer?.active !== true || viewer?.app === true) return null;
+  return {
+    organizationId,
+    organizationName: stringValue(organization?.name) || organizationId,
+    userId,
+    name,
+    email,
+    avatarUrl: stringValue(viewer?.avatarUrl),
+    admin: viewer?.admin === true,
+    owner: viewer?.owner === true,
+  };
+}
+
+export function slackAdminEligible(value: unknown, userId: string, email: string): boolean {
+  const response = recordValue(value);
+  const user = recordValue(response?.user);
+  const profile = recordValue(user?.profile);
+  return response?.ok === true && stringValue(user?.id) === userId && user?.deleted !== true && user?.is_bot !== true &&
+    (user?.is_admin === true || user?.is_owner === true || user?.is_primary_owner === true) &&
+    stringValue(profile?.email).toLowerCase() === email.toLowerCase();
+}
+
+async function slackIdTokenIsValid(token: string, nonce: string): Promise<boolean> {
+  try {
+    const { payload } = await jwtVerify(token, slackJwks, {
+      issuer: "https://slack.com",
+      audience: config.slackAuth.clientId,
+    });
+    return typeof payload.nonce === "string" && payload.nonce === nonce;
+  } catch {
+    return false;
+  }
+}
+
+function beginOAuth(req: IncomingMessage, res: ServerResponse, provider: AuthProvider): { nonce: string; state: string } {
   const nonce = randomBytes(16).toString("base64url");
+  res.setHeader("Set-Cookie", cookieHeader(req, nonceCookie(provider), nonce, 900));
+  return { nonce, state: mintOAuthState(provider, nonce) };
+}
+
+function finishSignIn(
+  req: IncomingMessage,
+  res: ServerResponse,
+  input: { provider: AuthProvider; user: enterprise.OrinUser; login: string; avatar: string; ids?: number[] },
+): void {
+  const session: Session = {
+    userId: input.user.userId,
+    provider: input.provider,
+    login: input.login,
+    avatar: input.avatar,
+    ids: input.ids ?? [],
+    exp: Date.now() + SESSION_TTL_MS,
+  };
+  res.setHeader("Set-Cookie", [
+    cookieHeader(req, COOKIE, encodeSession(session), SESSION_TTL_MS / 1000),
+    cookieHeader(req, nonceCookie(input.provider), "", 0),
+  ]);
+  res.writeHead(302, { Location: "/dashboard", "Cache-Control": "private, no-store, max-age=0" }).end();
+}
+
+async function providerOwnedWorkspaceId(provider: "slack" | "linear", externalId: string): Promise<string | null> {
+  const connector = await db.getConnector(provider, externalId);
+  if (!connector || connector.status !== "active") return null;
+  const workspace = await db.getWorkspace(connector.workspaceId);
+  if (workspace?.legacyInstallationId === undefined) return null;
+  const installation = await db.getInstallation(workspace.legacyInstallationId);
+  return installation?.githubAccount.toLowerCase().startsWith(`${provider}:`) ? workspace.workspaceId : null;
+}
+
+const githubOauthConfigured = () => Boolean(config.oauth.clientId && config.oauth.clientSecret);
+const slackOauthConfigured = () => Boolean(config.slackAuth.clientId && config.slackAuth.clientSecret);
+const linearOauthConfigured = () => Boolean(config.linearAuth.clientId && config.linearAuth.clientSecret);
+
+export function handleAuthProviders(res: ServerResponse): void {
+  send(res, 200, {
+    providers: {
+      github: githubOauthConfigured(),
+      slack: slackOauthConfigured(),
+      linear: linearOauthConfigured(),
+    },
+  });
+}
+
+export function handleAuthStart(req: IncomingMessage, res: ServerResponse): void {
+  if (!githubOauthConfigured()) return send(res, 404, { error: "sign-in not configured" });
+  const { state } = beginOAuth(req, res, "github");
   const u = new URL("https://github.com/login/oauth/authorize");
   u.searchParams.set("client_id", config.oauth.clientId as string);
   u.searchParams.set("redirect_uri", `${requestOrigin(req)}/v1/auth/callback`);
-  u.searchParams.set("state", mintState(nonce));
-  res.setHeader("Set-Cookie", `${NONCE_COOKIE}=${nonce}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=900`);
+  u.searchParams.set("state", state);
   res.writeHead(302, { Location: u.toString(), "Cache-Control": "private, no-store, max-age=0" }).end();
 }
 
-/** GET /v1/auth/callback?code&state — exchange, identify, authorize, set session. */
 export async function handleAuthCallback(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  if (!oauthConfigured()) return send(res, 404, { error: "sign-in not configured" });
+  if (!githubOauthConfigured()) return send(res, 404, { error: "sign-in not configured" });
   const url = new URL(req.url ?? "/", "https://localhost");
   const code = url.searchParams.get("code") ?? "";
   const state = url.searchParams.get("state") ?? "";
-  if (!code || !checkState(req, state)) return send(res, 400, { error: "invalid or expired sign-in link" });
+  if (!code || !checkOAuthState(req, state, "github")) return send(res, 400, { error: "invalid or expired sign-in link" });
 
   const tokenRes = await fetch("https://github.com/login/oauth/access_token", {
     method: "POST",
@@ -255,7 +417,9 @@ export async function handleAuthCallback(req: IncomingMessage, res: ServerRespon
     displayName: user.name?.trim() || user.login,
     email: verifiedEmail,
     avatarUrl: user.avatar_url,
+    reactivate: false,
   });
+  if (orinUser.status !== "active") return send(res, 403, { error: "account is inactive" });
   await enterprise.addUserIdentity(orinUser.userId, {
     provider: "github_login",
     externalId: user.login.toLowerCase(),
@@ -263,24 +427,189 @@ export async function handleAuthCallback(req: IncomingMessage, res: ServerRespon
     email: verifiedEmail,
   });
   await bootstrapSessionMemberships(ids, orinUser.userId);
-  const session: Session = {
-    userId: orinUser.userId,
+  finishSignIn(req, res, {
+    provider: "github",
+    user: orinUser,
     login: user.login,
     avatar: user.avatar_url ?? "",
     ids,
-    exp: Date.now() + SESSION_TTL_MS,
-  };
-  res.setHeader("Set-Cookie", [
-    `${COOKIE}=${encodeSession(session)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_TTL_MS / 1000}`,
-    `${NONCE_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`,
-  ]);
-  // no-store so a CDN never caches this Set-Cookie response and hands one user's session to another.
-  res.writeHead(302, { Location: "/dashboard", "Cache-Control": "private, no-store, max-age=0" }).end();
+  });
 }
 
-/** GET/POST /v1/auth/logout — clear the session. */
-export function handleLogout(res: ServerResponse): void {
-  setCookie(res, "", 0);
+export function handleSlackAuthStart(req: IncomingMessage, res: ServerResponse): void {
+  if (!slackOauthConfigured()) return send(res, 404, { error: "Slack sign-in is not configured" });
+  const { nonce, state } = beginOAuth(req, res, "slack");
+  const redirectUri = `${requestOrigin(req)}/v1/auth/slack/callback`;
+  const authorize = new URL("https://slack.com/openid/connect/authorize");
+  authorize.searchParams.set("response_type", "code");
+  authorize.searchParams.set("scope", "openid profile email");
+  authorize.searchParams.set("client_id", config.slackAuth.clientId as string);
+  authorize.searchParams.set("redirect_uri", redirectUri);
+  authorize.searchParams.set("state", state);
+  authorize.searchParams.set("nonce", nonce);
+  res.writeHead(302, { Location: authorize.toString(), "Cache-Control": "private, no-store, max-age=0" }).end();
+}
+
+async function slackIdentityIsAdmin(identity: SlackOpenIdIdentity): Promise<boolean> {
+  const installation = recordValue(await db.fetchSlackInstall(identity.teamId));
+  const bot = recordValue(installation?.bot);
+  const token = stringValue(bot?.token);
+  if (!token) return false;
+  try {
+    const url = new URL("https://slack.com/api/users.info");
+    url.searchParams.set("user", identity.userId);
+    const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    return response.ok && slackAdminEligible(await response.json(), identity.userId, identity.email);
+  } catch {
+    return false;
+  }
+}
+
+export async function handleSlackAuthCallback(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  if (!slackOauthConfigured()) return send(res, 404, { error: "Slack sign-in is not configured" });
+  const url = new URL(req.url ?? "/", "https://localhost");
+  const code = url.searchParams.get("code") ?? "";
+  const state = url.searchParams.get("state") ?? "";
+  if (!code || !checkOAuthState(req, state, "slack")) return send(res, 400, { error: "invalid or expired sign-in link" });
+  const redirectUri = `${requestOrigin(req)}/v1/auth/slack/callback`;
+  const tokenResponse = await fetch("https://slack.com/api/openid.connect.token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: config.slackAuth.clientId as string,
+      client_secret: config.slackAuth.clientSecret as string,
+      code,
+      redirect_uri: redirectUri,
+    }),
+  });
+  const tokenBody = tokenResponse.ok ? recordValue(await tokenResponse.json()) : null;
+  const accessToken = stringValue(tokenBody?.access_token);
+  const idToken = stringValue(tokenBody?.id_token);
+  if (!accessToken || !idToken || tokenBody?.ok !== true) return send(res, 502, { error: "Slack token exchange failed" });
+  if (!await slackIdTokenIsValid(idToken, oauthStateNonce(state))) {
+    return send(res, 403, { error: "Slack identity token validation failed" });
+  }
+  const profileResponse = await fetch("https://slack.com/api/openid.connect.userInfo", {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const identity = profileResponse.ok ? normalizeSlackOpenIdIdentity(await profileResponse.json()) : null;
+  if (!identity) return send(res, 403, { error: "Slack did not return a verified identity" });
+  const user = await enterprise.upsertUserIdentity({
+    provider: "slack_user",
+    externalId: `${identity.teamId}:${identity.userId}`,
+    handle: identity.userId,
+    displayName: identity.name,
+    email: identity.email,
+    avatarUrl: identity.picture,
+    reactivate: false,
+  });
+  if (user.status !== "active") return send(res, 403, { error: "account is inactive" });
+  const workspaceId = await providerOwnedWorkspaceId("slack", identity.teamId);
+  if (workspaceId && await slackIdentityIsAdmin(identity)) {
+    const membership = await enterprise.claimUnownedWorkspace(user.userId, workspaceId);
+    if (membership) {
+      await enterprise.recordAuditEvent({
+        workspaceId,
+        actorUserId: user.userId,
+        action: "membership.claimed",
+        targetType: "user",
+        targetId: user.userId,
+        details: { provider: "slack", role: membership.role },
+      });
+    }
+  }
+  finishSignIn(req, res, {
+    provider: "slack",
+    user,
+    login: identity.name,
+    avatar: identity.picture,
+  });
+}
+
+export function handleLinearAuthStart(req: IncomingMessage, res: ServerResponse): void {
+  if (!linearOauthConfigured()) return send(res, 404, { error: "Linear sign-in is not configured" });
+  const { nonce, state } = beginOAuth(req, res, "linear");
+  const authorize = new URL("https://linear.app/oauth/authorize");
+  authorize.searchParams.set("response_type", "code");
+  authorize.searchParams.set("client_id", config.linearAuth.clientId as string);
+  authorize.searchParams.set("redirect_uri", `${requestOrigin(req)}/v1/auth/linear/callback`);
+  authorize.searchParams.set("scope", "read");
+  authorize.searchParams.set("actor", "user");
+  authorize.searchParams.set("prompt", "consent");
+  authorize.searchParams.set("state", state);
+  authorize.searchParams.set("code_challenge", linearCodeChallenge(nonce));
+  authorize.searchParams.set("code_challenge_method", "S256");
+  res.writeHead(302, { Location: authorize.toString(), "Cache-Control": "private, no-store, max-age=0" }).end();
+}
+
+export async function handleLinearAuthCallback(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  if (!linearOauthConfigured()) return send(res, 404, { error: "Linear sign-in is not configured" });
+  const url = new URL(req.url ?? "/", "https://localhost");
+  const code = url.searchParams.get("code") ?? "";
+  const state = url.searchParams.get("state") ?? "";
+  if (!code || !checkOAuthState(req, state, "linear")) return send(res, 400, { error: "invalid or expired sign-in link" });
+  const redirectUri = `${requestOrigin(req)}/v1/auth/linear/callback`;
+  const tokenResponse = await fetch("https://api.linear.app/oauth/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "authorization_code",
+      code,
+      redirect_uri: redirectUri,
+      client_id: config.linearAuth.clientId as string,
+      client_secret: config.linearAuth.clientSecret as string,
+      code_verifier: linearCodeVerifier(oauthStateNonce(state)),
+    }),
+  });
+  const tokenBody = tokenResponse.ok ? recordValue(await tokenResponse.json()) : null;
+  const accessToken = stringValue(tokenBody?.access_token);
+  if (!accessToken) return send(res, 502, { error: "Linear token exchange failed" });
+  const viewerResponse = await fetch("https://api.linear.app/graphql", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      query: "query OrinDashboardViewer { viewer { id name displayName email avatarUrl active app admin owner organization { id name } } }",
+    }),
+  });
+  const identity = viewerResponse.ok ? normalizeLinearViewerIdentity(await viewerResponse.json()) : null;
+  if (!identity) return send(res, 403, { error: "Linear did not return an active user identity" });
+  const user = await enterprise.upsertUserIdentity({
+    provider: "linear_user",
+    externalId: `${identity.organizationId}:${identity.userId}`,
+    handle: identity.userId,
+    displayName: identity.name,
+    email: identity.email,
+    avatarUrl: identity.avatarUrl,
+    reactivate: false,
+  });
+  if (user.status !== "active") return send(res, 403, { error: "account is inactive" });
+  const workspaceId = await providerOwnedWorkspaceId("linear", identity.organizationId);
+  if (workspaceId && (identity.owner || identity.admin)) {
+    const membership = await enterprise.claimUnownedWorkspace(user.userId, workspaceId);
+    if (membership) {
+      await enterprise.recordAuditEvent({
+        workspaceId,
+        actorUserId: user.userId,
+        action: "membership.claimed",
+        targetType: "user",
+        targetId: user.userId,
+        details: { provider: "linear", role: membership.role },
+      });
+    }
+  }
+  finishSignIn(req, res, {
+    provider: "linear",
+    user,
+    login: identity.name,
+    avatar: identity.avatarUrl,
+  });
+}
+
+export function handleLogout(req: IncomingMessage, res: ServerResponse): void {
+  setCookie(req, res, "", 0);
   res.writeHead(302, { Location: "/", "Cache-Control": "private, no-store, max-age=0" }).end();
 }
 
@@ -298,19 +627,23 @@ export async function authenticatedUser(req: IncomingMessage): Promise<{
   const session = sessionFrom(req);
   if (!session) return null;
   let user = session.userId ? await enterprise.getUser(session.userId) : null;
-  user ??= await enterprise.getUserByIdentity("github_login", session.login.toLowerCase());
-  user ??= await enterprise.upsertUserIdentity({
-    provider: "github_login",
-    externalId: session.login.toLowerCase(),
-    handle: session.login,
-    displayName: session.login,
-    avatarUrl: session.avatar,
-  });
+  const provider = session.provider ?? "github";
+  if (!user && provider === "github") {
+    user = await enterprise.getUserByIdentity("github_login", session.login.toLowerCase());
+    user ??= await enterprise.upsertUserIdentity({
+      provider: "github_login",
+      externalId: session.login.toLowerCase(),
+      handle: session.login,
+      displayName: session.login,
+      avatarUrl: session.avatar,
+      reactivate: false,
+    });
+  }
+  if (!user) return null;
   if (user.status !== "active") return null;
   return { session, user };
 }
 
-/** GET /v1/me — who am I + which installations I can see (enriched from our DB). */
 export async function handleMe(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const auth = await authenticatedUser(req);
   if (!auth) return send(res, 401, { error: "not signed in" });
@@ -368,6 +701,7 @@ export async function handleMe(req: IncomingMessage, res: ServerResponse): Promi
   }));
   send(res, 200, {
     userId: user.userId,
+    provider: s.provider ?? "github",
     login: s.login,
     displayName: user.displayName,
     email: user.primaryEmail,
