@@ -486,6 +486,52 @@ function featureAuthorizationSql(permissionParameter: string, connector: string,
   )`;
 }
 
+function connectorContentPolicySql(connector: string, item: string, resource: string): string {
+  const actual = `(CASE policy.field
+    WHEN 'provider' THEN ${connector}.provider
+    WHEN 'resourceId' THEN COALESCE(${resource}.external_id, '')
+    WHEN 'owner' THEN ${item}.owner_key
+    WHEN 'mimeType' THEN ${item}.mime_type
+    WHEN 'path' THEN ${item}.source_path
+    WHEN 'sourceType' THEN ${item}.source_type
+    ELSE '' END)`;
+  const matches = `(CASE policy.operator
+    WHEN 'equals' THEN EXISTS (
+      SELECT 1 FROM unnest(policy.values) AS expected(value)
+      WHERE lower(${actual}) = lower(expected.value)
+    )
+    WHEN 'one_of' THEN EXISTS (
+      SELECT 1 FROM unnest(policy.values) AS expected(value)
+      WHERE lower(${actual}) = lower(expected.value)
+    )
+    WHEN 'contains' THEN EXISTS (
+      SELECT 1 FROM unnest(policy.values) AS expected(value)
+      WHERE position(lower(expected.value) in lower(${actual})) > 0
+    )
+    WHEN 'starts_with' THEN EXISTS (
+      SELECT 1 FROM unnest(policy.values) AS expected(value)
+      WHERE left(lower(${actual}), length(expected.value)) = lower(expected.value)
+    )
+    ELSE false END)`;
+  return `(
+    NOT EXISTS (
+      SELECT 1 FROM connector_policies policy
+      WHERE policy.workspace_id = ${item}.workspace_id AND policy.connector_id = ${connector}.connector_id AND policy.enabled = true
+        AND policy.effect = 'exclude' AND ${matches}
+    ) AND (
+      NOT EXISTS (
+        SELECT 1 FROM connector_policies policy
+        WHERE policy.workspace_id = ${item}.workspace_id AND policy.connector_id = ${connector}.connector_id AND policy.enabled = true
+          AND policy.effect = 'include'
+      ) OR EXISTS (
+        SELECT 1 FROM connector_policies policy
+        WHERE policy.workspace_id = ${item}.workspace_id AND policy.connector_id = ${connector}.connector_id AND policy.enabled = true
+          AND policy.effect = 'include' AND ${matches}
+      )
+    )
+  )`;
+}
+
 export async function authorizedSearch(input: {
   workspaceId: string;
   userId: string;
@@ -537,11 +583,12 @@ export async function authorizedSearch(input: {
        AND c.status = 'active'
        AND (i.resource_id IS NULL OR (
          r.enabled = true AND r.acl_status = 'current'
-         AND (c.provider <> 'slack' OR r.acl_synced_at > now() - interval '30 minutes')
+         AND (c.provider NOT IN ('slack', 'linear') OR r.acl_synced_at > now() - interval '30 minutes')
        ))
        AND ($4::text IS NULL OR c.provider = $4::text)
        AND ($5::uuid IS NULL OR i.resource_id = $5::uuid)
        AND ${featureAuthorizationSql("$8", "c", "i")}
+       AND ${connectorContentPolicySql("c", "i", "r")}
        AND (
          i.visibility = 'workspace' OR (
            i.visibility = 'restricted' AND i.acl_status = 'current' AND EXISTS (
@@ -613,9 +660,10 @@ export async function getAuthorizedItemsByIds(input: {
        AND c.status = 'active'
        AND (i.resource_id IS NULL OR (
          r.enabled = true AND r.acl_status = 'current'
-         AND (c.provider <> 'slack' OR r.acl_synced_at > now() - interval '30 minutes')
+         AND (c.provider NOT IN ('slack', 'linear') OR r.acl_synced_at > now() - interval '30 minutes')
        ))
        AND ${featureAuthorizationSql("$5", "c", "i")}
+       AND ${connectorContentPolicySql("c", "i", "r")}
        AND (
          i.visibility = 'workspace' OR (
            i.visibility = 'restricted' AND i.acl_status = 'current' AND EXISTS (

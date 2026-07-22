@@ -17,6 +17,9 @@ const db = await import(`${BOT}db.js`);
 const enterprise = await import(`${BOT}enterprise-db.js`);
 const contentDb = await import(`${BOT}content-db.js`);
 const slack = await import(`${BOT}slack.js`);
+const linearContent = await import(`${BOT}linear-content.js`);
+const linearAdapter = await import(`${BOT}linear.js`);
+const googleDrive = await import(`${BOT}google-drive.js`);
 const auth = await import(`${BOT}auth.js`);
 const { createHash } = await import("node:crypto");
 const { exportJWK, generateKeyPair, SignJWT } = await import("jose");
@@ -591,6 +594,7 @@ const ownerContent = await contentDb.upsertContentItem({
   sourceType: "document",
   title: "Owner compensation roadmap",
   body: "Private roadmap details for the owner only.",
+  ownerKey: "owner@example.com",
   visibility: "restricted",
   aclStatus: "current",
   acls: [{ principalType: "email", principalKey: "owner@example.com" }],
@@ -748,6 +752,32 @@ ok("connector policy includes an allowed drive", await contentDb.connectorConten
 ok("connector exclusion overrides inclusion", !(await contentDb.connectorContentAllowed(workspace.workspaceId, driveConnector.connectorId, {
   provider: "gdrive", resourceId: "shared-drive-1", owner: "", mimeType: "text/plain", path: "/engineering/private/payroll", sourceType: "document",
 })));
+const immediatePolicy = await contentDb.upsertConnectorPolicy({
+  workspaceId: workspace.workspaceId,
+  connectorId: driveConnector.connectorId,
+  effect: "exclude",
+  field: "owner",
+  operator: "equals",
+  values: ["OWNER@example.com"],
+});
+ok("new connector policy immediately filters search results", (await contentDb.authorizedSearch({
+  workspaceId: workspace.workspaceId,
+  userId: ownerUser.userId,
+  query: "compensation roadmap",
+  provider: "gdrive",
+})).length === 0);
+ok("new connector policy immediately filters citation rechecks", (await contentDb.getAuthorizedItemsByIds({
+  workspaceId: workspace.workspaceId,
+  userId: ownerUser.userId,
+  itemIds: [ownerContent.itemId],
+})).length === 0);
+await contentDb.deleteConnectorPolicy(workspace.workspaceId, immediatePolicy.policyId);
+ok("removing a connector policy restores retained authorized content", (await contentDb.authorizedSearch({
+  workspaceId: workspace.workspaceId,
+  userId: ownerUser.userId,
+  query: "compensation roadmap",
+  provider: "gdrive",
+})).length === 1);
 ok("connector policies list by workspace", (await contentDb.listConnectorPolicies(workspace.workspaceId)).length === 2);
 ok("connector policy can be deleted", await contentDb.deleteConnectorPolicy(workspace.workspaceId, excludePolicy.policyId));
 ok("other connector policy remains", (await contentDb.listConnectorPolicies(workspace.workspaceId)).some((policy) => policy.policyId === includePolicy.policyId));
@@ -1155,6 +1185,321 @@ ok("deleted Slack message is no longer searchable", (await contentDb.authorizedS
   query: "blue green",
   provider: "slack",
 })).length === 0);
+
+const linearConnector = await db.upsertConnector({
+  workspaceId: independentWorkspace.workspaceId,
+  provider: "linear",
+  externalId: "L-independent",
+  displayName: "Independent Linear",
+  capabilities: ["ingest", "query", "record", "warn", "deliver"],
+});
+const queuedConnectorSyncs = [];
+googleDrive.setGoogleDriveQueue({
+  async send(name, data) {
+    queuedConnectorSyncs.push({ name, data });
+    return "linear-sync-job";
+  },
+});
+const linearSyncResponse = new MockResponse();
+await googleDrive.handleWorkspaceGoogleDrive({
+  req: { method: "POST" },
+  res: linearSyncResponse,
+  workspaceId: independentWorkspace.workspaceId,
+  actorUserId: ownerUser.userId,
+  resource: "syncs",
+  sub: linearConnector.connectorId,
+});
+ok("dashboard manual sync queues the Linear connector", linearSyncResponse.status === 202
+  && queuedConnectorSyncs[0]?.name === "linear-sync"
+  && queuedConnectorSyncs[0]?.data.connectorId === linearConnector.connectorId);
+const linearGuest = await enterprise.inviteWorkspaceMember({
+  workspaceId: independentWorkspace.workspaceId,
+  email: "linear-guest@example.com",
+  role: "viewer",
+});
+const linearOwnerData = {
+  id: "LU-owner",
+  name: "Workspace Owner",
+  email: "owner@example.com",
+  active: true,
+  app: false,
+  canAccessAnyPublicTeam: true,
+};
+const linearSharedData = {
+  id: "LU-shared",
+  name: "Shared User",
+  email: "slack-outsider@example.com",
+  active: true,
+  app: false,
+  canAccessAnyPublicTeam: true,
+};
+const linearGuestData = {
+  id: "LU-guest",
+  name: "Linear Guest",
+  email: "linear-guest@example.com",
+  active: true,
+  app: false,
+  guest: true,
+  canAccessAnyPublicTeam: false,
+};
+const connection = (nodes) => ({
+  nodes,
+  pageInfo: { hasNextPage: false },
+  async fetchNext() { return this; },
+});
+let publicMembers = [linearOwnerData];
+const publicTeam = {
+  id: "LT-public",
+  key: "PUB",
+  name: "Public Team",
+  visibility: "public",
+  async members() { return connection(publicMembers); },
+};
+const privateTeam = {
+  id: "LT-private",
+  key: "PRI",
+  name: "Private Team",
+  visibility: "private",
+  async members() { return connection([linearOwnerData]); },
+};
+const restrictedTeam = {
+  id: "LT-restricted",
+  key: "RES",
+  name: "Restricted Team",
+  visibility: "restricted",
+  async members() { return connection([linearGuestData]); },
+};
+let activeTeam = publicTeam;
+let sharedUsers = [];
+let issueTitle = "Public deployment decision";
+let issueDescription = "Linear public alpha uses a canary release.";
+let issueComments = [
+  { id: "LC-1", body: "Comment beacon confirms the rollout.", userId: "LU-owner" },
+  { id: "LC-bot", body: "Bot poison must not enter search.", userId: "LU-app", botActor: { id: "app" } },
+];
+const issue = () => ({
+  id: "LI-1",
+  identifier: `${activeTeam.key}-1`,
+  title: issueTitle,
+  description: issueDescription,
+  url: "https://linear.app/example/issue/PUB-1",
+  creatorId: "LU-owner",
+  createdAt: "2026-01-01T00:00:00.000Z",
+  updatedAt: "2026-01-02T00:00:00.000Z",
+  team: Promise.resolve(activeTeam),
+  sharedAccess: { isShared: sharedUsers.length > 0, sharedWithUsers: sharedUsers },
+  async comments() { return connection(issueComments); },
+});
+let syncIssues = [issue()];
+const linearIssueQueries = [];
+const linearClient = {
+  async issue() { return issue(); },
+  async issues(input) {
+    linearIssueQueries.push(input);
+    return connection(syncIssues);
+  },
+  async users() { return connection([linearOwnerData, linearSharedData, linearGuestData]); },
+  async teams() { return connection([publicTeam, privateTeam, restrictedTeam]); },
+  async team(id) {
+    return [publicTeam, privateTeam, restrictedTeam].find((team) => team.id === id);
+  },
+};
+await linearContent.runLinearSync({
+  workspaceId: independentWorkspace.workspaceId,
+  connectorId: linearConnector.connectorId,
+}, linearClient);
+ok("scheduled Linear sync records a successful initial full run", (await contentDb.latestSuccessfulConnectorCursor(
+  linearConnector.connectorId,
+)).includes("lastFullAt"));
+await linearContent.runLinearSync({
+  workspaceId: independentWorkspace.workspaceId,
+  connectorId: linearConnector.connectorId,
+}, linearClient);
+ok("scheduled Linear incremental sync sends a typed updated-at filter", (
+  linearIssueQueries.at(-1)?.filter?.updatedAt?.gte instanceof Date
+));
+const cursorBeforePartial = await contentDb.latestSuccessfulConnectorCursor(linearConnector.connectorId);
+syncIssues = [{
+  ...issue(),
+  id: "LI-failed",
+  async comments() { throw new Error("temporary Linear read failure"); },
+}];
+await linearContent.runLinearSync({
+  workspaceId: independentWorkspace.workspaceId,
+  connectorId: linearConnector.connectorId,
+}, linearClient);
+const { rows: [partialLinearRun] } = await sql.query(
+  `SELECT status, cursor_value FROM connector_sync_runs WHERE connector_id = $1 ORDER BY started_at DESC LIMIT 1`,
+  [linearConnector.connectorId],
+);
+ok("partial Linear sync is recorded without advancing its cursor", partialLinearRun.status === "partial"
+  && partialLinearRun.cursor_value === cursorBeforePartial);
+syncIssues = [issue()];
+eq("Linear issue ingestion writes canonical permission-aware content", await linearContent.ingestLinearIssue(
+  "L-independent",
+  "LI-1",
+  linearClient,
+), "written");
+ok("Linear public team member can search an indexed issue", (await contentDb.authorizedSearch({
+  workspaceId: independentWorkspace.workspaceId,
+  userId: ownerUser.userId,
+  query: "public alpha",
+  provider: "linear",
+})).length === 1);
+ok("Linear comments are indexed with the issue", (await contentDb.authorizedSearch({
+  workspaceId: independentWorkspace.workspaceId,
+  userId: ownerUser.userId,
+  query: "comment beacon",
+  provider: "linear",
+})).length === 1);
+ok("Linear bot comments are excluded from indexed evidence", (await contentDb.authorizedSearch({
+  workspaceId: independentWorkspace.workspaceId,
+  userId: ownerUser.userId,
+  query: "bot poison",
+  provider: "linear",
+})).length === 0);
+ok("Linear guest outside a public team cannot search it", (await contentDb.authorizedSearch({
+  workspaceId: independentWorkspace.workspaceId,
+  userId: linearGuest.userId,
+  query: "public alpha",
+  provider: "linear",
+})).length === 0);
+publicMembers = [linearOwnerData, linearGuestData];
+await linearContent.runLinearSync({
+  workspaceId: independentWorkspace.workspaceId,
+  connectorId: linearConnector.connectorId,
+}, linearClient);
+ok("Linear explicit team membership grants a guest access", (await contentDb.authorizedSearch({
+  workspaceId: independentWorkspace.workspaceId,
+  userId: linearGuest.userId,
+  query: "public alpha",
+  provider: "linear",
+})).length === 1);
+activeTeam = privateTeam;
+sharedUsers = [linearSharedData];
+issueTitle = "Private launch decision";
+issueDescription = "Linear private beta uses a staged rollout.";
+issueComments = [];
+await linearContent.ingestLinearIssue("L-independent", "LI-1", linearClient);
+ok("moving a Linear issue removes access inherited from its former team", (await contentDb.authorizedSearch({
+  workspaceId: independentWorkspace.workspaceId,
+  userId: linearGuest.userId,
+  query: "private beta",
+  provider: "linear",
+})).length === 0);
+ok("an individually shared Linear user can search the shared issue", (await contentDb.authorizedSearch({
+  workspaceId: independentWorkspace.workspaceId,
+  userId: slackOutsider.userId,
+  query: "private beta",
+  provider: "linear",
+})).length === 1);
+activeTeam = restrictedTeam;
+sharedUsers = [];
+issueTitle = "Restricted launch decision";
+issueDescription = "Linear restricted gamma uses regional rollout controls.";
+await linearContent.ingestLinearIssue("L-independent", "LI-1", linearClient);
+ok("restricted Linear team membership grants access", (await contentDb.authorizedSearch({
+  workspaceId: independentWorkspace.workspaceId,
+  userId: linearGuest.userId,
+  query: "restricted gamma",
+  provider: "linear",
+})).length === 1);
+await linearAdapter.processLinearWebhook({
+  type: "PermissionChange",
+  action: "teamAccessChanged",
+  organizationId: "L-independent",
+  removedTeamIds: [restrictedTeam.id],
+});
+ok("Linear permission-change webhook immediately fails removed team access closed", (await contentDb.authorizedSearch({
+  workspaceId: independentWorkspace.workspaceId,
+  userId: linearGuest.userId,
+  query: "restricted gamma",
+  provider: "linear",
+})).length === 0);
+await linearContent.ingestLinearIssue("L-independent", "LI-1", linearClient);
+ok("moving an issue also revokes the former shared user's direct access", (await contentDb.authorizedSearch({
+  workspaceId: independentWorkspace.workspaceId,
+  userId: slackOutsider.userId,
+  query: "restricted gamma",
+  provider: "linear",
+})).length === 0);
+const restrictedResource = await db.getConnectorResource(linearConnector.connectorId, "team", restrictedTeam.id);
+await sql.query(
+  `UPDATE connector_resources SET acl_synced_at = now() - interval '31 minutes' WHERE resource_id = $1`,
+  [restrictedResource.resourceId],
+);
+ok("expired Linear team ACL synchronization fails closed", (await contentDb.authorizedSearch({
+  workspaceId: independentWorkspace.workspaceId,
+  userId: linearGuest.userId,
+  query: "restricted gamma",
+  provider: "linear",
+})).length === 0);
+await linearContent.ingestLinearIssue("L-independent", "LI-1", linearClient);
+eq("Linear deletion removes indexed issue content", await linearContent.deleteLinearIssue("L-independent", "LI-1"), true);
+ok("deleted Linear issue is no longer searchable", (await contentDb.authorizedSearch({
+  workspaceId: independentWorkspace.workspaceId,
+  userId: linearGuest.userId,
+  query: "restricted gamma",
+  provider: "linear",
+})).length === 0);
+await linearContent.ingestLinearIssue("L-independent", "LI-1", linearClient);
+await sql.query(
+  `UPDATE connector_sync_runs
+   SET cursor_value = $2
+   WHERE connector_id = $1 AND status IN ('succeeded', 'partial')`,
+  [linearConnector.connectorId, JSON.stringify({
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    lastFullAt: "2026-01-01T00:00:00.000Z",
+  })],
+);
+syncIssues = [];
+await linearContent.runLinearSync({
+  workspaceId: independentWorkspace.workspaceId,
+  connectorId: linearConnector.connectorId,
+}, linearClient);
+ok("scheduled Linear full sync reconciles issues no longer returned by Linear", (await contentDb.authorizedSearch({
+  workspaceId: independentWorkspace.workspaceId,
+  userId: linearGuest.userId,
+  query: "restricted gamma",
+  provider: "linear",
+})).length === 0);
+await db.storeLinearInstall("L-independent", {
+  accessToken: "expired-access",
+  refreshToken: "refresh-one",
+  expiresAt: "2026-01-01T00:00:00.000Z",
+});
+eq("Linear refresh rejects an incomplete token rotation", await linearContent.linearAccessToken(
+  "L-independent",
+  async () => Response.json({ access_token: "incomplete-access", expires_in: 3600 }),
+).then(() => "accepted", error => error.message), "Linear token refresh returned no refresh token");
+ok("failed Linear refresh keeps the previous credentials", (await db.fetchLinearInstall("L-independent")).accessToken === "expired-access");
+let refreshRequests = 0;
+const refreshedTokens = await Promise.all([1, 2].map(() => linearContent.linearAccessToken(
+  "L-independent",
+  async (_input, init) => {
+    refreshRequests += 1;
+    const body = new URLSearchParams(String(init.body));
+    ok("Linear refresh uses the refresh token grant", body.get("grant_type") === "refresh_token");
+    return Response.json({
+      access_token: "rotated-access",
+      refresh_token: "refresh-two",
+      expires_in: 3600,
+      scope: "read write",
+    });
+  },
+)));
+eq("concurrent Linear token refresh returns the rotated access token", refreshedTokens, ["rotated-access", "rotated-access"]);
+eq("Linear refresh token rotation is serialized", refreshRequests, 1);
+const rotatedInstall = await db.fetchLinearInstall("L-independent");
+ok("Linear refresh token and scopes rotate atomically", rotatedInstall.refreshToken === "refresh-two"
+  && rotatedInstall.scopes.join(",") === "read,write");
+await linearAdapter.processLinearWebhook({
+  type: "OAuthApp",
+  action: "revoked",
+  organizationId: "L-independent",
+});
+ok("Linear OAuth revocation deletes stored credentials", (await db.fetchLinearInstall("L-independent")) === null);
+ok("Linear OAuth revocation disables the connector", (await db.getConnector("linear", "L-independent"))?.status === "disabled");
 await db.deleteWorkspace(independentWorkspace.workspaceId);
 ok("workspace deletion cascades connectors", (await db.getConnector("slack", "T-independent")) === null);
 

@@ -11,8 +11,10 @@ import type { DeliveryRefs } from "./delivery.js";
 import type { TenantCredentials } from "./cognee.js";
 import type { DeliveryMode } from "./types.js";
 import type { CatchJob, CommandJob, IngestJob } from "./queues.js";
-import type { DriveSyncJob } from "./queues.js";
+import type { DriveSyncJob, LinearSyncJob, LinearWebhookJob } from "./queues.js";
 import { runGoogleDriveSync } from "./google-drive.js";
+import { runLinearSync } from "./linear-content.js";
+import { processLinearWebhook } from "./linear.js";
 import * as enterprise from "./enterprise-db.js";
 import * as content from "./content-db.js";
 
@@ -27,6 +29,8 @@ export async function startQueue(): Promise<PgBoss> {
   await boss.createQueue(QUEUE.command);
   await boss.createQueue(QUEUE.lifecycle);
   await boss.createQueue(QUEUE.driveSync);
+  await boss.createQueue(QUEUE.linearSync);
+  await boss.createQueue(QUEUE.linearWebhook);
   await boss.createQueue(QUEUE.connectorScheduler);
   await boss.work<IngestJob>(QUEUE.ingest, ingestWorker);
   await boss.work<CatchJob>(QUEUE.catch, { includeMetadata: true }, catchWorker);
@@ -34,6 +38,12 @@ export async function startQueue(): Promise<PgBoss> {
   await boss.work(QUEUE.lifecycle, () => runImprove());
   await boss.work<DriveSyncJob>(QUEUE.driveSync, async (jobs) => {
     for (const job of jobs) await runGoogleDriveSync(job.data);
+  });
+  await boss.work<LinearSyncJob>(QUEUE.linearSync, async (jobs) => {
+    for (const job of jobs) await runLinearSync(job.data);
+  });
+  await boss.work<LinearWebhookJob>(QUEUE.linearWebhook, async (jobs) => {
+    for (const job of jobs) await processLinearWebhook(job.data.webhook);
   });
   await boss.work(QUEUE.connectorScheduler, async () => {
     await enterprise.pruneExpiredRateLimits();
@@ -43,6 +53,18 @@ export async function startQueue(): Promise<PgBoss> {
         workspaceId: connector.workspaceId,
         connectorId: connector.connectorId,
       } satisfies DriveSyncJob, {
+        singletonKey: connector.connectorId,
+        singletonSeconds: 15 * 60,
+        retryLimit: 3,
+        retryDelay: 30,
+        retryBackoff: true,
+      });
+    }
+    for (const connector of await db.listActiveConnectorsByProvider("linear")) {
+      await boss.send(QUEUE.linearSync, {
+        workspaceId: connector.workspaceId,
+        connectorId: connector.connectorId,
+      } satisfies LinearSyncJob, {
         singletonKey: connector.connectorId,
         singletonSeconds: 15 * 60,
         retryLimit: 3,

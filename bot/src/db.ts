@@ -1149,6 +1149,33 @@ export async function fetchLinearInstall(id: string): Promise<unknown | null> {
   return rows[0] ? JSON.parse(decrypt(rows[0].data)) : null;
 }
 
+export async function mutateLinearInstall(
+  id: string,
+  update: (current: unknown) => Promise<unknown>,
+): Promise<unknown | null> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const { rows } = await client.query(`SELECT data FROM linear_installs WHERE id = $1 FOR UPDATE`, [id]);
+    if (!rows[0]) {
+      await client.query("COMMIT");
+      return null;
+    }
+    const next = await update(JSON.parse(decrypt(String(rows[0].data))));
+    await client.query(
+      `UPDATE linear_installs SET data = $2, updated_at = now() WHERE id = $1`,
+      [id, encrypt(JSON.stringify(next))],
+    );
+    await client.query("COMMIT");
+    return next;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function deleteLinearInstall(id: string): Promise<void> {
   await pool.query(`DELETE FROM linear_installs WHERE id = $1`, [id]);
 }

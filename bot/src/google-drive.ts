@@ -14,7 +14,7 @@ import {
 import type { ConnectorAccount } from "./connectors.js";
 import * as db from "./db.js";
 import * as enterprise from "./enterprise-db.js";
-import { QUEUE, safeJobError, type DriveSyncJob } from "./queues.js";
+import { QUEUE, safeJobError, type DriveSyncJob, type LinearSyncJob } from "./queues.js";
 
 const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.readonly";
 const MAX_DOWNLOAD_BYTES = 2_000_000;
@@ -686,25 +686,35 @@ export async function handleWorkspaceGoogleDrive(input: {
       return true;
     }
     const connector = await db.getConnectorById(workspaceId, sub);
-    if (!connector || connector.provider !== "gdrive") {
-      send(res, 404, { error: "Google Drive connector not found" });
+    if (!connector || !["gdrive", "linear"].includes(connector.provider)) {
+      send(res, 404, { error: "syncable connector not found" });
       return true;
     }
     if (!await connectorAllowed(connector, "connectors.manage")) return true;
     if (connector.status === "disabled") {
-      send(res, 409, { error: "enable the Google Drive connector before syncing" });
+      send(res, 409, { error: "enable the connector before syncing" });
       return true;
     }
     if (!queue) {
       send(res, 503, { error: "connector sync queue is unavailable" });
       return true;
     }
-    const jobId = await queue.send(QUEUE.driveSync, { workspaceId, connectorId: sub, actorUserId }, {
+    const queueName = connector.provider === "linear" ? QUEUE.linearSync : QUEUE.driveSync;
+    const job = { workspaceId, connectorId: sub, actorUserId } satisfies DriveSyncJob | LinearSyncJob;
+    const jobId = await queue.send(queueName, job, {
       singletonKey: sub,
       singletonSeconds: 60,
       retryLimit: 3,
       retryDelay: 30,
       retryBackoff: true,
+    });
+    await enterprise.recordAuditEvent({
+      workspaceId,
+      actorUserId,
+      action: "connector.sync_queued",
+      targetType: "connector",
+      targetId: connector.connectorId,
+      details: { provider: connector.provider },
     });
     send(res, 202, { accepted: true, jobId });
     return true;
