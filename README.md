@@ -98,7 +98,11 @@ Only a decision that is `rejected` and not superseded can block. Delivery is con
 
 ### Linear
 
-`bot/src/linear.ts` is a multi-workspace OAuth app. It answers `@Orin` agent-session mentions in issues with cited recalls, warns on issue creation when a new issue collides with a past decision, and supports the same `@Orin link` -> `@orinbot link CODE` flow to share a GitHub org's memory.
+`bot/src/linear.ts` and `bot/src/linear-content.ts` form a permission-aware Linear connector. OAuth installation uses browser-bound signed state and PKCE. Expiring access tokens and rotating refresh tokens are encrypted and refreshed atomically. Signed, fresh webhooks are durably queued before Orin acknowledges them, while a scheduled sync repairs missed events and refreshes source access.
+
+Issues and their human comments enter the canonical content index. Public teams include active workspace users who can access public teams plus explicit team members. Private and restricted teams include only their current members. Individually shared issues add only the users Linear reports on that issue. Disabled resources, failed ACL refreshes, and ACL snapshots older than 30 minutes fail closed.
+
+An active Orin member can mention `@Orin` in an issue for a cited answer from that same Linear team. Orin checks product permissions, Linear identity, team ACLs, content policies, and citations before replying. It does not post workspace knowledge into an individually shared issue. Current Linear and Orin administrators can create a one-time `@Orin link` code for approval by a GitHub organization owner.
 
 ### MCP and CI Pre-flight
 
@@ -131,7 +135,7 @@ Isolation is enforced by Cognee's backend access control: each install is a sepa
 | ------- | -------------- | --------- |
 | **GitHub App** | Required check / review / comment on PRs and issues; `@orinbot` commands | `bot/src/index.ts`, `commands.ts` |
 | **Slack** | `/why`, brain reaction to record, `@Orin` mentions | `bot/src/slack.ts` |
-| **Linear** | `@Orin` agent in issues, collision warnings on create | `bot/src/linear.ts` |
+| **Linear** | Permission-aware issue and comment sync; same-team `@Orin` answers | `bot/src/linear.ts`, `linear-content.ts` |
 | **MCP** | `why`, `check_rejected`, `record_decision` in Cursor / Claude Code / CLI | `bot/src/mcp.ts` |
 | **CI** | `POST /v1/preflight` via the "Orin Preflight" GitHub Action | `bot/src/preflight.ts`, `bot/action/action.yml` |
 | **Dashboard** | Catches, decisions, graph, rules, docs, keys, settings | `web/` |
@@ -178,13 +182,14 @@ orin/  (repo folder: codegaurd)
 ├── bot/                          GitHub App backend + adapters (Node + TypeScript, npm)
 │   ├── src/
 │   │   ├── index.ts              webhook + HTTP server, event -> queue fan-out
-│   │   ├── worker.ts             pg-boss workers: ingest / catch / command / lifecycle
+│   │   ├── worker.ts             pg-boss workers: GitHub, Drive, Linear, and lifecycle jobs
 │   │   ├── pipeline.ts           ingest + the precision catch (grounding + semantic gates)
 │   │   ├── cognee.ts             Cognee REST client (remember/recall/improve/forget, EBAC)
 │   │   ├── llm.ts                DeepSeek extraction + judgment (@ai-sdk)
 │   │   ├── ontology.ts           the OWL decision ontology that grounds extraction
 │   │   ├── commands.ts           @orinbot command parser + handlers
-│   │   ├── slack.ts / linear.ts  the two chat/PM adapters (Bolt / Linear SDK)
+│   │   ├── slack.ts / linear.ts  chat adapters and verified webhook entry points
+│   │   ├── linear-content.ts     Linear issue sync, team ACLs, and token rotation
 │   │   ├── mcp.ts                MCP server: why / check_rejected / record_decision
 │   │   ├── preflight.ts          CI pre-flight, metrics, graph endpoints
 │   │   ├── auth.ts / dash.ts     dashboard OAuth session + workspace API
@@ -214,7 +219,7 @@ orin/  (repo folder: codegaurd)
 
 ## Quick Start
 
-Each folder is its own npm project. You need Node 20+, Docker (for the engine), and Postgres.
+Each folder is its own npm project. You need Node 22+, Docker for the engine, and Postgres.
 
 ```bash
 git clone <repo-url>
@@ -224,20 +229,22 @@ cd orin
 cd engine && cp .env.example .env    # fill in the LLM key
 docker compose up -d                 # cognee REST on :8000 (localhost only)
 
-# 2. bot - the GitHub App backend (needs a registered GitHub App: App ID, private key, webhook secret)
+# 2. bot backend and queue workers
 cd ../bot && npm install && cp .env.example .env
-npm run dev                          # webhook + API server on :3000
+npm run dev                          # API, GitHub webhooks, and queue workers on :3000
 npm test                             # patch / commands / pipeline unit tests
 
-# adapters + MCP run as their own processes off the same build
-npm run build && npm run mcp:http    # MCP server (streamable HTTP)
+# adapters and MCP run in separate terminals after npm run build
+npm run build && npm run mcp:http    # MCP server
 npm run slack                        # Slack Bolt app
-npm run linear                       # Linear OAuth app
+npm run linear                       # Linear OAuth and webhook app on :3002
 
 # 3. web, in another terminal
-cd web
+cd ../web
 npm install
-ORIN_API_ORIGIN=http://127.0.0.1:3000 npm run dev -- --port 3100
+ORIN_API_ORIGIN=http://127.0.0.1:3000 \
+NEXT_PUBLIC_LINEAR_INSTALL_URL=http://127.0.0.1:3002/linear/install \
+npm run dev -- --port 3100
 # open http://localhost:3100
 ```
 
@@ -247,6 +254,8 @@ For local dashboard OAuth, set `WEB_ORIGIN=http://localhost:3100` in `bot/.env`.
 - Slack: `http://localhost:3100/v1/auth/slack/callback`, with the `openid`, `profile`, and `email` user scopes
 - Linear: `http://localhost:3100/v1/auth/linear/callback`
 - Google Drive: `http://localhost:3100/v1/connectors/google-drive/callback`
+
+The Linear connector installation callback is separate from dashboard sign-in. Register `http://127.0.0.1:3002/linear/oauth` and set the same value as `LINEAR_REDIRECT_URI`. Linear requires a public HTTPS webhook URL, so local webhook testing also needs a tunnel to port 3002.
 
 ---
 
@@ -270,13 +279,14 @@ SLACK_STATE_SECRET=...
 LINEAR_CLIENT_ID=...                        # Linear install and dashboard sign-in
 LINEAR_CLIENT_SECRET=...
 LINEAR_WEBHOOK_SECRET=...
+LINEAR_REDIRECT_URI=http://127.0.0.1:3002/linear/oauth
 GOOGLE_DRIVE_CLIENT_ID=...                  # optional Google Drive connector
 GOOGLE_DRIVE_CLIENT_SECRET=...
 DEEPSEEK_API_KEY=...                        # the bot's own extraction/judgment LLM
 WEB_ORIGIN=http://localhost:3100             # browser origin for OAuth redirects
 ```
 
-Set `ORIN_API_ORIGIN=http://127.0.0.1:3000` for local web development. On Vercel, set the project Root Directory to `web`, point `ORIN_API_ORIGIN` at the deployed backend, and register the production GitHub and Google Drive callback URLs.
+For local web development, set `ORIN_API_ORIGIN=http://127.0.0.1:3000`. Optional public web variables are `NEXT_PUBLIC_SLACK_INSTALL_URL`, `NEXT_PUBLIC_LINEAR_INSTALL_URL`, and `NEXT_PUBLIC_ORIN_MCP_URL`. On Vercel, set the project Root Directory to `web`, point `ORIN_API_ORIGIN` at the deployed backend, and register every enabled provider's production callback URL.
 
 **engine/.env**: a paid LLM key plus `ENABLE_BACKEND_ACCESS_CONTROL=true`; embeddings default to local `fastembed`.
 
@@ -307,6 +317,8 @@ Set `ORIN_API_ORIGIN=http://127.0.0.1:3000` for local web development. On Vercel
 | Workspace access | Active membership, role defaults, group grants, user grants, and explicit denies are evaluated for each API operation. Deny takes precedence. |
 | Source permissions | Restricted content must have a current source ACL that matches the user. Stale, failed, or empty ACLs fail closed. Connector, resource, and feature conditions are filtered before results reach the model. |
 | Google credentials | OAuth state is signed and bound to the user and workspace. Refresh tokens are encrypted at rest, use read-only scopes, and are removed on disconnect. |
+| Linear credentials | Install state is browser-bound and signed, authorization uses PKCE, tokens rotate under a database lock, and revocation disables the connector and fails ACLs closed. |
+| Linear answers | Inline answers are limited to the current team, citations are rechecked before delivery, and individually shared issues never receive workspace knowledge in comments. |
 | Cross-user cache leak | All authenticated `/v1/*` responses send `Cache-Control: private, no-store` + `Vary: Cookie`, so a CDN never serves one user's data to another. |
 | Cross-tenant access | Every `/v1/dash/:inst/*` route checks the signed-in user administers that installation; `@orinbot override` is guarded against citing a decision from another repo/thread. |
 | Command abuse | Write access required for mutations, admin for `forget`; keys are repo-scoped and stored as SHA-256 hashes (plaintext shown once at mint). |

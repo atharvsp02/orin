@@ -14,7 +14,7 @@ port 8787). Shared core for every adapter: **Postgres + Cognee 1.2.2 (DeepSeek +
 | `/v1/auth/*`, `/v1/me` | GitHub, Slack, and Linear dashboard authentication | 3000 | `orin-bot` |
 | `/mcp` | MCP server (IDE agents / CI) | 8788 | `orin-mcp` |
 | `/slack/*` | Slack app (events, commands, OAuth) | 3001 | `orin-slack` |
-| `/linear` | Linear adapter (planned) | 3002 | `orin-linear` |
+| `/linear` | Linear OAuth, verified webhooks, and permission-aware issue sync | 3002 | `orin-linear` |
 | `/v1/connectors/google-drive/*` | Google Drive OAuth | 3000 | `orin-bot` |
 | `/v1/workspaces/*` | Workspace search, chat, admin, connector, and audit APIs | 3000 | `orin-bot` |
 | - | Cognee engine (internal) | 8000 | `orin-cognee` |
@@ -54,14 +54,14 @@ Secrets live only in `~/codeguard/bot/.env` (chmod 600, git-ignored) and never i
 Security: minting is ephemeral + workspace-bound; consuming requires proven installation ownership; a used/leaked
 code grants nothing. `/orin unlink` reverts the workspace to a fresh memory of its own.
 
-## Linear adapter (multi-workspace OAuth; pending credentials)
+## Linear adapter
 - Create a Linear OAuth application (Settings → API → Applications): callback
   `https://orin-bot.duckdns.org/linear/oauth`, webhook `https://orin-bot.duckdns.org/linear`
-  (events: Issues + Agent session events), enable the agent option if offered.
-- Env needed: `LINEAR_CLIENT_ID`, `LINEAR_CLIENT_SECRET`, `LINEAR_WEBHOOK_SECRET`
-  (optional `LINEAR_ACCESS_TOKEN` as single-workspace dev fallback; `LINEAR_ACTOR=app` default).
+  (events: Issues, Comments, Users, Teams, permission changes, revocation, and Agent sessions), enable the agent option if offered.
+- Env needed: `LINEAR_CLIENT_ID`, `LINEAR_CLIENT_SECRET`, `LINEAR_WEBHOOK_SECRET`, and
+  `LINEAR_REDIRECT_URI=https://orin-bot.duckdns.org/linear/oauth`. `LINEAR_ACTOR=app` is the default.
 - **Self-serve:** any org installs at `https://orin-bot.duckdns.org/linear/install` → OAuth consent →
-  per-org token stored encrypted → its own isolated memory auto-provisioned.
+  encrypted rotating credentials stored → isolated workspace auto-provisioned → permission-aware sync queued.
 - **Dashboard sign-in:** register `https://orin-seven.vercel.app/v1/auth/linear/callback`. Dashboard OAuth uses user actor read access with PKCE, discards the token after identity lookup, and lets only a verified Linear admin or owner claim an unowned Linear workspace.
 
 ## Google Drive connector
@@ -83,6 +83,7 @@ code grants nothing. `/orin unlink` reverts the workspace to a fresh memory of i
 5. Deploy the web app with `ORIN_API_ORIGIN` pointing at the bot.
 6. Run a Drive sync in a non-production workspace and verify ACL-filtered search with owner and viewer accounts.
 7. Reinstall Slack in a non-production workspace, send a channel message, and verify that a channel member can search it while a non-member cannot.
+8. Install Linear in a non-production workspace and verify public, private, restricted, guest, shared-issue, team-move, and revocation behavior before enabling it for production organizations.
 8. Check connector sync and authorization events in the audit log.
 
 Rollback the application to the previous bot and web builds if verification fails. The schema additions are backward compatible and should remain in place during application rollback. Do not drop new tables during an incident.
