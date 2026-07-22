@@ -241,7 +241,12 @@ ORIN_API_ORIGIN=http://127.0.0.1:3000 npm run dev -- --port 3100
 # open http://localhost:3100
 ```
 
-For local dashboard OAuth, set `WEB_ORIGIN=http://localhost:3100` in `bot/.env`. Register `http://localhost:3100/v1/auth/callback` as the GitHub callback. For Google Drive, also register `http://localhost:3100/v1/connectors/google-drive/callback` in the Google OAuth client.
+For local dashboard OAuth, set `WEB_ORIGIN=http://localhost:3100` in `bot/.env`. Register these callbacks for the providers you enable:
+
+- GitHub: `http://localhost:3100/v1/auth/callback`
+- Slack: `http://localhost:3100/v1/auth/slack/callback`, with the `openid`, `profile`, and `email` user scopes
+- Linear: `http://localhost:3100/v1/auth/linear/callback`
+- Google Drive: `http://localhost:3100/v1/connectors/google-drive/callback`
 
 ---
 
@@ -258,7 +263,14 @@ GITHUB_PRIVATE_KEY_PATH=./github-app.pem    # (or GITHUB_PRIVATE_KEY inline)
 GITHUB_WEBHOOK_SECRET=...
 GITHUB_OAUTH_CLIENT_ID=...                  # dashboard sign-in (auth routes 404 until set)
 GITHUB_OAUTH_CLIENT_SECRET=...
-GOOGLE_DRIVE_CLIENT_ID=...                # optional Google Drive connector
+SLACK_CLIENT_ID=...                         # Slack install and dashboard sign-in
+SLACK_CLIENT_SECRET=...
+SLACK_SIGNING_SECRET=...
+SLACK_STATE_SECRET=...
+LINEAR_CLIENT_ID=...                        # Linear install and dashboard sign-in
+LINEAR_CLIENT_SECRET=...
+LINEAR_WEBHOOK_SECRET=...
+GOOGLE_DRIVE_CLIENT_ID=...                  # optional Google Drive connector
 GOOGLE_DRIVE_CLIENT_SECRET=...
 DEEPSEEK_API_KEY=...                        # the bot's own extraction/judgment LLM
 WEB_ORIGIN=http://localhost:3100             # browser origin for OAuth redirects
@@ -279,7 +291,7 @@ Set `ORIN_API_ORIGIN=http://127.0.0.1:3000` for local web development. On Vercel
 | LLM | `@ai-sdk` with DeepSeek (extraction + judgment); local `fastembed` embeddings in the engine |
 | Adapters | `@slack/bolt`, `@linear/sdk`, `@modelcontextprotocol/sdk`, `zod` |
 | Frontend | Next.js 16, React 19, Tailwind 4, Radix UI, framer-motion, lucide + simple-icons |
-| Auth | GitHub App JWT (webhooks), GitHub OAuth (dashboard), HMAC session cookies |
+| Auth | GitHub App JWT, GitHub OAuth, Slack OpenID Connect, Linear OAuth with PKCE, HMAC session cookies |
 | Deploy | Azure VM, Caddy, pm2, DuckDNS; Vercel for the web app |
 
 ---
@@ -291,7 +303,7 @@ Set `ORIN_API_ORIGIN=http://127.0.0.1:3000` for local web development. On Vercel
 | Tenant isolation | Every install is a separate Cognee tenant with its own `X-Api-Key`; the bot always calls key-scoped (EBAC). |
 | Decisions at rest | Per-tenant Cognee keys are encrypted with `ORIN_SECRET`; the graph lives only on the self-hosted engine. |
 | Webhook forgery | Webhooks verified with the App's signing secret (`verifyAndReceive`) before any work is queued. |
-| Dashboard sign-in | GitHub OAuth; the token is used once to read installations then discarded. Session is an HMAC-signed cookie (HttpOnly, Secure, SameSite=Lax); CSRF state is bound to a per-browser nonce. |
+| Dashboard sign-in | GitHub, Slack, or Linear can prove identity. Provider tokens used for sign-in are discarded. Sessions use HMAC-signed HttpOnly cookies, provider-bound CSRF state, Slack OpenID token and nonce verification, and Linear PKCE. Workspace membership is checked separately. |
 | Workspace access | Active membership, role defaults, group grants, user grants, and explicit denies are evaluated for each API operation. Deny takes precedence. |
 | Source permissions | Restricted content must have a current source ACL that matches the user. Stale, failed, or empty ACLs fail closed. Connector, resource, and feature conditions are filtered before results reach the model. |
 | Google credentials | OAuth state is signed and bound to the user and workspace. Refresh tokens are encrypted at rest, use read-only scopes, and are removed on disconnect. |

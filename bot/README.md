@@ -22,6 +22,10 @@ One package, several `npm run` targets (they share the decision core in `src/pip
 - `POST /v1/preflight-keys` - mint a preflight key (admin-only; disabled unless `ADMIN_TOKEN` is set).
 - `GET /v1/metrics` - `{prsPrevented, decisionsTracked, rejectionsActive}` for a repo, preflight-key auth.
 - `GET /v1/graph` - interactive knowledge-graph HTML (CSP-sandboxed), preflight-key auth.
+- `GET /v1/auth/providers` - configured dashboard identity providers.
+- `GET /v1/auth/github|slack|linear` - provider-specific dashboard sign-in.
+- `GET /v1/me` - current user, authorized workspaces, permissions, and visible connectors.
+- `/v1/workspaces/*` - permission-aware search, chat, connector, member, group, grant, policy, and audit APIs.
 
 ## Cognee lifecycle (all four verbs fire live)
 

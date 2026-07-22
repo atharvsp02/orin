@@ -11,6 +11,7 @@ port 8787). Shared core for every adapter: **Postgres + Cognee 1.2.2 (DeepSeek +
 | --- | --- | --- | --- |
 | `/api/github/webhooks` | GitHub App webhooks | 3000 | `orin-bot` |
 | `/v1/preflight`, `/v1/metrics`, `/v1/graph`, `/v1/preflight-keys` | CI pre-flight + dashboard APIs | 3000 | `orin-bot` |
+| `/v1/auth/*`, `/v1/me` | GitHub, Slack, and Linear dashboard authentication | 3000 | `orin-bot` |
 | `/mcp` | MCP server (IDE agents / CI) | 8788 | `orin-mcp` |
 | `/slack/*` | Slack app (events, commands, OAuth) | 3001 | `orin-slack` |
 | `/linear` | Linear adapter (planned) | 3002 | `orin-linear` |
@@ -41,6 +42,7 @@ Secrets live only in `~/codeguard/bot/.env` (chmod 600, git-ignored) and never i
 - **Commands:** `/why [repo:owner/name] <question>` · `/orin link|status|repos|unlink|help` ·
   react `:brain:` on a message to record it.
 - **Permission-aware search:** subscribe to `message.channels`, `message.groups`, `member_joined_channel`, and `member_left_channel`. Grant `channels:read`, `channels:history`, `groups:read`, `groups:history`, `users:read`, and `users:read.email`. Reinstall the app after changing scopes.
+- **Dashboard sign-in:** add the production and local `/v1/auth/slack/callback` URLs and grant the `openid`, `profile`, and `email` user scopes. Slack OpenID tokens and nonces are verified before a session is created.
 - Orin indexes new and edited messages only in channels where the app is present. Deleted messages are removed. Channel ACL synchronization fails closed.
 - The Slack process refreshes indexed channel membership every 15 minutes. Search hides Slack content when its channel ACL is more than 30 minutes old.
 - `/why`, `@Orin`, status, and repository listing require an active Orin workspace member linked by Slack email. Ask responses are private. Brain-reaction recording requires content administration permission.
@@ -60,6 +62,7 @@ code grants nothing. `/orin unlink` reverts the workspace to a fresh memory of i
   (optional `LINEAR_ACCESS_TOKEN` as single-workspace dev fallback; `LINEAR_ACTOR=app` default).
 - **Self-serve:** any org installs at `https://orin-bot.duckdns.org/linear/install` → OAuth consent →
   per-org token stored encrypted → its own isolated memory auto-provisioned.
+- **Dashboard sign-in:** register `https://orin-seven.vercel.app/v1/auth/linear/callback`. Dashboard OAuth uses user actor read access with PKCE, discards the token after identity lookup, and lets only a verified Linear admin or owner claim an unowned Linear workspace.
 
 ## Google Drive connector
 
@@ -96,7 +99,7 @@ npm --prefix web exec -- playwright install chromium
 npm --prefix web run test:e2e
 ```
 
-Next is intentionally pinned at `16.0.10`. The current npm audit reports advisories that require a newer Next release. Treat the framework upgrade as a separate reviewed change before exposing a self-hosted web process directly to untrusted traffic.
+Next is pinned at `16.2.11`. The remaining web audit entries come from PostCSS and Sharp versions nested inside the latest stable Next release. Track the next stable Next release and do not move production to a canary build only to clear transitive audit output.
 
 ## Add a new adapter route (Caddy)
 `/etc/caddy/Caddyfile` on rey3 - add a `handle /x* { reverse_proxy localhost:PORT }` block inside the
