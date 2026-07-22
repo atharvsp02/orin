@@ -2,6 +2,7 @@
 
 import { motion } from "framer-motion"
 import { ChevronRight, Plus } from "lucide-react"
+import Image from "next/image"
 import Link from "next/link"
 
 const featureCards = [
@@ -57,10 +58,13 @@ const featureCards = [
     title: "Catches re-proposals before they merge",
     illustration: (
       <div className="relative w-full h-full flex items-center justify-center overflow-hidden">
-        <img
+        <Image
           src="/images/speed-lines.png"
           alt="Speed lines illustration"
-          className="w-full h-full object-cover"
+          width={1344}
+          height={1280}
+          sizes="(min-width: 1024px) 33vw, 100vw"
+          className="w-full h-auto object-cover"
           style={{ filter: "invert(1)" }}
         />
       </div>
@@ -70,10 +74,13 @@ const featureCards = [
     title: "Precision first: cited, or silent",
     illustration: (
       <div className="relative w-full h-full flex items-center justify-center overflow-hidden">
-        <img
+        <Image
           src="/images/precision-workflow.png"
           alt="Precision workflow illustration"
-          className="w-full h-full object-cover"
+          width={1344}
+          height={1280}
+          sizes="(min-width: 1024px) 33vw, 100vw"
+          className="w-full h-auto object-cover"
           style={{ filter: "invert(1)" }}
         />
       </div>

@@ -1,6 +1,7 @@
 "use client"
 
 import { Link2, Plus, MoreHorizontal } from "lucide-react"
+import Image from "next/image"
 
 export function UIPanelDetail() {
   return (
@@ -101,7 +102,7 @@ export function UIPanelDetail() {
         <div className="pt-3 border-t border-zinc-800/50">
           <div className="text-[11px] text-zinc-500 font-medium mb-3">Activity</div>
           <div className="flex items-start gap-2">
-            <img src="https://i.pravatar.cc/24?img=1" alt="" className="w-6 h-6 rounded-full" />
+            <Image src="https://i.pravatar.cc/24?img=1" alt="" width={24} height={24} className="w-6 h-6 rounded-full" />
             <div className="flex-1">
               <p className="text-zinc-400 text-[12px]">
                 <span className="text-white">nan</span>

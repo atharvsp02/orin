@@ -1,5 +1,7 @@
 "use client"
 
+import Image from "next/image"
+
 export function UIPanelInbox() {
   const items = [
     {
@@ -90,7 +92,7 @@ export function UIPanelInbox() {
         {items.map((item, index) => (
           <div key={index} className="px-4 py-2.5 hover:bg-zinc-800/30 transition-colors cursor-pointer">
             <div className="flex items-start gap-3">
-              <img src={item.avatar || "/placeholder.svg"} alt="" className="w-8 h-8 rounded-full shrink-0 mt-0.5" />
+              <Image src={item.avatar || "/placeholder.svg"} alt="" width={32} height={32} className="w-8 h-8 rounded-full shrink-0 mt-0.5" />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-0.5">
                   {item.id && <span className="text-zinc-500 text-[11px]">{item.id}</span>}

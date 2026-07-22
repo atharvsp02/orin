@@ -2,6 +2,7 @@
 
 import type React from "react"
 import { motion, type Variants } from "framer-motion"
+import Image from "next/image"
 import {
   Inbox,
   CircleUser,
@@ -405,7 +406,7 @@ function ActivityItem({
 }) {
   return (
     <div className="flex items-start gap-2">
-      <img src={avatar || "/placeholder.svg"} alt="" className="w-5 h-5 rounded-full" />
+      <Image src={avatar || "/placeholder.svg"} alt="" width={20} height={20} className="w-5 h-5 rounded-full" />
       <div className="flex-1">
         <p className="text-zinc-400 text-xs">
           <span className="text-white">{name}</span>
