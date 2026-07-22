@@ -11,6 +11,7 @@ const openrouter = createOpenAI({ baseURL: "https://openrouter.ai/api/v1", apiKe
 const registry = createProviderRegistry({ google, openai, deepseek, openrouter });
 
 type ModelId = `google:${string}` | `openai:${string}` | `deepseek:${string}` | `openrouter:${string}`;
+export type LlmProvider = "google" | "openai" | "deepseek" | "openrouter";
 
 const DEFAULT_MODEL: Record<string, ModelId> = {
   google: `google:${process.env.ORIN_GOOGLE_MODEL ?? "gemini-2.5-flash"}`,
@@ -19,10 +20,14 @@ const DEFAULT_MODEL: Record<string, ModelId> = {
   openrouter: `openrouter:${process.env.ORIN_OPENROUTER_MODEL ?? "google/gemini-2.5-flash"}`,
 };
 
+export function resolveLlmProvider(value = process.env.ORIN_LLM_PROVIDER): LlmProvider {
+  const provider = value?.trim().toLowerCase() || "deepseek";
+  if (!(provider in DEFAULT_MODEL)) throw new Error(`unsupported ORIN_LLM_PROVIDER: ${provider}`);
+  return provider as LlmProvider;
+}
+
 function model(_provider?: string) {
-  // Orin runs on DeepSeek only. The provider argument is kept for call-site compatibility
-  // but ignored: every model resolves to DeepSeek (deepseek-chat by default).
-  return registry.languageModel(DEFAULT_MODEL.deepseek);
+  return registry.languageModel(DEFAULT_MODEL[resolveLlmProvider()]);
 }
 
 const decisionSchema = z.object({

@@ -282,13 +282,14 @@ LINEAR_WEBHOOK_SECRET=...
 LINEAR_REDIRECT_URI=http://127.0.0.1:3002/linear/oauth
 GOOGLE_DRIVE_CLIENT_ID=...                  # optional Google Drive connector
 GOOGLE_DRIVE_CLIENT_SECRET=...
-DEEPSEEK_API_KEY=...                        # the bot's own extraction/judgment LLM
+ORIN_LLM_PROVIDER=openai                    # local app-layer LLM
+OPENAI_API_KEY=...                          # the bot's OpenAI API key
 WEB_ORIGIN=http://localhost:3100             # browser origin for OAuth redirects
 ```
 
 For local web development, set `ORIN_API_ORIGIN=http://127.0.0.1:3000`. Optional public web variables are `NEXT_PUBLIC_SLACK_INSTALL_URL`, `NEXT_PUBLIC_LINEAR_INSTALL_URL`, and `NEXT_PUBLIC_ORIN_MCP_URL`. On Vercel, set the project Root Directory to `web`, point `ORIN_API_ORIGIN` at the deployed backend, and register every enabled provider's production callback URL.
 
-**engine/.env**: a paid LLM key plus `ENABLE_BACKEND_ACCESS_CONTROL=true`; embeddings default to local `fastembed`.
+**engine/.env**: set `LLM_API_KEY` and `EMBEDDING_API_KEY` to your OpenAI API key for local development, with `ENABLE_BACKEND_ACCESS_CONTROL=true`.
 
 ---
 

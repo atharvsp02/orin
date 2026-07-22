@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
 function required(name: string): string {
   const v = process.env[name];
@@ -7,10 +7,11 @@ function required(name: string): string {
   return v;
 }
 
-// GitHub App private key: from a .pem file path (preferred — avoids multi-line PEM in .env) or inline.
+// GitHub App private key from a PEM file path or an inline environment value.
 function githubPrivateKey(): string {
   const path = process.env.GITHUB_PRIVATE_KEY_PATH;
-  if (path) return readFileSync(path, "utf8");
+  if (path && existsSync(path)) return readFileSync(path, "utf8");
+  if (path && !process.env.GITHUB_PRIVATE_KEY) throw new Error(`GITHUB_PRIVATE_KEY_PATH does not exist: ${path}`);
   return required("GITHUB_PRIVATE_KEY");
 }
 

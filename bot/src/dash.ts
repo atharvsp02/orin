@@ -682,7 +682,7 @@ export async function handleDash(req: IncomingMessage, res: ServerResponse, path
     if (typeof body.scoreCutoff === "number" && body.scoreCutoff > 0 && body.scoreCutoff <= 2)
       patch.scoreCutoff = body.scoreCutoff;
     if (typeof body.customInstructions === "string") patch.customInstructions = body.customInstructions.slice(0, 2000);
-    // LLM provider is fixed to DeepSeek for all tenants; it is intentionally not settable.
+    // The deployment controls the LLM provider through ORIN_LLM_PROVIDER.
     if (typeof body.tone === "string" && ["friendly", "terse"].includes(body.tone)) patch.tone = body.tone as "friendly" | "terse";
     await db.updateTenantConfig(inst, patch);
     send(res, 200, await db.getTenantConfig(inst));
