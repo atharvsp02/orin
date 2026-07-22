@@ -21,18 +21,36 @@ const driveConnector = {
   capabilities: ["ingest", "query"],
 }
 
+const linearConnector = {
+  connectorId: "10000000-0000-4000-8000-000000000002",
+  provider: "linear",
+  displayName: "Acme Linear",
+  status: "active",
+  capabilities: ["ingest", "query", "ask", "warn", "record"],
+}
+
 const overview = {
   account: "Acme",
   workspace: { workspaceId: "ws-1", displayName: "Acme" },
-  connectors: [driveConnector],
-  resources: [{
-    resourceId: "20000000-0000-4000-8000-000000000001",
-    connectorId: driveConnector.connectorId,
-    externalId: "drive-1",
-    kind: "shared_drive",
-    displayName: "Product Drive",
-    enabled: true,
-  }],
+  connectors: [driveConnector, linearConnector],
+  resources: [
+    {
+      resourceId: "20000000-0000-4000-8000-000000000001",
+      connectorId: driveConnector.connectorId,
+      externalId: "drive-1",
+      kind: "shared_drive",
+      displayName: "Product Drive",
+      enabled: true,
+    },
+    {
+      resourceId: "20000000-0000-4000-8000-000000000002",
+      connectorId: linearConnector.connectorId,
+      externalId: "team-1",
+      kind: "team",
+      displayName: "Product Team",
+      enabled: true,
+    },
+  ],
   syncs: [{
     runId: "30000000-0000-4000-8000-000000000001",
     workspaceId: "ws-1",
@@ -106,7 +124,7 @@ function me(permissions = allPermissions) {
       role: permissions === allPermissions ? "owner" : "viewer",
       permissions,
       hasGitHubCompatibility: false,
-      connectors: [driveConnector],
+      connectors: [driveConnector, linearConnector],
     }],
   }
 }
@@ -133,7 +151,7 @@ async function json(route: Route, body: unknown, status = 200) {
 }
 
 async function mockDashboard(page: Page, permissions = allPermissions) {
-  let policies: Array<Record<string, unknown>> = []
+  const policies = new Map<string, Array<Record<string, unknown>>>()
   let peopleState = people.map((person) => ({ ...person }))
   let groupsState = [{ groupId: "group-1", workspaceId: "ws-1", displayName: "Engineering", memberCount: 1, memberIds: ["user-2"], createdAt: "2026-07-03T08:00:00.000Z" }]
   let grants: Array<Record<string, unknown>> = []
@@ -171,15 +189,19 @@ async function mockDashboard(page: Page, permissions = allPermissions) {
       return json(route, grant, 201)
     }
     if (path.endsWith("/audit")) return json(route, { events: [{ eventId: "event-1", workspaceId: "ws-1", actorUserId: "user-1", action: "connector.sync_completed", targetType: "connector", targetId: driveConnector.connectorId, outcome: "success", details: {}, createdAt: "2026-07-21T08:01:00.000Z" }] })
-    if (path.endsWith("/connectorpolicies") && request.method() === "GET") return json(route, { policies })
+    if (path.endsWith("/connectorpolicies") && request.method() === "GET") {
+      return json(route, { policies: policies.get(url.searchParams.get("connectorId") ?? "") ?? [] })
+    }
     if (path.endsWith("/connectorpolicies") && request.method() === "POST") {
       const input = request.postDataJSON()
-      const policy = { ...input, policyId: "policy-1", workspaceId: "ws-1", enabled: true }
-      policies = [policy]
+      const policy = { ...input, policyId: `policy-${input.connectorId}`, workspaceId: "ws-1", enabled: true }
+      policies.set(input.connectorId, [policy])
       return json(route, policy, 201)
     }
     if (path.includes("/connectorpolicies/") && request.method() === "DELETE") {
-      policies = []
+      for (const [connectorId, items] of policies) {
+        policies.set(connectorId, items.filter((item) => item.policyId !== path.split("/").at(-1)))
+      }
       return json(route, { deleted: true })
     }
     if (path.includes("/syncs/") && request.method() === "POST") return json(route, { accepted: true, jobId: "job-1" }, 202)
@@ -204,20 +226,27 @@ test("searches authorized sources and answers with a citation", async ({ page })
   await expect(page.getByText("Payments migration plan")).toBeVisible()
 })
 
-test("manages Drive sync health and indexing policies", async ({ page }) => {
+test("manages connector sync health and provider policies", async ({ page }) => {
   await mockDashboard(page)
   await page.goto("/dashboard")
   await page.getByText("Connectors", { exact: true }).first().click()
 
-  await expect(page.getByRole("heading", { name: "Google Drive" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Google Drive active", exact: true })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Linear active", exact: true })).toBeVisible()
   await expect(page.getByText("Last sync succeeded", { exact: false })).toBeVisible()
-  await expect(page.getByRole("button", { name: "Sync now" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Sync now" })).toHaveCount(2)
   await expect(page.getByText("SharePoint", { exact: true })).toBeVisible()
   await expect(page.getByText("Planned", { exact: true }).first()).toBeVisible()
 
-  await page.getByPlaceholder("One value per line or comma separated, for example /Finance/ or application/pdf").fill("/Private/")
-  await page.getByRole("button", { name: "Add policy" }).click()
-  await expect(page.getByText("/Private/")).toBeVisible()
+  const driveEditor = page.getByRole("heading", { name: "Google Drive content policy" }).locator("..").locator("..")
+  await driveEditor.getByPlaceholder("One value per line or comma separated, for example /Finance/ or application/pdf").fill("/Private/")
+  await driveEditor.getByRole("button", { name: "Add policy" }).click()
+  await expect(driveEditor.getByText("/Private/")).toBeVisible()
+
+  const linearEditor = page.getByRole("heading", { name: "Linear content policy" }).locator("..").locator("..")
+  await linearEditor.getByPlaceholder("One value per line or comma separated, for example TEAM_ID or issue").fill("TEAM_PRIVATE")
+  await linearEditor.getByRole("button", { name: "Add policy" }).click()
+  await expect(linearEditor.getByText("TEAM_PRIVATE")).toBeVisible()
 })
 
 test("shows workspace administration to an owner", async ({ page }) => {

@@ -348,6 +348,11 @@ export const api = {
   disconnectGoogleDrive: (workspaceId: string, connectorId: string) =>
     req<{ disconnected: boolean }>(`${workspacePath(workspaceId, "disconnects")}/${connectorId}`, { method: "DELETE" }),
   googleDriveConnectUrl: (workspaceId: string) => `/v1/connectors/google-drive/start?workspaceId=${encodeURIComponent(workspaceId)}`,
+  connectorInstallUrls: {
+    slack: process.env.NEXT_PUBLIC_SLACK_INSTALL_URL ?? "https://orin-bot.duckdns.org/slack/install",
+    linear: process.env.NEXT_PUBLIC_LINEAR_INSTALL_URL ?? "https://orin-bot.duckdns.org/linear/install",
+  },
+  mcpUrl: process.env.NEXT_PUBLIC_ORIN_MCP_URL ?? "https://orin-bot.duckdns.org/mcp",
   signInUrls: {
     github: "/v1/auth/github",
     slack: "/v1/auth/slack",

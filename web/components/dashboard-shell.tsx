@@ -22,8 +22,6 @@ import {
   Copy,
   Check,
   LogOut,
-  Slack as SlackIcon,
-  Network,
   GitBranch,
   FileText,
   BookOpen,
@@ -235,7 +233,7 @@ export function DashboardShell({ me }: { me: Me }) {
               {overview.connectors.filter((connector) => connector.provider !== "github").map((connector) => (
                 <NavItem
                   key={connector.connectorId}
-                  icon={connector.provider === "slack" ? SlackIcon : Network}
+                  iconNode={<ConnectorLogo provider={connector.provider} className="w-4 h-4" />}
                   label={connector.displayName || connector.provider}
                   onClick={() => setView("connectors")}
                 />
@@ -301,13 +299,15 @@ export function DashboardShell({ me }: { me: Me }) {
 
 function NavItem({
   icon: Icon,
+  iconNode,
   label,
   badge,
   active,
   color,
   onClick,
 }: {
-  icon: React.ElementType
+  icon?: React.ElementType
+  iconNode?: React.ReactNode
   label: string
   badge?: number
   active?: boolean
@@ -321,7 +321,7 @@ function NavItem({
         active ? "bg-zinc-800 text-white" : "text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-300"
       }`}
     >
-      <Icon className={`w-4 h-4 ${color || ""}`} />
+      {iconNode ?? (Icon ? <Icon className={`w-4 h-4 ${color || ""}`} /> : null)}
       <span className="flex-1 text-xs">{label}</span>
       {badge !== undefined && (
         <span className="bg-indigo-500/80 text-white text-[0.625rem] min-w-[1.125rem] h-[1.125rem] flex items-center justify-center rounded-full font-medium px-1">
@@ -1504,15 +1504,15 @@ function ConnectorsView({
       provider: "slack",
       name: "Slack",
       desc: "Channel conversations, questions, reactions, and recorded decisions.",
-      href: "https://orin-bot.duckdns.org/slack/install",
+      href: api.connectorInstallUrls.slack,
       action: "Connect Slack",
       available: true,
     },
     {
       provider: "linear",
       name: "Linear",
-      desc: "Issues, project context, planning questions, and decision warnings.",
-      href: "https://orin-bot.duckdns.org/linear/install",
+      desc: "Issues and comments with public, private, restricted, and individually shared access controls.",
+      href: api.connectorInstallUrls.linear,
       action: "Connect Linear",
       available: true,
     },
@@ -1591,7 +1591,7 @@ function ConnectorsView({
     }
   }
 
-  const mcpJson = `{\n  "mcpServers": {\n    "orin": {\n      "url": "https://orin-bot.duckdns.org/mcp",\n      "headers": { "Authorization": "Bearer <your orin_ key>" }\n    }\n  }\n}`
+  const mcpJson = `{\n  "mcpServers": {\n    "orin": {\n      "url": "${api.mcpUrl}",\n      "headers": { "Authorization": "Bearer <your orin_ key>" }\n    }\n  }\n}`
 
   return (
     <FullPanel title="Connectors" subtitle="One workspace memory with switchable sources. Connect only the tools your team uses." rail={<ConnectorsRail />}>
@@ -1623,7 +1623,7 @@ function ConnectorsView({
             </div>
             {connector && canManage ? (
               <div className="flex items-center gap-2">
-                {connector.provider === "gdrive" && <button onClick={() => syncConnector(connector.connectorId)} disabled={busy !== null} className="text-xs px-3 py-2 rounded-lg border border-zinc-700 text-zinc-300 disabled:opacity-40">{busy === `sync:${connector.connectorId}` ? "Queued" : "Sync now"}</button>}
+                {["gdrive", "linear"].includes(connector.provider) && <button onClick={() => syncConnector(connector.connectorId)} disabled={busy !== null} className="text-xs px-3 py-2 rounded-lg border border-zinc-700 text-zinc-300 disabled:opacity-40">{busy === `sync:${connector.connectorId}` ? "Queued" : "Sync now"}</button>}
                 <button onClick={() => setConnectorEnabled(connector.connectorId, connector.status !== "active")} disabled={busy !== null} className="text-xs px-3 py-2 rounded-lg border border-zinc-700 text-zinc-300 disabled:opacity-40">{busy === connector.connectorId ? "Saving" : connector.status === "active" ? "Disable" : "Enable"}</button>
                 {connector.provider === "gdrive" && <button onClick={() => disconnectDrive(connector.connectorId)} disabled={busy !== null} className="text-xs px-3 py-2 rounded-lg border border-red-950 text-red-400 disabled:opacity-40">Disconnect</button>}
               </div>
@@ -1666,9 +1666,9 @@ function ConnectorsView({
           </div>
         )}
 
-        {canManagePolicies && overview.connectors.some((connector) => connector.provider === "gdrive") && (
-          <DrivePolicyEditor workspaceId={workspaceId} connectorId={overview.connectors.find((connector) => connector.provider === "gdrive")!.connectorId} />
-        )}
+        {canManagePolicies && overview.connectors.filter((connector) => ["gdrive", "slack", "linear"].includes(connector.provider)).map((connector) => (
+          <ContentPolicyEditor key={connector.connectorId} workspaceId={workspaceId} connectorId={connector.connectorId} provider={connector.provider} />
+        ))}
 
         {/* MCP: syntax-colored config, same treatment as the landing page */}
         <div className={`${card} p-5`}>
@@ -1677,7 +1677,7 @@ function ConnectorsView({
               <KeyRound className="w-[1.125rem] h-[1.125rem] text-white" />
             </div>
             <div>
-              <div className="text-white text-sm font-medium">MCP · Cursor, Claude Code, CLI</div>
+              <div className="text-white text-sm font-medium">MCP · Cursor, Codex, CLI</div>
               <div className="text-zinc-500 text-xs mt-1 leading-relaxed">
                 Your coding agents ask Orin before repeating history. Mint a repo-scoped key under Keys, then add this to
                 your MCP client config:
@@ -1688,7 +1688,7 @@ function ConnectorsView({
             <div className="absolute top-4 right-4">
               <CopyButton text={mcpJson} />
             </div>
-            <p className="text-zinc-700 mb-3">{"//"}orin-bot.duckdns.org/mcp</p>
+            <p className="text-zinc-700 mb-3">{"//"}{api.mcpUrl.replace(/^https?:\/\//, "")}</p>
             <p>
               <span className="text-zinc-500">{"{"}</span>
             </p>
@@ -1703,7 +1703,7 @@ function ConnectorsView({
             <p className="pl-12">
               <span className="text-orange-400/70">&quot;url&quot;</span>
               <span className="text-zinc-500">: </span>
-              <span className="text-green-400/70">&quot;https://orin-bot.duckdns.org/mcp&quot;</span>
+              <span className="text-green-400/70">&quot;{api.mcpUrl}&quot;</span>
               <span className="text-zinc-500">,</span>
             </p>
             <p className="pl-12">
@@ -1729,9 +1729,9 @@ function ConnectorsView({
         <div className={`${card} p-5`}>
           <div className="text-white text-sm font-medium mb-1.5">Shared workspace memory</div>
           <p className="text-zinc-500 text-xs leading-relaxed">
-            Each connector can start with isolated memory or join this workspace. Today, Slack can join by running{" "}
-            <span className="text-zinc-300 font-mono">/orin link</span> and verifying the one-time code from a connected
-            GitHub resource. Codes expire in 15 minutes.
+            Slack and Linear can start with isolated memory or join this workspace. A current source administrator creates
+            a one-time link code, then a GitHub organization owner approves it from a connected issue or pull request.
+            Codes expire in 15 minutes.
           </p>
         </div>
       </div>
@@ -1742,7 +1742,7 @@ function ConnectorsView({
 const policyFields: ConnectorPolicy["field"][] = ["resourceId", "owner", "mimeType", "path", "sourceType"]
 const policyOperators: ConnectorPolicy["operator"][] = ["equals", "contains", "starts_with", "one_of"]
 
-function DrivePolicyEditor({ workspaceId, connectorId }: { workspaceId: string; connectorId: string }) {
+function ContentPolicyEditor({ workspaceId, connectorId, provider }: { workspaceId: string; connectorId: string; provider: string }) {
   const [policies, setPolicies] = useState<ConnectorPolicy[] | null>(null)
   const [effect, setEffect] = useState<ConnectorPolicy["effect"]>("exclude")
   const [field, setField] = useState<ConnectorPolicy["field"]>("path")
@@ -1750,6 +1750,12 @@ function DrivePolicyEditor({ workspaceId, connectorId }: { workspaceId: string; 
   const [values, setValues] = useState("")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
+  const providerName = provider === "gdrive" ? "Google Drive" : provider === "slack" ? "Slack" : "Linear"
+  const valueExample = provider === "gdrive"
+    ? "/Finance/ or application/pdf"
+    : provider === "slack"
+      ? "C0123456789 or private"
+      : "TEAM_ID or issue"
 
   const load = useCallback(async () => {
     try {
@@ -1794,7 +1800,7 @@ function DrivePolicyEditor({ workspaceId, connectorId }: { workspaceId: string; 
   return (
     <div className={`${card} overflow-hidden`}>
       <div className="px-5 py-4 border-b border-zinc-800/50">
-        <div className="text-white text-sm font-medium">Google Drive content policy</div>
+        <h3 className="text-white text-sm font-medium"><ConnectorLogo provider={provider} className="inline w-4 h-4 mr-2" />{providerName} content policy</h3>
         <div className="text-zinc-500 text-xs mt-1 leading-relaxed">Limit what the connector indexes. Exclude rules always win. Adding an include rule changes the default from all content to matching content only.</div>
       </div>
       <div className="p-5 border-b border-zinc-800/50 space-y-3">
@@ -1811,7 +1817,7 @@ function DrivePolicyEditor({ workspaceId, connectorId }: { workspaceId: string; 
           </select>
           <button onClick={create} disabled={busy || !values.trim()} className="h-9 rounded-lg bg-white px-4 text-zinc-950 text-xs font-medium disabled:opacity-40">{busy ? "Saving" : "Add policy"}</button>
         </div>
-        <textarea value={values} onChange={(event) => setValues(event.target.value)} placeholder="One value per line or comma separated, for example /Finance/ or application/pdf" className="min-h-20 w-full resize-y rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-zinc-200 text-xs outline-none placeholder:text-zinc-600" />
+        <textarea value={values} onChange={(event) => setValues(event.target.value)} placeholder={`One value per line or comma separated, for example ${valueExample}`} className="min-h-20 w-full resize-y rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-zinc-200 text-xs outline-none placeholder:text-zinc-600" />
         {error && <div className="rounded-lg border border-red-900/50 bg-red-950/20 px-4 py-3 text-red-300 text-xs">{error}</div>}
       </div>
       <div className="divide-y divide-zinc-800/50">
@@ -1823,7 +1829,7 @@ function DrivePolicyEditor({ workspaceId, connectorId }: { workspaceId: string; 
             <button onClick={() => remove(policy.policyId)} disabled={busy} aria-label="Delete connector policy" className="text-zinc-600 hover:text-red-400 disabled:opacity-40"><Trash2 className="w-4 h-4" /></button>
           </div>
         ))}
-        {policies?.length === 0 && <div className="px-5 py-6 text-center text-zinc-600 text-xs">No content policies. All source-authorized Drive content can be indexed.</div>}
+        {policies?.length === 0 && <div className="px-5 py-6 text-center text-zinc-600 text-xs">No content policies. All source-authorized {providerName} content can be indexed.</div>}
         {policies === null && <div className="px-5 py-6 text-center text-zinc-600 text-xs">Loading policies</div>}
       </div>
     </div>
