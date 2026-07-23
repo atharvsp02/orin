@@ -3,7 +3,15 @@ import { config } from "./config.js";
 import { anchorFor, suggestionBlock } from "./patch.js";
 import type { installationOctokit } from "./github.js";
 import type { Judgment } from "./llm.js";
-import type { DeliveryDecision, DeliveryMode, Finding, Installation, PrSnapshot, TenantConfig } from "./types.js";
+import type {
+  DecisionRecord,
+  DeliveryDecision,
+  DeliveryMode,
+  Finding,
+  Installation,
+  PrSnapshot,
+  TenantConfig,
+} from "./types.js";
 
 type Gh = Awaited<ReturnType<typeof installationOctokit>>;
 
@@ -226,6 +234,13 @@ const commentDelivery: Delivery = {
 
 export function resolveDelivery(mode: DeliveryMode): Delivery {
   return mode === "review" ? reviewDelivery : mode === "comment" ? commentDelivery : checkDelivery;
+}
+
+export function buildIssueWarning(judgment: Judgment, record: DecisionRecord | null): string | null {
+  if (!judgment.matches || !judgment.decisionId || !judgment.comment.trim()) return null;
+  const title = record?.title ?? judgment.decisionId;
+  const source = record?.sourceUrl ? `\nSource: ${record.sourceUrl}` : "";
+  return `⚠️ ${judgment.comment.trim()}\n\nDecision: ${judgment.decisionId}: ${title}${source}`;
 }
 
 /** Turn a judgment + PR into a delivery decision (with an inline anchor when terms overlap the diff). */

@@ -18,6 +18,18 @@ const ok = (name, cond) => {
 // grounding gate
 ok("grounded: enough overlap", grounded("we should add redis caching", "redis caching layer", 2));
 ok("grounded: below threshold", !grounded("add redis", "postgres tuning", 2));
+ok(
+  "grounded: RabbitMQ does not match Redis through common words or URL suffixes",
+  !grounded(
+    "add RabbitMQ through amqplib and AMQP_URL for background jobs",
+    "adding Redis would complicate deployment Redis ioredis REDIS_URL PostgreSQL",
+    2,
+  ),
+);
+ok("grounded: technical identifiers remain distinct", !grounded("AMQP_URL worker", "REDIS_URL cache", 1));
+ok("grounded: trailing punctuation is normalized", grounded("redis.", "redis", 1));
+ok("grounded: invalid threshold stays closed", !grounded("redis", "redis", Number.NaN));
+ok("grounded: zero threshold still requires overlap", !grounded("rabbitmq", "redis", 0));
 
 // recency decay — bounded in [FLOOR, 1], monotonically decreasing with age, floors out.
 const now = Date.parse("2026-07-02T00:00:00Z");

@@ -4,7 +4,7 @@ process.env.GITHUB_APP_ID ??= "1";
 process.env.GITHUB_PRIVATE_KEY ??= "dummy";
 process.env.GITHUB_WEBHOOK_SECRET ??= "dummy";
 
-const { resolveDelivery } = await import("../dist/delivery.js");
+const { buildIssueWarning, resolveDelivery } = await import("../dist/delivery.js");
 
 let pass = 0;
 let fail = 0;
@@ -75,6 +75,35 @@ const decision = {
     }],
   }],
 };
+const issueWarning = buildIssueWarning(
+  {
+    matches: true,
+    decisionId: "PR-3",
+    comment: "This proposal reintroduces RabbitMQ.",
+  },
+  {
+    decisionId: "PR-3",
+    installationId: 1,
+    repo: "acme/app",
+    sourceType: "pr",
+    sourceUrl: "https://github.com/acme/app/pull/3",
+    title: "Reject RabbitMQ for background jobs",
+    outcome: "rejected",
+    reasoningText: "The existing queue is sufficient.",
+    decidedAt: "2026-07-23T00:00:00Z",
+    terms: ["RabbitMQ"],
+    createdAt: "2026-07-23T00:00:00Z",
+  },
+);
+ok(
+  "issue warning cites the decision and source",
+  issueWarning?.includes("Decision: PR-3: Reject RabbitMQ") &&
+    issueWarning.includes("https://github.com/acme/app/pull/3"),
+);
+ok(
+  "issue warning rejects an empty judgment",
+  buildIssueWarning({ matches: false, decisionId: null, comment: "" }, null) === null,
+);
 
 const delivery = resolveDelivery("check");
 let refs = await delivery.open(ctx);

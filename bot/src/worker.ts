@@ -3,7 +3,7 @@ import { config } from "./config.js";
 import * as db from "./db.js";
 import * as gh from "./github.js";
 import { ingestItem, evaluatePr, matchRules } from "./pipeline.js";
-import { resolveDelivery, buildDecision } from "./delivery.js";
+import { resolveDelivery, buildDecision, buildIssueWarning } from "./delivery.js";
 import { handleCommand } from "./commands.js";
 import { runImprove } from "./lifecycle.js";
 import { CATCH_RETRY_OPTIONS, QUEUE, catchFailureRecord } from "./queues.js";
@@ -146,7 +146,9 @@ async function runCatch(data: CatchJob): Promise<void> {
     const judgment = await evaluatePr(inst, cfg, creds, `${it.title}\n\n${it.body}`, data.repo, sessionId);
     let commentId: number | null = null;
     if (judgment.matches && judgment.decisionId && judgment.comment && cfg.autoComment) {
-      commentId = await gh.postComment(data.installationId, data.repo, data.number, `⚠️ ${judgment.comment}`);
+      const record = await db.getDecisionRecord(data.installationId, data.repo, judgment.decisionId);
+      const warning = buildIssueWarning(judgment, record);
+      if (warning) commentId = await gh.postComment(data.installationId, data.repo, data.number, warning);
     }
     await db.upsertDelivery({
       installationId: data.installationId,

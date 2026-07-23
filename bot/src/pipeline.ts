@@ -120,6 +120,7 @@ export async function evaluatePr(
       title: c.title,
       outcome: c.outcome,
       reasoning: c.reasoningText,
+      terms: c.terms,
       url: c.sourceUrl,
     })),
     firstAnswer(recall),
@@ -146,14 +147,68 @@ export function isTemporalQuery(q: string): boolean {
   );
 }
 
+const GROUNDING_IGNORED_TERMS = new Set([
+  "about",
+  "add",
+  "adding",
+  "after",
+  "again",
+  "also",
+  "and",
+  "approach",
+  "before",
+  "current",
+  "decision",
+  "delivery",
+  "demonstrated",
+  "deployment",
+  "does",
+  "e2e",
+  "evaluate",
+  "files",
+  "for",
+  "from",
+  "github",
+  "into",
+  "need",
+  "operations",
+  "orin",
+  "pending",
+  "proposal",
+  "review",
+  "should",
+  "status",
+  "sufficient",
+  "that",
+  "the",
+  "their",
+  "this",
+  "through",
+  "url",
+  "use",
+  "using",
+  "was",
+  "were",
+  "will",
+  "with",
+  "without",
+  "would",
+]);
+
 // Grounding gate: require >= threshold shared significant terms (the false-positive guard).
 export function grounded(a: string, b: string, threshold: number): boolean {
-  const sig = (s: string) => new Set(s.toLowerCase().match(/[a-z0-9][a-z0-9-]{2,}/g) ?? []);
+  if (!Number.isFinite(threshold)) return false;
+  const sig = (s: string) =>
+    new Set(
+      (s.toLowerCase().match(/[a-z0-9][a-z0-9_./:@-]{2,}/g) ?? [])
+        .map((term) => term.replace(/[./:@-]+$/g, ""))
+        .filter((term) => term.length >= 3 && !GROUNDING_IGNORED_TERMS.has(term) && !/^https?:/.test(term)),
+    );
   const ta = sig(a);
   const tb = sig(b);
   let overlap = 0;
   for (const t of ta) if (tb.has(t)) overlap++;
-  return overlap >= threshold;
+  return overlap >= Math.max(1, Math.ceil(threshold));
 }
 
 function firstAnswer(res: unknown): string {
