@@ -201,6 +201,11 @@ eq("workspace claim creates exactly one active owner", await enterprise.countAct
 await db.deleteWorkspace(claimWorkspace.workspaceId);
 
 const SLACK_AUTH_INSTALLATION = 8_100_000_000_001;
+await sql.query(
+  `DELETE FROM users WHERE user_id IN (
+     SELECT user_id FROM user_identities WHERE provider = 'slack_user' AND external_id = 'T-auth:U-auth-owner'
+   )`,
+);
 await db.upsertInstallation({
   installationId: SLACK_AUTH_INSTALLATION,
   githubAccount: "slack:Authentication Test",
@@ -304,6 +309,11 @@ ok("Slack callback used token, userinfo, signing key, and admin verification end
 ].every((url) => authFetchCalls.some((call) => call.url === url)) && authFetchCalls.some((call) => call.url.startsWith("https://slack.com/api/users.info")));
 await db.deleteSlackInstall("T-auth");
 await db.deleteInstallation(SLACK_AUTH_INSTALLATION);
+await sql.query(
+  `DELETE FROM users WHERE user_id IN (
+     SELECT user_id FROM user_identities WHERE provider = 'slack_user' AND external_id = 'T-auth:U-auth-owner'
+   )`,
+);
 
 const LINEAR_AUTH_INSTALLATION = 8_100_000_000_002;
 await db.upsertInstallation({
