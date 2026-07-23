@@ -67,6 +67,7 @@ export async function evaluatePr(
 ): Promise<Judgment> {
   const records = await db.getDecisionRecords(inst.installationId, repo);
   const active = records.filter((r) => r.outcome === "rejected" && !r.supersededBy);
+  if (active.length === 0) return { matches: false, decisionId: null, comment: "" };
 
   const candidates = new Map<string, DecisionRecord>();
 

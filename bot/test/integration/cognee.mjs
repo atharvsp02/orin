@@ -125,6 +125,14 @@ await db.initSchema();
 await db.deleteInstallation(INST).catch(() => {});
 await db.upsertInstallation({ installationId: INST, githubAccount: "acme", datasetName: DS, cogneeApiKey: "apikey-1" });
 const inst = await db.getInstallation(INST);
+const emptyCfg = await db.getTenantConfig(INST);
+const searchCountBeforeEmptyEvaluation = seen.filter((request) => request.path === "/api/v1/search").length;
+const emptyEvaluation = await pipeline.evaluatePr(inst, emptyCfg, creds, "add redis", "acme/empty");
+const searchCountAfterEmptyEvaluation = seen.filter((request) => request.path === "/api/v1/search").length;
+ok(
+  "evaluatePr returns clear without searching Cognee when no rejected decisions exist",
+  emptyEvaluation.matches === false && searchCountAfterEmptyEvaluation === searchCountBeforeEmptyEvaluation,
+);
 
 // pipeline.ask (GRAPH_COMPLETION → firstAnswer)
 ok("pipeline.ask returns cited answer", (await pipeline.ask(inst, creds, "why did we drop redis")) === "Because redis added ops burden.");
