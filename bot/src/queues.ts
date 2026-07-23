@@ -5,6 +5,7 @@ export const QUEUE = {
   command: "command",
   lifecycle: "lifecycle",
   driveSync: "drive-sync",
+  githubSync: "github-sync",
   linearSync: "linear-sync",
   linearWebhook: "linear-webhook",
   connectorScheduler: "connector-scheduler",
@@ -65,6 +66,13 @@ export interface DriveSyncJob {
   workspaceId: string;
   connectorId: string;
   actorUserId?: string;
+}
+
+export interface GithubSyncJob {
+  workspaceId: string;
+  connectorId: string;
+  actorUserId?: string;
+  backfill?: boolean;
 }
 
 export interface LinearSyncJob {

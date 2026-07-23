@@ -9,10 +9,11 @@ import { runImprove } from "./lifecycle.js";
 import { CATCH_RETRY_OPTIONS, QUEUE, catchFailureRecord } from "./queues.js";
 import type { DeliveryRefs } from "./delivery.js";
 import type { TenantCredentials } from "./cognee.js";
-import type { DeliveryMode } from "./types.js";
+import type { DecisionRecord, DeliveryMode } from "./types.js";
 import type { CatchJob, CommandJob, IngestJob } from "./queues.js";
-import type { DriveSyncJob, LinearSyncJob, LinearWebhookJob } from "./queues.js";
+import type { DriveSyncJob, GithubSyncJob, LinearSyncJob, LinearWebhookJob } from "./queues.js";
 import { runGoogleDriveSync } from "./google-drive.js";
+import { indexGithubDecisionContents, runGithubDecisionSync } from "./github-content.js";
 import { runLinearSync } from "./linear-content.js";
 import { processLinearWebhook } from "./linear.js";
 import * as enterprise from "./enterprise-db.js";
@@ -29,6 +30,7 @@ export async function startQueue(): Promise<PgBoss> {
   await boss.createQueue(QUEUE.command);
   await boss.createQueue(QUEUE.lifecycle);
   await boss.createQueue(QUEUE.driveSync);
+  await boss.createQueue(QUEUE.githubSync);
   await boss.createQueue(QUEUE.linearSync);
   await boss.createQueue(QUEUE.linearWebhook);
   await boss.createQueue(QUEUE.connectorScheduler);
@@ -39,6 +41,9 @@ export async function startQueue(): Promise<PgBoss> {
   await boss.work<DriveSyncJob>(QUEUE.driveSync, async (jobs) => {
     for (const job of jobs) await runGoogleDriveSync(job.data);
   });
+  await boss.work<GithubSyncJob>(QUEUE.githubSync, async (jobs) => {
+    for (const job of jobs) await runGithubDecisionSync(job.data);
+  });
   await boss.work<LinearSyncJob>(QUEUE.linearSync, async (jobs) => {
     for (const job of jobs) await runLinearSync(job.data);
   });
@@ -48,6 +53,18 @@ export async function startQueue(): Promise<PgBoss> {
   await boss.work(QUEUE.connectorScheduler, async () => {
     await enterprise.pruneExpiredRateLimits();
     await content.failStaleConnectorSyncs();
+    for (const connector of await db.listActiveConnectorsByProvider("github")) {
+      await boss.send(QUEUE.githubSync, {
+        workspaceId: connector.workspaceId,
+        connectorId: connector.connectorId,
+      } satisfies GithubSyncJob, {
+        singletonKey: connector.connectorId,
+        singletonSeconds: 15 * 60,
+        retryLimit: 3,
+        retryDelay: 30,
+        retryBackoff: true,
+      });
+    }
     for (const connector of await db.listActiveConnectorsByProvider("gdrive")) {
       await boss.send(QUEUE.driveSync, {
         workspaceId: connector.workspaceId,
@@ -76,7 +93,29 @@ export async function startQueue(): Promise<PgBoss> {
   // Apply accumulated maintainer feedback to the graph once an hour (the /improve verb).
   await boss.schedule(QUEUE.lifecycle, "0 * * * *");
   await boss.schedule(QUEUE.connectorScheduler, "*/15 * * * *");
+  for (const connector of await db.listActiveConnectorsByProvider("github")) {
+    await boss.send(QUEUE.githubSync, {
+      workspaceId: connector.workspaceId,
+      connectorId: connector.connectorId,
+      backfill: true,
+    } satisfies GithubSyncJob, {
+      singletonKey: `backfill:${connector.connectorId}`,
+      singletonSeconds: 60,
+      retryLimit: 3,
+      retryDelay: 30,
+      retryBackoff: true,
+    });
+  }
   return boss;
+}
+
+async function indexIngestedGithubRecords(records: DecisionRecord[]): Promise<void> {
+  if (records.length === 0) return;
+  const first = records[0];
+  const supersedingIds = new Set(records.map((record) => record.decisionId));
+  const superseded = (await db.getDecisionRecords(first.installationId, first.repo))
+    .filter((record) => record.supersededBy && supersedingIds.has(record.supersededBy));
+  await indexGithubDecisionContents([...records, ...superseded]);
 }
 
 // Backfill (whole repo) or live single-item ingest -> extract decision -> remember().
@@ -93,11 +132,17 @@ async function ingestWorker(jobs: PgBoss.Job<IngestJob>[]): Promise<void> {
 
     if (data.number != null) {
       const it = await gh.fetchItem(data.installationId, data.repo, data.number);
-      await ingestItem(inst, cfg, creds, it, data.repo);
+      const record = await ingestItem(inst, cfg, creds, it, data.repo);
+      if (record) await indexIngestedGithubRecords([record]);
       continue;
     }
     const items = await gh.fetchClosedItems(data.installationId, data.repo, data.limit ?? 50);
-    for (const it of items) await ingestItem(inst, cfg, creds, it, data.repo);
+    const records = [];
+    for (const it of items) {
+      const record = await ingestItem(inst, cfg, creds, it, data.repo);
+      if (record) records.push(record);
+    }
+    await indexIngestedGithubRecords(records);
     console.log(`ingest done: ${data.repo} (${items.length} items scanned)`);
   }
 }

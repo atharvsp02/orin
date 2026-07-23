@@ -804,8 +804,12 @@ export async function upsertDecisionRecord(d: DecisionRecord): Promise<void> {
        (decision_id, installation_id, repo, source_type, source_url, title, outcome, reasoning_text, decided_at, terms, superseded_by, cognee_data_id)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
      ON CONFLICT (installation_id, repo, decision_id) DO UPDATE
-       SET outcome        = EXCLUDED.outcome,
+       SET source_type    = EXCLUDED.source_type,
+           source_url     = EXCLUDED.source_url,
+           title          = EXCLUDED.title,
+           outcome        = EXCLUDED.outcome,
            reasoning_text = EXCLUDED.reasoning_text,
+           decided_at     = EXCLUDED.decided_at,
            terms          = EXCLUDED.terms,
            superseded_by  = EXCLUDED.superseded_by,
            cognee_data_id = EXCLUDED.cognee_data_id`,

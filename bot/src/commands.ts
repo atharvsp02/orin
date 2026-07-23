@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import PgBoss from "pg-boss";
 import * as db from "./db.js";
 import { installationOctokit } from "./github.js";
+import { indexGithubDecisionContents } from "./github-content.js";
 import { ask, overrideDecision, seedRules, listRules } from "./pipeline.js";
 import { recordThreadFeedback, forgetTenant } from "./lifecycle.js";
 import { QUEUE } from "./queues.js";
@@ -141,8 +142,12 @@ export async function handleCommand(job: CommandJob, boss: PgBoss): Promise<void
         break;
       }
       const sourceUrl = `https://github.com/${job.repo}/${job.isPr ? "pull" : "issues"}/${job.number}`;
-      const newId = await overrideDecision(inst, creds, { repo: job.repo, citedRef: ref, reason: cmd.reason, by: job.sender, number: job.number, sourceUrl });
-      await reply(`✅ Recorded **${newId}** superseding **${ref}** — Orin will no longer flag this decision.`);
+      const record = await overrideDecision(inst, creds, { repo: job.repo, citedRef: ref, reason: cmd.reason, by: job.sender, number: job.number, sourceUrl });
+      const superseded = await db.getDecisionRecord(job.installationId, job.repo, ref);
+      await indexGithubDecisionContents([record, ...(superseded ? [superseded] : [])]).catch((error) => {
+        console.warn("GitHub decision search indexing failed:", error instanceof Error ? error.message : String(error));
+      });
+      await reply(`✅ Recorded **${record.decisionId}** superseding **${ref}**. Orin will no longer flag this decision.`);
       break;
     }
     case "ignore": {

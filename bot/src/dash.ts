@@ -20,6 +20,7 @@ import * as content from "./content-db.js";
 import type { ConnectorAccount, ConnectorResource } from "./connectors.js";
 import type { DecisionRecord } from "./types.js";
 import { safeJobError } from "./queues.js";
+import { contentAllowed as policyAllowsContent } from "./content.js";
 
 const cog = { baseUrl: config.cogneeBaseUrl };
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -43,18 +44,36 @@ async function ensureGithubRepoResources(
   return resources;
 }
 
-function authorizedGithubRecords(
+async function authorizedGithubRecords(
   access: enterprise.WorkspaceAccess,
+  workspaceId: string,
+  userId: string,
+  connector: ConnectorAccount,
   resources: ConnectorResource[],
   records: DecisionRecord[],
-): DecisionRecord[] {
+  authorizedResourceIds?: Set<string>,
+): Promise<DecisionRecord[]> {
   const byRepo = new Map(resources.filter((resource) => resource.kind === "repository").map((resource) => [resource.externalId, resource]));
+  const allowedResources = authorizedResourceIds ?? await content.authorizedMemberResourceIds({
+    workspaceId,
+    userId,
+    connectorId: connector.connectorId,
+    resourceIds: resources.map((resource) => resource.resourceId),
+  });
+  const policies = await content.listConnectorPolicies(workspaceId, connector.connectorId);
   return records.filter((record) => {
     const resource = byRepo.get(record.repo);
-    return Boolean(resource?.enabled) && can(access.membership.role, "search.use", access.grants, {
+    return Boolean(resource && allowedResources.has(resource.resourceId)) && can(access.membership.role, "search.use", access.grants, {
       connectorProvider: "github",
       resourceId: resource?.resourceId,
-      sourceType: record.sourceType,
+      sourceType: "decision",
+    }) && policyAllowsContent(policies, {
+      provider: "github",
+      resourceId: record.repo,
+      owner: record.repo.split("/")[0] ?? "",
+      mimeType: "text/plain",
+      path: record.repo,
+      sourceType: "decision",
     });
   });
 }
@@ -75,7 +94,7 @@ async function workspaceGithubRecords(
   if (!connector || connector.workspaceId !== workspaceId || connector.status !== "active") return [];
   const records = await db.getDecisionRecords(installationId);
   const resources = await ensureGithubRepoResources(connector, records.map((record) => record.repo));
-  return authorizedGithubRecords(access, resources, records);
+  return authorizedGithubRecords(access, workspaceId, access.user.userId, connector, resources, records);
 }
 
 async function visibleConnectorInventory(
@@ -380,27 +399,52 @@ export async function handleDash(req: IncomingMessage, res: ServerResponse, path
     }
     let records: DecisionRecord[] = [];
     let githubResources: ConnectorResource[] = [];
+    let authorizedGithubResourceIds = new Set<string>();
     if (githubConnector) {
       records = await db.getDecisionRecords(inst);
       githubResources = await ensureGithubRepoResources(githubConnector, [
         ...installedRepos,
         ...records.map((record) => record.repo),
       ]);
+      authorizedGithubResourceIds = await content.authorizedMemberResourceIds({
+        workspaceId: currentWorkspace.workspaceId,
+        userId: auth.user.userId,
+        connectorId: githubConnector.connectorId,
+        resourceIds: githubResources.map((resource) => resource.resourceId),
+      });
       resources = [
         ...resources.filter((item) => item.connectorId !== githubConnector.connectorId),
-        ...githubResources.filter((item) => can(
-          access!.membership.role,
-          "connectors.read",
-          access!.grants,
-          { connectorProvider: "github", resourceId: item.resourceId },
-        )),
+        ...githubResources.filter((item) =>
+          can(
+            access!.membership.role,
+            "connectors.read",
+            access!.grants,
+            { connectorProvider: "github", resourceId: item.resourceId },
+          ) && (
+            authorizedGithubResourceIds.has(item.resourceId) ||
+            can(
+              access!.membership.role,
+              "connectors.manage",
+              access!.grants,
+              { connectorProvider: "github", resourceId: item.resourceId },
+            )
+          )
+        ),
       ];
     }
     const visibleRecords = githubConnector?.status === "active"
-      ? authorizedGithubRecords(access!, githubResources, records)
+      ? await authorizedGithubRecords(
+          access!,
+          currentWorkspace.workspaceId,
+          auth.user.userId,
+          githubConnector,
+          githubResources,
+          records,
+          authorizedGithubResourceIds,
+        )
       : [];
     const catchRepos = githubConnector?.status === "active" ? githubResources
-      .filter((item) => item.kind === "repository" && item.enabled && can(
+      .filter((item) => item.kind === "repository" && authorizedGithubResourceIds.has(item.resourceId) && can(
         access!.membership.role,
         "search.use",
         access!.grants,
@@ -411,6 +455,10 @@ export async function handleDash(req: IncomingMessage, res: ServerResponse, path
       db.countPreventedForRepos(inst, catchRepos),
       db.recentDeliveriesForRepos(inst, catchRepos, 20),
     ]);
+    const visibleGithubRepos = new Set(resources
+      .filter((resource) => resource.connectorId === githubConnector?.connectorId && resource.kind === "repository")
+      .map((resource) => resource.externalId));
+    installedRepos = installedRepos.filter((repo) => visibleGithubRepos.has(repo));
     const repos = [...new Set([...visibleRecords.map((record) => record.repo), ...catchRepos])].sort();
     const metrics = {
       prsPrevented,

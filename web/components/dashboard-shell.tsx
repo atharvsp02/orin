@@ -1623,7 +1623,7 @@ function ConnectorsView({
             </div>
             {connector && canManage ? (
               <div className="flex items-center gap-2">
-                {["gdrive", "linear"].includes(connector.provider) && <button onClick={() => syncConnector(connector.connectorId)} disabled={busy !== null} className="text-xs px-3 py-2 rounded-lg border border-zinc-700 text-zinc-300 disabled:opacity-40">{busy === `sync:${connector.connectorId}` ? "Queued" : "Sync now"}</button>}
+                {["gdrive", "github", "linear"].includes(connector.provider) && <button onClick={() => syncConnector(connector.connectorId)} disabled={busy !== null} className="text-xs px-3 py-2 rounded-lg border border-zinc-700 text-zinc-300 disabled:opacity-40">{busy === `sync:${connector.connectorId}` ? "Queued" : "Sync now"}</button>}
                 <button onClick={() => setConnectorEnabled(connector.connectorId, connector.status !== "active")} disabled={busy !== null} className="text-xs px-3 py-2 rounded-lg border border-zinc-700 text-zinc-300 disabled:opacity-40">{busy === connector.connectorId ? "Saving" : connector.status === "active" ? "Disable" : "Enable"}</button>
                 {connector.provider === "gdrive" && <button onClick={() => disconnectDrive(connector.connectorId)} disabled={busy !== null} className="text-xs px-3 py-2 rounded-lg border border-red-950 text-red-400 disabled:opacity-40">Disconnect</button>}
               </div>

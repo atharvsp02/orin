@@ -414,6 +414,22 @@ function searchRow(row: Record<string, unknown>, query: string): SearchResult {
   };
 }
 
+const SEARCH_STOP_WORDS = new Set([
+  "a", "about", "an", "and", "are", "because", "did", "do", "does", "for", "how", "in", "is", "it",
+  "me", "of", "on", "or", "our", "please", "tell", "that", "the", "this", "to", "was", "we",
+  "were", "what", "when", "where", "who", "why", "with",
+]);
+
+export function searchTerms(value: string): string[] {
+  return [...new Set((value.toLowerCase().match(/[a-z0-9_]{2,}/g) ?? [])
+    .filter((token) => !SEARCH_STOP_WORDS.has(token)))]
+    .slice(0, 32);
+}
+
+export function searchTsQuery(value: string): string {
+  return searchTerms(value).join(" | ");
+}
+
 function featureConditionSql(grant: string, connector: string, item: string): string {
   return `(
     NOT EXISTS (
@@ -548,7 +564,11 @@ export async function authorizedSearch(input: {
   const principals = [...await userContentPrincipals(input.userId, input.workspaceId)];
   if (principals.length === 0) return [];
   const { rows } = await pool.query(
-    `WITH search_query AS (SELECT websearch_to_tsquery('simple', $3::text) AS value),
+    `WITH search_query AS (
+            SELECT websearch_to_tsquery('simple', $3::text) AS exact,
+                   to_tsquery('simple', $9::text) AS broad,
+                   $10::text[] AS terms
+          ),
           active_access AS (
             SELECT membership.role
             FROM workspace_memberships membership
@@ -571,7 +591,8 @@ export async function authorizedSearch(input: {
             )
           )
      SELECT i.*, c.provider,
-            (ts_rank_cd(i.search_vector, q.value) +
+            (ts_rank_cd(i.search_vector, q.exact) +
+             ts_rank_cd(i.search_vector, q.broad) * 0.35 +
              CASE WHEN i.source_updated_at > now() - interval '30 days' THEN 0.05 ELSE 0 END) AS score
      FROM content_items i
      JOIN connectors c ON c.connector_id = i.connector_id AND c.workspace_id = i.workspace_id
@@ -583,7 +604,7 @@ export async function authorizedSearch(input: {
        AND c.status = 'active'
        AND (i.resource_id IS NULL OR (
          r.enabled = true AND r.acl_status = 'current'
-         AND (c.provider NOT IN ('slack', 'linear') OR r.acl_synced_at > now() - interval '30 minutes')
+         AND (c.provider NOT IN ('slack', 'linear', 'github') OR r.acl_synced_at > now() - interval '30 minutes')
        ))
        AND ($4::text IS NULL OR c.provider = $4::text)
        AND ($5::uuid IS NULL OR i.resource_id = $5::uuid)
@@ -598,7 +619,14 @@ export async function authorizedSearch(input: {
          )
        )
        AND (
-         i.search_vector @@ q.value OR
+         i.search_vector @@ q.exact OR
+         (
+           i.search_vector @@ q.broad AND
+           (
+             SELECT count(*) FROM unnest(q.terms) AS broad_term(value)
+             WHERE i.search_vector @@ plainto_tsquery('simple', broad_term.value)
+           ) >= LEAST(3, GREATEST(1, CEIL(cardinality(q.terms) * 0.6)::int))
+         ) OR
          position(lower($3::text) in lower(i.title)) > 0 OR
          position(lower($3::text) in lower(i.body)) > 0
        )
@@ -613,6 +641,8 @@ export async function authorizedSearch(input: {
       limit,
       input.userId,
       input.permission ?? null,
+      searchTsQuery(query),
+      searchTerms(query),
     ],
   );
   return rows.map((row) => searchRow(row, query));
@@ -660,7 +690,7 @@ export async function getAuthorizedItemsByIds(input: {
        AND c.status = 'active'
        AND (i.resource_id IS NULL OR (
          r.enabled = true AND r.acl_status = 'current'
-         AND (c.provider NOT IN ('slack', 'linear') OR r.acl_synced_at > now() - interval '30 minutes')
+         AND (c.provider NOT IN ('slack', 'linear', 'github') OR r.acl_synced_at > now() - interval '30 minutes')
        ))
        AND ${featureAuthorizationSql("$5", "c", "i")}
        AND ${connectorContentPolicySql("c", "i", "r")}
@@ -675,6 +705,41 @@ export async function getAuthorizedItemsByIds(input: {
     [input.workspaceId, itemIds, principals, input.userId, input.permission ?? null],
   );
   return rows.map((row) => searchRow(row, ""));
+}
+
+export async function authorizedMemberResourceIds(input: {
+  workspaceId: string;
+  userId: string;
+  connectorId: string;
+  resourceIds: string[];
+}): Promise<Set<string>> {
+  const resourceIds = [...new Set(input.resourceIds)].slice(0, 10_000);
+  if (resourceIds.length === 0) return new Set();
+  const principals = [...await userContentPrincipals(input.userId, input.workspaceId)];
+  if (principals.length === 0) return new Set();
+  const { rows } = await pool.query(
+    `SELECT resource.resource_id
+     FROM connector_resources resource
+     JOIN connectors connector ON connector.connector_id = resource.connector_id
+     WHERE connector.workspace_id = $1::uuid
+       AND connector.connector_id = $2::uuid
+       AND connector.status = 'active'
+       AND resource.resource_id = ANY($3::uuid[])
+       AND resource.enabled = true
+       AND resource.acl_status = 'current'
+       AND (
+         connector.provider NOT IN ('slack', 'linear', 'github') OR
+         resource.acl_synced_at > now() - interval '30 minutes'
+       )
+       AND EXISTS (
+         SELECT 1 FROM connector_resource_memberships membership
+         WHERE membership.workspace_id = connector.workspace_id
+           AND membership.resource_id = resource.resource_id
+           AND membership.principal = ANY($4::text[])
+       )`,
+    [input.workspaceId, input.connectorId, resourceIds, principals],
+  );
+  return new Set(rows.map((row) => String(row.resource_id)));
 }
 
 function policyFromRow(row: Record<string, unknown>): StoredConnectorPolicy {

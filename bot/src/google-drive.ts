@@ -14,7 +14,7 @@ import {
 import type { ConnectorAccount } from "./connectors.js";
 import * as db from "./db.js";
 import * as enterprise from "./enterprise-db.js";
-import { QUEUE, safeJobError, type DriveSyncJob, type LinearSyncJob } from "./queues.js";
+import { QUEUE, safeJobError, type DriveSyncJob, type GithubSyncJob, type LinearSyncJob } from "./queues.js";
 
 const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.readonly";
 const MAX_DOWNLOAD_BYTES = 2_000_000;
@@ -686,7 +686,7 @@ export async function handleWorkspaceGoogleDrive(input: {
       return true;
     }
     const connector = await db.getConnectorById(workspaceId, sub);
-    if (!connector || !["gdrive", "linear"].includes(connector.provider)) {
+    if (!connector || !["gdrive", "github", "linear"].includes(connector.provider)) {
       send(res, 404, { error: "syncable connector not found" });
       return true;
     }
@@ -699,8 +699,17 @@ export async function handleWorkspaceGoogleDrive(input: {
       send(res, 503, { error: "connector sync queue is unavailable" });
       return true;
     }
-    const queueName = connector.provider === "linear" ? QUEUE.linearSync : QUEUE.driveSync;
-    const job = { workspaceId, connectorId: sub, actorUserId } satisfies DriveSyncJob | LinearSyncJob;
+    const queueName = connector.provider === "github"
+      ? QUEUE.githubSync
+      : connector.provider === "linear"
+        ? QUEUE.linearSync
+        : QUEUE.driveSync;
+    const job = {
+      workspaceId,
+      connectorId: sub,
+      actorUserId,
+      ...(connector.provider === "github" ? { backfill: true } : {}),
+    } satisfies DriveSyncJob | GithubSyncJob | LinearSyncJob;
     const jobId = await queue.send(queueName, job, {
       singletonKey: sub,
       singletonSeconds: 60,

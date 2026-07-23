@@ -22,10 +22,10 @@ export async function ingestItem(
   creds: TenantCredentials,
   it: RepoItem,
   repo: string,
-): Promise<void> {
+): Promise<DecisionRecord | null> {
   const thread = `${it.title}\n\n${it.body}\n\n${it.comments.join("\n---\n")}`;
   const d = await llm.extractDecision(cfg.llmProvider, thread);
-  if (!d.isDecision) return;
+  if (!d.isDecision) return null;
 
   const decisionId = `${it.kind.toUpperCase()}-${it.number}`;
   const doc =
@@ -37,7 +37,7 @@ export async function ingestItem(
     content: doc,
     ontologyKey: ONTOLOGY_KEY,
   });
-  await db.upsertDecisionRecord({
+  const record: DecisionRecord = {
     decisionId,
     installationId: inst.installationId,
     repo,
@@ -50,10 +50,12 @@ export async function ingestItem(
     terms: d.terms,
     cogneeDataId: dataId(res),
     createdAt: "",
-  });
+  };
+  await db.upsertDecisionRecord(record);
   if (d.supersedesRefs.length) {
     await db.markSuperseded(inst.installationId, repo, d.supersedesRefs, decisionId);
   }
+  return record;
 }
 
 /** Given PR text, decide whether to comment and what to say (grounding + score gates + judgment). */
@@ -312,12 +314,12 @@ export async function overrideDecision(
   inst: Installation,
   creds: TenantCredentials,
   a: { repo: string; citedRef: string; reason: string; by: string; number: number; sourceUrl: string },
-): Promise<string> {
+): Promise<DecisionRecord> {
   const newId = `OVERRIDE-${a.number}-${Math.random().toString(36).slice(2, 8)}`;
   const cited = await db.getDecisionRecord(inst.installationId, a.repo, a.citedRef);
   const doc = `Decision ${newId} (ACCEPTED): Override of ${a.citedRef} by @${a.by}. ${a.reason} Source: ${a.sourceUrl}`;
   const res = await cognee.remember(cog, creds, { datasetName: inst.datasetName, filename: `${newId}.txt`, content: doc, ontologyKey: ONTOLOGY_KEY });
-  await db.upsertDecisionRecord({
+  const record: DecisionRecord = {
     decisionId: newId,
     installationId: inst.installationId,
     repo: a.repo,
@@ -330,10 +332,11 @@ export async function overrideDecision(
     terms: cited?.terms ?? [],
     cogneeDataId: dataId(res),
     createdAt: "",
-  });
+  };
+  await db.upsertDecisionRecord(record);
   // Exact supersession — the caller must have already authorized this citedRef against the thread.
   await db.setSuperseded(inst.installationId, a.repo, a.citedRef, newId);
-  return newId;
+  return record;
 }
 
 function dataId(res: unknown): string | undefined {
