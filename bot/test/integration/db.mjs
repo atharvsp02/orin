@@ -16,6 +16,7 @@ const BOT = new URL("../../dist/", import.meta.url).href;
 const db = await import(`${BOT}db.js`);
 const enterprise = await import(`${BOT}enterprise-db.js`);
 const contentDb = await import(`${BOT}content-db.js`);
+const githubContent = await import(`${BOT}github-content.js`);
 const slack = await import(`${BOT}slack.js`);
 const linearContent = await import(`${BOT}linear-content.js`);
 const linearAdapter = await import(`${BOT}linear.js`);
@@ -998,6 +999,224 @@ const wide = await db.getDecisionRecords(INST); // installation-wide (adapters)
 ok("installation-wide sees both repos' PR-42", wide.length === 2);
 const one = await db.getDecisionRecord(INST, "acme/a", "PR-42");
 ok("getDecisionRecord repo-scoped", one?.repo === "acme/a" && one?.sourceUrl === "https://x/PR-42");
+await db.upsertDecisionRecord({
+  ...mk("acme/a", "PR-42"),
+  title: "Updated PR-42 title",
+  sourceUrl: "https://x/updated/PR-42",
+  decidedAt: "2026-02-02T00:00:00Z",
+});
+const updatedDecision = await db.getDecisionRecord(INST, "acme/a", "PR-42");
+ok("decision reingestion refreshes mutable source fields",
+  updatedDecision?.title === "Updated PR-42 title"
+  && updatedDecision.sourceUrl === "https://x/updated/PR-42"
+  && updatedDecision.decidedAt === "2026-02-02T00:00:00Z");
+
+const GITHUB_SEARCH_INST = 900004;
+await db.deleteInstallation(GITHUB_SEARCH_INST);
+await db.upsertInstallation({
+  installationId: GITHUB_SEARCH_INST,
+  githubAccount: "search-fixture",
+  datasetName: `repo-${GITHUB_SEARCH_INST}`,
+  cogneeApiKey: "search-fixture-key",
+});
+const githubSearchWorkspace = await db.getWorkspaceByInstallation(GITHUB_SEARCH_INST);
+const githubSearchConnector = await db.getConnector("github", String(GITHUB_SEARCH_INST));
+await enterprise.bootstrapWorkspaceMembership(ownerUser.userId, githubSearchWorkspace.workspaceId);
+await enterprise.inviteWorkspaceMember({
+  workspaceId: githubSearchWorkspace.workspaceId,
+  email: "viewer@example.com",
+  role: "viewer",
+});
+await enterprise.addUserIdentity(viewerMembership.userId, {
+  provider: "github_login",
+  externalId: "reviewer",
+  handle: "reviewer",
+});
+const githubDecision = {
+  decisionId: "ISSUE-88",
+  installationId: GITHUB_SEARCH_INST,
+  repo: "acme/private-decisions",
+  sourceType: "issue",
+  sourceUrl: "https://github.com/acme/private-decisions/issues/88",
+  title: "Reject Redis as a session cache",
+  outcome: "rejected",
+  reasoningText: "Adding Redis would create deployment complexity without enough benefit.",
+  decidedAt: "2026-07-20T10:00:00Z",
+  terms: ["redis", "deployment"],
+  cogneeDataId: "github-search-issue-88",
+  createdAt: "",
+};
+await db.upsertDecisionRecord(githubDecision);
+const githubClient = ({ visibility = "private", collaborators = [], fail = false } = {}) => ({
+  rest: {
+    repos: {
+      async get() {
+        if (fail) throw new Error("GitHub repository access unavailable");
+        return { data: { visibility, private: visibility !== "public" } };
+      },
+      async listCollaborators() {
+        return { data: [] };
+      },
+    },
+  },
+  async paginate() {
+    return collaborators.map((login) => ({ login }));
+  },
+});
+eq("GitHub decision backfill indexes one private source", await githubContent.runGithubDecisionSync({
+  workspaceId: githubSearchWorkspace.workspaceId,
+  connectorId: githubSearchConnector.connectorId,
+  actorUserId: ownerUser.userId,
+  backfill: true,
+}, githubClient({ collaborators: ["owner"] })), { repositories: 1, written: 1, failed: 0 });
+const githubOwnerSearch = await contentDb.authorizedSearch({
+  workspaceId: githubSearchWorkspace.workspaceId,
+  userId: ownerUser.userId,
+  permission: "search.use",
+  query: "Why Redis addition rejected",
+  provider: "github",
+});
+ok("natural language search finds the indexed GitHub decision and source URL",
+  githubOwnerSearch.length === 1
+  && githubOwnerSearch[0].url === githubDecision.sourceUrl
+  && githubOwnerSearch[0].sourceType === "decision");
+ok("a private repository non-collaborator cannot search its decision", (await contentDb.authorizedSearch({
+  workspaceId: githubSearchWorkspace.workspaceId,
+  userId: viewerMembership.userId,
+  permission: "search.use",
+  query: "Why Redis addition rejected",
+  provider: "github",
+})).length === 0);
+await githubContent.syncGithubRepositoryAccess(
+  GITHUB_SEARCH_INST,
+  githubDecision.repo,
+  githubClient({ collaborators: ["owner", "reviewer", "REVIEWER"] }),
+);
+const githubViewerSearch = await contentDb.authorizedSearch({
+  workspaceId: githubSearchWorkspace.workspaceId,
+  userId: viewerMembership.userId,
+  permission: "search.use",
+  query: "Why Redis addition rejected",
+  provider: "github",
+});
+ok("an effective private repository collaborator can search its decision", githubViewerSearch.length === 1);
+const githubSearchResource = await db.getConnectorResource(
+  githubSearchConnector.connectorId,
+  "repository",
+  githubDecision.repo,
+);
+ok("dashboard resource authorization includes an effective GitHub collaborator", (await contentDb.authorizedMemberResourceIds({
+  workspaceId: githubSearchWorkspace.workspaceId,
+  userId: viewerMembership.userId,
+  connectorId: githubSearchConnector.connectorId,
+  resourceIds: [githubSearchResource.resourceId],
+})).has(githubSearchResource.resourceId));
+await sql.query(
+  `UPDATE connector_resources SET acl_synced_at = now() - interval '31 minutes' WHERE resource_id = $1`,
+  [githubSearchResource.resourceId],
+);
+ok("an expired GitHub repository ACL fails search closed", (await contentDb.authorizedSearch({
+  workspaceId: githubSearchWorkspace.workspaceId,
+  userId: viewerMembership.userId,
+  permission: "search.use",
+  query: "Why Redis addition rejected",
+  provider: "github",
+})).length === 0);
+ok("an expired GitHub repository ACL fails citation rechecks closed", (await contentDb.getAuthorizedItemsByIds({
+  workspaceId: githubSearchWorkspace.workspaceId,
+  userId: viewerMembership.userId,
+  permission: "search.use",
+  itemIds: [githubViewerSearch[0].itemId],
+})).length === 0);
+ok("dashboard resource authorization fails an expired GitHub ACL closed", (await contentDb.authorizedMemberResourceIds({
+  workspaceId: githubSearchWorkspace.workspaceId,
+  userId: viewerMembership.userId,
+  connectorId: githubSearchConnector.connectorId,
+  resourceIds: [githubSearchResource.resourceId],
+})).size === 0);
+await githubContent.syncGithubRepositoryAccess(
+  GITHUB_SEARCH_INST,
+  githubDecision.repo,
+  githubClient({ collaborators: ["owner", "reviewer"] }),
+);
+ok("refreshing a GitHub repository ACL restores authorized evidence", (await contentDb.authorizedSearch({
+  workspaceId: githubSearchWorkspace.workspaceId,
+  userId: viewerMembership.userId,
+  permission: "search.use",
+  query: "Why Redis addition rejected",
+  provider: "github",
+})).length === 1);
+await githubContent.syncGithubRepositoryAccess(
+  GITHUB_SEARCH_INST,
+  githubDecision.repo,
+  githubClient({ collaborators: ["owner"] }),
+);
+ok("removing a GitHub collaborator immediately revokes search access", (await contentDb.authorizedSearch({
+  workspaceId: githubSearchWorkspace.workspaceId,
+  userId: viewerMembership.userId,
+  permission: "search.use",
+  query: "Why Redis addition rejected",
+  provider: "github",
+})).length === 0);
+ok("removing a GitHub collaborator immediately revokes citation access", (await contentDb.getAuthorizedItemsByIds({
+  workspaceId: githubSearchWorkspace.workspaceId,
+  userId: viewerMembership.userId,
+  permission: "search.use",
+  itemIds: [githubViewerSearch[0].itemId],
+})).length === 0);
+ok("dashboard resource authorization removes a former GitHub collaborator", (await contentDb.authorizedMemberResourceIds({
+  workspaceId: githubSearchWorkspace.workspaceId,
+  userId: viewerMembership.userId,
+  connectorId: githubSearchConnector.connectorId,
+  resourceIds: [githubSearchResource.resourceId],
+})).size === 0);
+await githubContent.syncGithubRepositoryAccess(
+  GITHUB_SEARCH_INST,
+  githubDecision.repo,
+  githubClient({ visibility: "public" }),
+);
+ok("workspace members can search decisions from a public GitHub repository", (await contentDb.authorizedSearch({
+  workspaceId: githubSearchWorkspace.workspaceId,
+  userId: viewerMembership.userId,
+  permission: "search.use",
+  query: "Why Redis addition rejected",
+  provider: "github",
+})).length === 1);
+eq("a total GitHub ACL sync failure is surfaced", await githubContent.runGithubDecisionSync({
+  workspaceId: githubSearchWorkspace.workspaceId,
+  connectorId: githubSearchConnector.connectorId,
+}, githubClient({ fail: true })).then(() => "succeeded", error => error.message), "all GitHub repository ACL synchronizations failed");
+ok("a failed GitHub repository ACL sync fails search closed", (await contentDb.authorizedSearch({
+  workspaceId: githubSearchWorkspace.workspaceId,
+  userId: viewerMembership.userId,
+  permission: "search.use",
+  query: "Why Redis addition rejected",
+  provider: "github",
+})).length === 0);
+eq("a later GitHub ACL-only sync recovers without rewriting decisions", await githubContent.runGithubDecisionSync({
+  workspaceId: githubSearchWorkspace.workspaceId,
+  connectorId: githubSearchConnector.connectorId,
+}, githubClient({ visibility: "public" })), { repositories: 1, written: 0, failed: 0 });
+ok("successful GitHub ACL recovery restores search access", (await contentDb.authorizedSearch({
+  workspaceId: githubSearchWorkspace.workspaceId,
+  userId: viewerMembership.userId,
+  permission: "search.use",
+  query: "Why Redis addition rejected",
+  provider: "github",
+})).length === 1);
+await db.setConnectorResourceEnabled(
+  githubSearchWorkspace.workspaceId,
+  githubSearchResource.resourceId,
+  false,
+);
+ok("disabling a GitHub repository immediately removes its decisions from search", (await contentDb.authorizedSearch({
+  workspaceId: githubSearchWorkspace.workspaceId,
+  userId: viewerMembership.userId,
+  permission: "search.use",
+  query: "Why Redis addition rejected",
+  provider: "github",
+})).length === 0);
+await db.deleteInstallation(GITHUB_SEARCH_INST);
 
 // --- supersession: exact (setSuperseded) must not touch the other repo ---
 await db.setSuperseded(INST, "acme/a", "PR-42", "OVERRIDE-1");
@@ -1225,6 +1444,19 @@ await googleDrive.handleWorkspaceGoogleDrive({
 ok("dashboard manual sync queues the Linear connector", linearSyncResponse.status === 202
   && queuedConnectorSyncs[0]?.name === "linear-sync"
   && queuedConnectorSyncs[0]?.data.connectorId === linearConnector.connectorId);
+const githubSyncResponse = new MockResponse();
+await googleDrive.handleWorkspaceGoogleDrive({
+  req: { method: "POST" },
+  res: githubSyncResponse,
+  workspaceId: workspace.workspaceId,
+  actorUserId: ownerUser.userId,
+  resource: "syncs",
+  sub: githubConnector.connectorId,
+});
+ok("dashboard manual sync queues a GitHub decision backfill", githubSyncResponse.status === 202
+  && queuedConnectorSyncs[1]?.name === "github-sync"
+  && queuedConnectorSyncs[1]?.data.connectorId === githubConnector.connectorId
+  && queuedConnectorSyncs[1]?.data.backfill === true);
 const linearGuest = await enterprise.inviteWorkspaceMember({
   workspaceId: independentWorkspace.workspaceId,
   email: "linear-guest@example.com",
