@@ -976,7 +976,7 @@ await db.deleteWorkspace(foreignWorkspace.workspaceId);
 
 // --- tenant_config defaults ---
 const cfg = await db.getTenantConfig(INST);
-ok("config defaults: llmProvider deepseek", cfg.llmProvider === "deepseek");
+ok("config defaults: llmProvider openai", cfg.llmProvider === "openai");
 ok("config defaults: blockOnRepropose true", cfg.blockOnRepropose === true);
 ok("config defaults: deliveryMode check", cfg.deliveryMode === "check");
 

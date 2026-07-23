@@ -33,10 +33,12 @@ export async function initSchema(): Promise<void> {
       score_cutoff         REAL NOT NULL DEFAULT 0.6,
       auto_comment         BOOLEAN NOT NULL DEFAULT true,
       custom_instructions  TEXT NOT NULL DEFAULT '',
-      llm_provider         TEXT NOT NULL DEFAULT 'deepseek',
+      llm_provider         TEXT NOT NULL DEFAULT 'openai',
       delivery_mode        TEXT NOT NULL DEFAULT 'check',
       block_on_repropose   BOOLEAN NOT NULL DEFAULT true
     );
+    ALTER TABLE tenant_config ALTER COLUMN llm_provider SET DEFAULT 'openai';
+    UPDATE tenant_config SET llm_provider = 'openai' WHERE llm_provider = 'deepseek';
     CREATE TABLE IF NOT EXISTS decision_records (
       decision_id     TEXT   NOT NULL,
       installation_id BIGINT NOT NULL REFERENCES installations(installation_id) ON DELETE CASCADE,
@@ -792,7 +794,7 @@ export async function getTenantConfig(installationId: number): Promise<TenantCon
     scoreCutoff: r.score_cutoff ?? 0.6,
     autoComment: r.auto_comment ?? true,
     customInstructions: r.custom_instructions ?? "",
-    llmProvider: r.llm_provider ?? "deepseek",
+    llmProvider: r.llm_provider ?? "openai",
     deliveryMode: r.delivery_mode ?? "check",
     blockOnRepropose: r.block_on_repropose ?? true,
   };

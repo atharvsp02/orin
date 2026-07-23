@@ -4,8 +4,17 @@ process.env.GITHUB_APP_ID ??= "1";
 process.env.GITHUB_PRIVATE_KEY ??= "dummy";
 process.env.GITHUB_WEBHOOK_SECRET ??= "dummy";
 delete process.env.ORIN_LLM_PROVIDER;
+delete process.env.ORIN_LLM_FALLBACK_PROVIDER;
 
-const { buildJudgmentPrompt, normalizeJudgment, resolveLlmModelId, resolveLlmProvider } =
+const {
+  buildJudgmentPrompt,
+  normalizeJudgment,
+  resolveLlmFallbackProvider,
+  resolveLlmModelId,
+  resolveLlmProvider,
+  resolveLlmProviderOrder,
+  runWithLlmFallback,
+} =
   await import("../dist/llm.js");
 
 let pass = 0;
@@ -16,9 +25,19 @@ const ok = (name, condition) => {
   console.log(`  ${condition ? "PASS" : "FAIL"} ${name}`);
 };
 
-ok("defaults to DeepSeek", resolveLlmProvider(undefined) === "deepseek");
+ok("defaults to OpenAI", resolveLlmProvider(undefined) === "openai");
 ok("selects OpenAI", resolveLlmProvider("openai") === "openai");
 ok("normalizes provider input", resolveLlmProvider(" OpenAI ") === "openai");
+ok("defaults fallback to DeepSeek", resolveLlmFallbackProvider(undefined) === "deepseek");
+ok("allows fallback to be disabled", resolveLlmFallbackProvider("none") === null);
+ok(
+  "orders OpenAI before DeepSeek",
+  JSON.stringify(resolveLlmProviderOrder()) === JSON.stringify(["openai", "deepseek"]),
+);
+ok(
+  "deduplicates identical primary and fallback providers",
+  JSON.stringify(resolveLlmProviderOrder("openai", "openai")) === JSON.stringify(["openai"]),
+);
 ok("resolves a tenant OpenAI model", resolveLlmModelId("openai").startsWith("openai:"));
 ok("resolves a tenant DeepSeek model", resolveLlmModelId("deepseek").startsWith("deepseek:"));
 
@@ -29,6 +48,40 @@ try {
   invalidProviderRejected = true;
 }
 ok("rejects unsupported providers", invalidProviderRejected);
+let invalidFallbackRejected = false;
+try {
+  resolveLlmFallbackProvider("invalid");
+} catch {
+  invalidFallbackRejected = true;
+}
+ok("rejects an unsupported fallback provider", invalidFallbackRejected);
+
+const primaryCalls = [];
+const primaryResult = await runWithLlmFallback(["openai", "deepseek"], async (provider) => {
+  primaryCalls.push(provider);
+  return "primary";
+});
+ok("uses only OpenAI when the primary succeeds", primaryResult === "primary"
+  && JSON.stringify(primaryCalls) === JSON.stringify(["openai"]));
+
+const fallbackCalls = [];
+const fallbackResult = await runWithLlmFallback(["openai", "deepseek"], async (provider) => {
+  fallbackCalls.push(provider);
+  if (provider === "openai") throw new Error("OpenAI unavailable");
+  return "fallback";
+});
+ok("uses DeepSeek after an OpenAI failure", fallbackResult === "fallback"
+  && JSON.stringify(fallbackCalls) === JSON.stringify(["openai", "deepseek"]));
+
+let bothProvidersRejected = false;
+try {
+  await runWithLlmFallback(["openai", "deepseek"], async () => {
+    throw new Error("provider unavailable");
+  });
+} catch (error) {
+  bothProvidersRejected = error instanceof AggregateError && error.errors.length === 2;
+}
+ok("fails when OpenAI and DeepSeek both fail", bothProvidersRejected);
 
 const candidates = [
   {
