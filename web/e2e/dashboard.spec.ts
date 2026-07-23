@@ -324,9 +324,10 @@ test("hides management actions from a viewer", async ({ page }) => {
   await expect(page.getByText("Google Drive content policy", { exact: true })).toHaveCount(0)
 })
 
-test("proxies API requests through a bounded allowlisted route", async ({ request }) => {
+test("proxies API requests through a bounded allowlisted route", async ({ request, baseURL }) => {
+  const origin = new URL(baseURL ?? "http://127.0.0.1:3100").origin
   const response = await request.post("/v1/proxy-test?mode=e2e", {
-    headers: { origin: "http://127.0.0.1:3100" },
+    headers: { origin },
     data: { query: "roadmap" },
   })
   expect(response.status()).toBe(200)
@@ -336,8 +337,8 @@ test("proxies API requests through a bounded allowlisted route", async ({ reques
     method: "POST",
     url: "/v1/proxy-test?mode=e2e",
     body: "{\"query\":\"roadmap\"}",
-    origin: "http://127.0.0.1:3100",
-    forwardedHost: "127.0.0.1:3100",
+    origin,
+    forwardedHost: new URL(origin).host,
   })
 
   const redirect = await request.get("/v1/proxy-redirect", { maxRedirects: 0 })

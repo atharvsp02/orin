@@ -1,5 +1,7 @@
 import { createServer } from "node:http"
 
+const port = Number(process.env.PLAYWRIGHT_API_PORT ?? 3199)
+
 createServer(async (req, res) => {
   if (req.url === "/health") {
     res.writeHead(200).end("ok")
@@ -21,4 +23,4 @@ createServer(async (req, res) => {
     origin: req.headers.origin,
     forwardedHost: req.headers["x-forwarded-host"],
   }))
-}).listen(3199, "127.0.0.1")
+}).listen(port, "127.0.0.1")
