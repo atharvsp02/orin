@@ -1,6 +1,7 @@
 // Integration test: drives the REAL cognee.ts REST client + the feedback lifecycle against a MOCK
 // Cognee server (records requests to assert casing/multipart fields) + REAL Postgres. No LLM needed.
 import http from "node:http";
+import "dotenv/config";
 
 const PORT = 8899;
 process.env.DATABASE_URL ??= "postgres://cg@127.0.0.1:5433/orin";
