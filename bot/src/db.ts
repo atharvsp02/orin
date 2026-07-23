@@ -952,6 +952,20 @@ export async function getPrSession(installationId: number, repo: string, prNumbe
   return rows[0]?.session_id ?? null;
 }
 
+export async function getLatestCommentIdForPr(
+  installationId: number,
+  repo: string,
+  prNumber: number,
+): Promise<number | null> {
+  const { rows } = await pool.query(
+    `SELECT comment_id FROM deliveries
+     WHERE installation_id = $1 AND repo = $2 AND number = $3 AND comment_id IS NOT NULL
+     ORDER BY updated_at DESC LIMIT 1`,
+    [installationId, repo, prNumber],
+  );
+  return rows[0]?.comment_id == null ? null : Number(rows[0].comment_id);
+}
+
 // The decision Orin most recently flagged on a PR/issue (for `@orin override` with no ref).
 export async function getLatestDecisionForPr(installationId: number, repo: string, number: number): Promise<string | null> {
   const { rows } = await pool.query(

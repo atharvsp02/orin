@@ -1004,9 +1004,12 @@ ok("markSuperseded matches exact PR-<n>", (await db.getDecisionRecord(INST, "acm
 ok("markSuperseded leaves DOC-<n> untouched (no wildcard collateral)", (await db.getDecisionRecord(INST, "acme/a", "DOC-7"))?.supersededBy === undefined);
 
 // --- deliveries + idempotency + IDOR guard helpers ---
-await db.upsertDelivery({ installationId: INST, repo: "acme/a", prNumber: 10, kind: "pr", headSha: "sha1", mode: "check", checkRunId: 555, decisionId: "PR-42", sessionId: "sess-pr-10", state: "posted" });
+await db.upsertDelivery({ installationId: INST, repo: "acme/a", prNumber: 10, kind: "pr", headSha: "sha1", mode: "check", checkRunId: 555, commentId: 777, decisionId: "PR-42", sessionId: "sess-pr-10", state: "posted" });
 const del = await db.getDelivery(INST, "acme/a", 10, "sha1");
-ok("delivery roundtrip", del?.checkRunId === 555 && del?.sessionId === "sess-pr-10");
+ok("delivery roundtrip", del?.checkRunId === 555 && del?.commentId === 777 && del?.sessionId === "sess-pr-10");
+eq("getLatestCommentIdForPr returns the persisted summary comment", await db.getLatestCommentIdForPr(INST, "acme/a", 10), 777);
+await db.upsertDelivery({ installationId: INST, repo: "acme/a", prNumber: 10, kind: "pr", headSha: "sha2", mode: "check", checkRunId: 556, state: "clear" });
+eq("getLatestCommentIdForPr carries a comment across PR commits", await db.getLatestCommentIdForPr(INST, "acme/a", 10), 777);
 eq("getPrSession returns stored session", await db.getPrSession(INST, "acme/a", 10), "sess-pr-10");
 eq("getLatestDecisionForPr", await db.getLatestDecisionForPr(INST, "acme/a", 10), "PR-42");
 ok("decisionFlaggedOnThread true for flagged", await db.decisionFlaggedOnThread(INST, "acme/a", 10, "PR-42") === true);

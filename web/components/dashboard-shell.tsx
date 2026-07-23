@@ -2053,7 +2053,7 @@ function SettingsView({ workspaceId }: { workspaceId: string }) {
       }
     >
       <div className={card}>
-        <Row label="Delivery mode" hint="check = merge-blocking status check, review = inline PR review, comment = plain comment">
+        <Row label="Delivery mode" hint="check = merge-blocking status check plus summary comment, review = inline PR review, comment = plain comment">
           <Select value={s.deliveryMode} onValueChange={(v) => setS({ ...s, deliveryMode: v })}>
             <SelectTrigger className="w-36 bg-zinc-950 border-zinc-800 text-zinc-200 text-xs h-8">
               <SelectValue />
@@ -2068,7 +2068,7 @@ function SettingsView({ workspaceId }: { workspaceId: string }) {
         <Row label="Block on re-proposal" hint="Fail the required check when a PR re-proposes a rejected decision">
           <Switch checked={s.blockOnRepropose} onCheckedChange={(v) => setS({ ...s, blockOnRepropose: v })} />
         </Row>
-        <Row label="Auto-comment" hint="Let Orin write on PRs and issues (off = silent, log-only)">
+        <Row label="Automatic delivery" hint="Publish Orin checks, reviews, or comments automatically (off = silent, log-only)">
           <Switch checked={s.autoComment} onCheckedChange={(v) => setS({ ...s, autoComment: v })} />
         </Row>
         <Row label="LLM engine" hint="Extraction and judgment run on DeepSeek for every workspace. Fixed, not configurable.">

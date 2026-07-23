@@ -1,4 +1,5 @@
 import * as db from "./db.js";
+import { config } from "./config.js";
 import { anchorFor, suggestionBlock } from "./patch.js";
 import type { installationOctokit } from "./github.js";
 import type { Judgment } from "./llm.js";
@@ -20,6 +21,7 @@ export interface DeliveryRefs {
   checkRunId?: number;
   reviewId?: number;
   commentId?: number;
+  freshCheck?: boolean;
 }
 export interface Delivery {
   mode: DeliveryMode;
@@ -29,6 +31,8 @@ export interface Delivery {
 }
 
 const CHECK_NAME = "Orin"; // the required-status-check "context"
+const COMMENT_MARKER = "<!-- orin:decision-summary -->";
+const CLEAR_COMMENT = `${COMMENT_MARKER}\n✅ Orin: no decision conflict on the latest commit.`;
 
 function output(findings: Finding[], notes?: string[]) {
   const f = findings[0];
@@ -37,7 +41,7 @@ function output(findings: Finding[], notes?: string[]) {
     title: f ? `Re-proposes ${f.decisionId} (${f.outcome})` : "No decision conflict",
     summary: f ? (f.summaryMd.split("\n")[0] ?? "") : "No re-proposal of a rejected decision found.",
     text:
-      findings.map((x) => `### ${x.decisionId} — ${x.title}\n\n${x.summaryMd}\n\nSource: ${x.sourceUrl}`).join("\n\n---\n\n") +
+      findings.map((x) => `### ${x.decisionId}: ${x.title}\n\n${x.summaryMd}\n\nSource: ${x.sourceUrl}`).join("\n\n---\n\n") +
       rules,
   };
 }
@@ -68,13 +72,68 @@ async function openCheck(ctx: DeliveryCtx): Promise<number> {
   return data.id;
 }
 
+async function existingSummaryComment(ctx: DeliveryCtx): Promise<number | undefined> {
+  const comments = await ctx.octokit.paginate(ctx.octokit.rest.issues.listComments, {
+    owner: ctx.owner,
+    repo: ctx.repo,
+    issue_number: ctx.number,
+    per_page: 100,
+  });
+  return comments.find(
+    (comment) =>
+      comment.body?.includes(COMMENT_MARKER) &&
+      String(comment.performed_via_github_app?.id ?? "") === String(config.github.appId),
+  )?.id;
+}
+
+async function publishSummaryComment(
+  ctx: DeliveryCtx,
+  commentId: number | undefined,
+  body: string,
+): Promise<number> {
+  const id = commentId ?? (await existingSummaryComment(ctx));
+  const markedBody = `${COMMENT_MARKER}\n${body}`;
+  if (id) {
+    try {
+      await ctx.octokit.rest.issues.updateComment({ owner: ctx.owner, repo: ctx.repo, comment_id: id, body: markedBody });
+      return id;
+    } catch (error) {
+      if (!(error && typeof error === "object" && "status" in error && error.status === 404)) throw error;
+    }
+  }
+  const { data } = await ctx.octokit.rest.issues.createComment({
+    owner: ctx.owner,
+    repo: ctx.repo,
+    issue_number: ctx.number,
+    body: markedBody,
+  });
+  return data.id;
+}
+
+async function clearSummaryComment(ctx: DeliveryCtx, commentId?: number): Promise<number | undefined> {
+  if (!commentId) return undefined;
+  try {
+    await ctx.octokit.rest.issues.updateComment({
+      owner: ctx.owner,
+      repo: ctx.repo,
+      comment_id: commentId,
+      body: CLEAR_COMMENT,
+    });
+    return commentId;
+  } catch (error) {
+    if (error && typeof error === "object" && "status" in error && error.status === 404) return undefined;
+    throw error;
+  }
+}
+
 // Check Run — the enforcement surface (a required status check blocks merge on `failure`).
 const checkDelivery: Delivery = {
   mode: "check",
   async open(ctx) {
-    return { mode: "check", checkRunId: await openCheck(ctx) };
+    return { mode: "check", checkRunId: await openCheck(ctx), freshCheck: true };
   },
   async publish(ctx, prior, d) {
+    const freshCheck = prior?.freshCheck === true || !prior?.checkRunId;
     const id = prior?.checkRunId ?? (await openCheck(ctx));
     const o = output(d.findings, d.notes);
     await ctx.octokit.rest.checks.update({
@@ -83,9 +142,15 @@ const checkDelivery: Delivery = {
       check_run_id: id,
       status: "completed",
       conclusion: d.blocking ? "failure" : "neutral",
-      output: { title: o.title, summary: o.summary, text: o.text, annotations: annotations(d.findings).slice(0, 50) },
+      output: {
+        title: o.title,
+        summary: o.summary,
+        text: o.text,
+        ...(freshCheck ? { annotations: annotations(d.findings).slice(0, 50) } : {}),
+      },
     });
-    return { mode: "check", checkRunId: id };
+    const commentId = await publishSummaryComment(ctx, prior?.commentId, o.text);
+    return { mode: "check", checkRunId: id, commentId };
   },
   async clear(ctx, prior) {
     const id = prior?.checkRunId ?? (await openCheck(ctx));
@@ -97,7 +162,8 @@ const checkDelivery: Delivery = {
       conclusion: "success",
       output: { title: "No decision conflict", summary: "No re-proposal of a rejected decision found." },
     });
-    return { mode: "check", checkRunId: id };
+    const commentId = await clearSummaryComment(ctx, prior?.commentId);
+    return { mode: "check", checkRunId: id, commentId };
   },
 };
 
@@ -151,20 +217,10 @@ const commentDelivery: Delivery = {
   },
   async publish(ctx, prior, d) {
     const body = output(d.findings, d.notes).text;
-    if (prior?.commentId) {
-      await ctx.octokit.rest.issues.updateComment({ owner: ctx.owner, repo: ctx.repo, comment_id: prior.commentId, body });
-      return { mode: "comment", commentId: prior.commentId };
-    }
-    const { data } = await ctx.octokit.rest.issues.createComment({ owner: ctx.owner, repo: ctx.repo, issue_number: ctx.number, body });
-    return { mode: "comment", commentId: data.id };
+    return { mode: "comment", commentId: await publishSummaryComment(ctx, prior?.commentId, body) };
   },
   async clear(ctx, prior) {
-    if (prior?.commentId) {
-      await ctx.octokit.rest.issues
-        .updateComment({ owner: ctx.owner, repo: ctx.repo, comment_id: prior.commentId, body: "✅ Orin: no decision conflict on the latest commit." })
-        .catch(() => undefined);
-    }
-    return { mode: "comment", commentId: prior?.commentId };
+    return { mode: "comment", commentId: await clearSummaryComment(ctx, prior?.commentId) };
   },
 };
 

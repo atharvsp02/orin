@@ -186,7 +186,25 @@ async function runCatch(data: CatchJob): Promise<void> {
         commentId: prior.commentId ?? undefined,
       }
     : null;
-  if (cfg.autoComment && !refs) refs = await delivery.open(ctx); // show the check in_progress while we work
+  if (cfg.autoComment && ["check", "comment"].includes(cfg.deliveryMode) && !refs?.commentId) {
+    const commentId = await db.getLatestCommentIdForPr(data.installationId, data.repo, data.number);
+    if (commentId) refs = { ...(refs ?? { mode: cfg.deliveryMode }), commentId };
+  }
+  if (cfg.autoComment && (!refs || (cfg.deliveryMode === "check" && !refs.checkRunId))) {
+    refs = { ...(refs ?? {}), ...(await delivery.open(ctx)) };
+    await db.upsertDelivery({
+      installationId: data.installationId,
+      repo: data.repo,
+      prNumber: data.number,
+      kind: "pr",
+      headSha: pr.headSha,
+      mode: refs.mode,
+      checkRunId: refs.checkRunId ?? null,
+      reviewId: refs.reviewId ?? null,
+      commentId: refs.commentId ?? null,
+      state: "processing",
+    });
+  }
 
   const prText = `${pr.title}\n\n${pr.body}\n\nFiles: ${pr.files.map((f) => f.path).join(", ")}`;
   const sessionId = `orin-pr-${data.installationId}-${data.number}`;
